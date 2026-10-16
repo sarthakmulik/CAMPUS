@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Pencil, Send, Trash2, X } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { Check, MessageCircle, Pencil, Send, Trash2, X } from 'lucide-react'
 import {
   addComment, deleteComment, fetchComments, friendlyMessage, relativeTime,
   updateComment, type CampusComment,
@@ -128,8 +129,8 @@ export default function CommentsSheet({
     }
   }
 
-  return (
-    <div className="overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
+  return createPortal(
+    <div className="overlay comments-overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
       <section className={`bottom-sheet comments-sheet ${theme === 'dark' ? 'dark' : ''}`} role="dialog" aria-label={`Comments on ${post.anonymous ? 'this post' : 'this post'}`}>
         <div className="sheet-handle"/>
         <div className="sheet-heading">
@@ -149,7 +150,7 @@ export default function CommentsSheet({
             </div>
           )}
           {!loading && !error && comments.length === 0 && (
-            <p className="comments-empty"><b>No comments yet</b><span>Be the first to reply — keep it kind.</span></p>
+            <p className="comments-empty"><MessageCircle size={26}/><b>No comments yet</b><span>Be the first to reply — keep it kind.</span></p>
           )}
           {comments.map(comment => {
             const isOwn = Boolean(userId && comment.authorId === userId)
@@ -215,6 +216,7 @@ export default function CommentsSheet({
         </div>
         <div className="comment-counter">{draft.length}/500</div>
       </section>
-    </div>
+    </div>,
+    document.body,
   )
 }

@@ -223,6 +223,23 @@ function ReelSlide({
     }
   }, [active, muted])
 
+  // Pause when the tab is hidden, resume the slide in view when it returns.
+  useEffect(() => {
+    const onVisibility = () => {
+      const video = videoRef.current
+      if (!video) return
+      if (document.hidden) {
+        video.pause()
+      } else if (active) {
+        video.muted = muted
+        const playback = video.play()
+        if (playback) playback.catch(() => {})
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [active, muted])
+
   useEffect(() => () => {
     if (tapTimer.current) window.clearTimeout(tapTimer.current)
   }, [])
@@ -268,7 +285,13 @@ function ReelSlide({
 
   return (
     <div className="reel-slide" onClick={onMenuClose}>
-      <div className="reel-frame">
+      <div
+        className="reel-frame"
+        tabIndex={0}
+        onKeyDown={event => {
+          if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); togglePlay() }
+        }}
+      >
         {src
           ? <video
               ref={videoRef}
@@ -283,7 +306,7 @@ function ReelSlide({
               onPause={() => setPlaying(false)}
               onClick={onVideoTap}
             />
-          : <div className="reel-video reel-video-missing"><span>This reel has no video file.</span></div>}
+          : <div className="reel-video-missing"><span>This reel has no video file.</span></div>}
 
         {!playing && src && <span className="reel-big-play" aria-hidden="true"><Play size={30}/></span>}
 
