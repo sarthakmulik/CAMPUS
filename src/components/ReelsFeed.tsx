@@ -1,0 +1,361 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  Bookmark, Copy, Flag, Heart, MessageCircle, MoreHorizontal,
+  Play, Share2, Volume2, VolumeX,
+} from 'lucide-react'
+import {
+  fetchReels, toggleLike as dbToggleLike, friendlyMessage,
+  initialsFor,
+} from '../lib/db'
+import type { CampusPost } from '../types'
+import CommentsSheet from './CommentsSheet'
+
+type ReelsFeedProps = {
+  userId: string | null
+  identity: { name: string; username: string; initials: string }
+  requireAuth: (reason: string) => boolean
+  flash: (message: string) => void
+  onReport: (post: CampusPost) => void
+  onCreateReel: () => void
+}
+
+const PAGE_SIZE = 8
+
+/**
+ * Discover page: an Instagram-Reels-style vertical feed. One snap-scrolled
+ * full-height slide per reel, autoplaying the slide in view, tap to
+ * pause/resume, double-tap to like (with a heart burst), right action rail,
+ * caption + author overlay and a live progress line — everything reads its
+ * numbers from the database (list_public_reels, migration 0004).
+ */
+export default function ReelsFeed({ userId, identity, requireAuth, flash, onReport, onCreateReel }: ReelsFeedProps) {
+  const [reels, setReels] = useState<CampusPost[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [muted, setMuted] = useState(true)
+  const [activeIndex, setActiveIndex] = useState(0)
+  const [moreMenuFor, setMoreMenuFor] = useState<string | null>(null)
+  const [commentsFor, setCommentsFor] = useState<CampusPost | null>(null)
+  const stageRef = useRef<HTMLDivElement | null>(null)
+  const nextPage = useRef(0)
+  const hasMore = useRef(true)
+  const fetching = useRef(false)
+
+  const loadPage = useCallback(async () => {
+    if (fetching.current) return
+    if (!hasMore.current) return
+    fetching.current = true
+    const offset = nextPage.current * PAGE_SIZE
+    try {
+      const rows = await fetchReels(PAGE_SIZE, offset)
+      nextPage.current += 1
+      hasMore.current = rows.length === PAGE_SIZE
+      setReels(current => [...current, ...rows.filter(row => !current.some(c => c.id === row.id))])
+      setError(null)
+    } catch (err) {
+      setError(friendlyMessage(err))
+      hasMore.current = false
+    } finally {
+      fetching.current = false
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { void loadPage() }, [loadPage])
+
+  const retry = () => {
+    nextPage.current = 0
+    hasMore.current = true
+    setReels([])
+    setLoading(true)
+    void loadPage()
+  }
+
+  const onStageScroll = () => {
+    const stage = stageRef.current
+    if (!stage || reels.length === 0) return
+    const index = Math.round(stage.scrollTop / stage.clientHeight)
+    setActiveIndex(clampInt(index, 0, reels.length - 1))
+    if (index >= reels.length - 2) void loadPage()
+  }
+
+  const likeReel = async (post: CampusPost, forceLike = false) => {
+    if (!userId) { requireAuth('like reels'); return }
+    const target = reels.find(r => r.id === post.id)
+    if (!target) return
+    if (forceLike && target.liked) return // already liked: a double-tap never un-likes
+    const nextLiked = forceLike ? true : !target.liked
+    setReels(current => current.map(r => r.id === post.id
+      ? { ...r, liked: nextLiked, likes: r.likes + (nextLiked ? 1 : -1) }
+      : r))
+    try {
+      await dbToggleLike(post.id, userId, nextLiked)
+    } catch (err) {
+      setReels(current => current.map(r => r.id === post.id ? { ...r, liked: target.liked, likes: target.likes } : r))
+      flash(friendlyMessage(err))
+    }
+  }
+
+  const openReelComments = (post: CampusPost) => {
+    if (!requireAuth('join the conversation')) return
+    setCommentsFor(post)
+  }
+
+  const saveReel = (post: CampusPost) => {
+    if (!requireAuth('bookmark reels')) return
+    setReels(current => current.map(r => r.id === post.id ? { ...r, saved: !r.saved } : r))
+  }
+
+  const copyCaption = async (post: CampusPost) => {
+    try {
+      await navigator.clipboard.writeText(`${post.author}: ${post.body}`)
+      flash('Caption copied.')
+    } catch {
+      flash('Your browser blocked the clipboard. Select the caption text instead.')
+    }
+  }
+
+  if (loading && reels.length === 0) {
+    return (
+      <div className="reels-stage">
+        <div className="reels-status"><div className="reels-spinner" aria-hidden="true"/><span>Loading reels…</span></div>
+      </div>
+    )
+  }
+
+  if (error && reels.length === 0) {
+    return (
+      <div className="reels-stage">
+        <div className="reels-status error">
+          <b>Reels could not load.</b>
+          <p>{error}</p>
+          <button className="reels-retry" onClick={retry}>Try again</button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="reels-stage" ref={stageRef} onScroll={onStageScroll}>
+      {reels.length === 0
+        ? <div className="reels-status"><b>No reels yet</b><span>Be the first to post a reel to your campus.</span><button className="reels-retry" onClick={onCreateReel}>Post a reel</button></div>
+        : reels.map((post, index) =>
+            <ReelSlide
+              key={post.id}
+              post={post}
+              active={index === activeIndex}
+              muted={muted}
+              onToggleMute={() => setMuted(m => !m)}
+              onLikeTap={forceLike => void likeReel(post, forceLike)}
+              onToggleLike={() => void likeReel(post)}
+              onSave={() => saveReel(post)}
+              onComment={() => openReelComments(post)}
+              onShare={() => void copyCaption(post)}
+              onReport={() => onReport(post)}
+              menuOpen={moreMenuFor === post.id}
+              onMenu={() => setMoreMenuFor(current => current === post.id ? null : post.id)}
+              onMenuClose={() => setMoreMenuFor(null)}
+            />
+          )}
+      {loading && reels.length > 0 && <div className="reels-loading-more"><div className="reels-spinner small" aria-hidden="true"/></div>}
+
+      {commentsFor && (
+        <CommentsSheet
+          theme="dark"
+          post={commentsFor}
+          userId={userId}
+          identity={identity}
+          requireAuth={requireAuth}
+          onClose={() => setCommentsFor(null)}
+          onCountChange={count => setReels(current => current.map(r => r.id === commentsFor.id ? { ...r, comments: count } : r))}
+        />
+      )}
+    </div>
+  )
+}
+
+function clampInt(value: number, min: number, max: number): number {
+  return value < min ? min : value > max ? max : value
+}
+
+/* -------------------------------------------------------------------------- */
+
+type ReelSlideProps = {
+  post: CampusPost
+  active: boolean
+  muted: boolean
+  onToggleMute: () => void
+  onLikeTap: (forceLike: boolean) => void
+  onToggleLike: () => void
+  onSave: () => void
+  onComment: () => void
+  onShare: () => void
+  onReport: () => void
+  menuOpen: boolean
+  onMenu: () => void
+  onMenuClose: () => void
+}
+
+function ReelSlide({
+  post, active, muted, onToggleMute, onLikeTap, onToggleLike, onSave,
+  onComment, onShare, onReport, menuOpen, onMenu, onMenuClose,
+}: ReelSlideProps) {
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const [playing, setPlaying] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [bursts, setBursts] = useState<{ id: number; x: number; y: number }[]>([])
+  const burstId = useRef(0)
+  const lastTap = useRef(0)
+  const tapTimer = useRef<number | null>(null)
+
+  const src = post.media && post.media.length > 0 ? post.media[0] : ''
+  const initials = post.anonymous ? '' : initialsFor(post.author, post.handle.replace('@', ''))
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    if (active) {
+      video.muted = muted
+      const playback = video.play()
+      if (playback) playback.catch(() => { /* autoplay blocked until the viewer taps */ })
+    } else {
+      video.pause()
+    }
+  }, [active, muted])
+
+  useEffect(() => () => {
+    if (tapTimer.current) window.clearTimeout(tapTimer.current)
+  }, [])
+
+  const togglePlay = () => {
+    const video = videoRef.current
+    if (!video) return
+    if (video.paused) void video.play()
+    else video.pause()
+  }
+
+  const spawnBurst = (x: number, y: number) => {
+    const id = ++burstId.current
+    setBursts(current => [...current, { id, x, y }])
+    window.setTimeout(() => setBursts(current => current.filter(burst => burst.id !== id)), 800)
+  }
+
+  // Instagram gesture: one tap toggles play/pause (after a short grace
+  // period), a quick second tap likes the reel with a heart burst.
+  const onVideoTap = (event: React.MouseEvent<HTMLVideoElement>) => {
+    const now = Date.now()
+    if (now - lastTap.current < 300) {
+      if (tapTimer.current) { window.clearTimeout(tapTimer.current); tapTimer.current = null }
+      lastTap.current = 0
+      const rect = event.currentTarget.getBoundingClientRect()
+      spawnBurst(event.clientX - rect.left, event.clientY - rect.top)
+      onLikeTap(true)
+      if (!playing) togglePlay()
+    } else {
+      lastTap.current = now
+      if (tapTimer.current) window.clearTimeout(tapTimer.current)
+      tapTimer.current = window.setTimeout(togglePlay, 300)
+    }
+  }
+
+  const onTimeUpdate = () => {
+    const video = videoRef.current
+    if (!video || !Number.isFinite(video.duration) || video.duration === 0) return
+    setProgress(video.currentTime / video.duration * 100)
+  }
+
+  const stop = (event: React.MouseEvent) => event.stopPropagation()
+
+  return (
+    <div className="reel-slide" onClick={onMenuClose}>
+      <div className="reel-frame">
+        {src
+          ? <video
+              ref={videoRef}
+              className="reel-slide-video"
+              src={src}
+              preload="metadata"
+              loop
+              playsInline
+              muted={muted}
+              onTimeUpdate={onTimeUpdate}
+              onPlay={() => setPlaying(true)}
+              onPause={() => setPlaying(false)}
+              onClick={onVideoTap}
+            />
+          : <div className="reel-video reel-video-missing"><span>This reel has no video file.</span></div>}
+
+        {!playing && src && <span className="reel-big-play" aria-hidden="true"><Play size={30}/></span>}
+
+        {bursts.map(burst => (
+          <span key={burst.id} className="reel-heart-burst" style={{ left: burst.x, top: burst.y }} aria-hidden="true">
+            <Heart size={92} fill="currentColor"/>
+          </span>
+        ))}
+
+        {/* legibility gradients, top and bottom */}
+        <div className="reel-shade top" aria-hidden="true"/>
+        <div className="reel-shade" aria-hidden="true"/>
+
+        {/* top bar: mute */}
+        <div className="reel-top" onClick={stop}>
+          <button className="reel-mute" onClick={onToggleMute} aria-label={muted ? 'Unmute' : 'Mute'}>
+            {muted ? <VolumeX size={16}/> : <Volume2 size={16}/>}
+          </button>
+        </div>
+
+        {/* right action rail */}
+        <div className="reel-rail" onClick={stop}>
+          <div className="reel-rail-item">
+            <button className={post.liked ? 'liked' : ''} onClick={onToggleLike} aria-label={`Like reel (${post.likes})`}>
+              <Heart size={27} fill={post.liked ? 'currentColor' : 'none'}/>
+            </button>
+            <span>{post.likes}</span>
+          </div>
+          <div className="reel-rail-item">
+            <button onClick={onComment} aria-label={`Replies (${post.comments})`}>
+              <MessageCircle size={26}/>
+            </button>
+            <span>{post.comments}</span>
+          </div>
+          <div className="reel-rail-item">
+            <button onClick={onShare} aria-label="Copy caption"><Share2 size={25}/></button>
+          </div>
+          <div className="reel-rail-item">
+            <button className={post.saved ? 'saved' : ''} onClick={onSave} aria-label="Save reel">
+              <Bookmark size={25} fill={post.saved ? 'currentColor' : 'none'}/>
+            </button>
+          </div>
+          <div className="reel-rail-item">
+            <button onClick={onMenu} aria-label="More options"><MoreHorizontal size={26}/></button>
+          </div>
+        </div>
+
+        {menuOpen && (
+          <div className="reel-more-pop" onClick={stop}>
+            <button onClick={onReport}><Flag size={15}/> Report reel</button>
+            <button onClick={onShare}><Copy size={15}/> Copy caption</button>
+          </div>
+        )}
+
+        {/* caption + author overlay */}
+        <div className="reel-info" onClick={stop}>
+          <span className={`reel-info-avatar ${post.anonymous ? 'anonymous' : ''}`}>
+            {post.anonymous ? '😳' : initials}
+          </span>
+          <div className="reel-meta">
+            <div className="reel-meta-line">
+              <b>{post.anonymous ? 'Anonymous' : post.author}</b>
+              {post.college && <span className="reel-college-chip">{post.college}</span>}
+              <span className="reel-time">{post.time}</span>
+              {post.editedAt && <span className="reel-time">· edited</span>}
+            </div>
+            {post.body && <p className="reel-caption">{post.body}</p>}
+          </div>
+        </div>
+
+        <div className="reel-progressline" aria-hidden="true"><i style={{ width: `${progress}%` }}/></div>
+      </div>
+    </div>
+  )
+}
