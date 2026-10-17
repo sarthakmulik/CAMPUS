@@ -17,6 +17,8 @@ type ReelsFeedProps = {
   flash: (message: string) => void
   onReport: (post: CampusPost) => void
   onCreateReel: () => void
+  /** tap the author's avatar or name → open their profile (anonymous reels keep the author hidden) */
+  onOpenAuthor: (profileId: string) => void
   /** deep-linked reel id — the stage slides to it (fetching it if needed) */
   autoOpenId?: string | null
   onAutoOpened?: () => void
@@ -31,7 +33,7 @@ const PAGE_SIZE = 8
  * caption + author overlay and a live progress line — everything reads its
  * numbers from the database (list_public_reels, migration 0004).
  */
-export default function ReelsFeed({ userId, identity, requireAuth, flash, onReport, onCreateReel, autoOpenId, onAutoOpened }: ReelsFeedProps) {
+export default function ReelsFeed({ userId, identity, requireAuth, flash, onReport, onCreateReel, onOpenAuthor, autoOpenId, onAutoOpened }: ReelsFeedProps) {
   const [reels, setReels] = useState<CampusPost[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -196,6 +198,7 @@ export default function ReelsFeed({ userId, identity, requireAuth, flash, onRepo
               menuOpen={moreMenuFor === post.id}
               onMenu={() => setMoreMenuFor(current => current === post.id ? null : post.id)}
               onMenuClose={() => setMoreMenuFor(null)}
+              onOpenAuthor={onOpenAuthor}
             />
           )}
       {loading && reels.length > 0 && <div className="reels-loading-more"><div className="reels-spinner small" aria-hidden="true"/></div>}
@@ -235,11 +238,13 @@ type ReelSlideProps = {
   menuOpen: boolean
   onMenu: () => void
   onMenuClose: () => void
+  /** tap the author's avatar or name → open their profile */
+  onOpenAuthor: (profileId: string) => void
 }
 
 function ReelSlide({
   post, active, muted, onToggleMute, onLikeTap, onToggleLike, onSave,
-  onComment, onShare, onReport, menuOpen, onMenu, onMenuClose,
+  onComment, onShare, onReport, menuOpen, onMenu, onMenuClose, onOpenAuthor,
 }: ReelSlideProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [playing, setPlaying] = useState(false)
@@ -404,12 +409,24 @@ function ReelSlide({
 
         {/* caption + author overlay */}
         <div className="reel-info" onClick={stop}>
-          <span className={`reel-info-avatar ${post.anonymous ? 'anonymous' : ''}`}>
+          <button
+            className={`reel-info-avatar reel-author-link ${post.anonymous ? 'anonymous' : ''}`}
+            onClick={() => { if (!post.anonymous && post.authorId) onOpenAuthor(post.authorId) }}
+            aria-label={post.anonymous ? 'Anonymous reel' : `Open ${post.author}'s profile`}
+            tabIndex={post.anonymous || !post.authorId ? -1 : 0}
+          >
             {post.anonymous ? '😳' : initials}
-          </span>
+          </button>
           <div className="reel-meta">
             <div className="reel-meta-line">
-              <b>{post.anonymous ? 'Anonymous' : post.author}</b>
+              <button
+                className="reel-author-link reel-author-name"
+                onClick={() => { if (!post.anonymous && post.authorId) onOpenAuthor(post.authorId) }}
+                aria-label={post.anonymous ? 'Anonymous reel' : `Open ${post.author}'s profile`}
+                tabIndex={post.anonymous || !post.authorId ? -1 : 0}
+              >
+                {post.anonymous ? 'Anonymous' : post.author}
+              </button>
               {post.college && <span className="reel-college-chip">{post.college}</span>}
               <span className="reel-time">{post.time}</span>
               {post.editedAt && <span className="reel-time">· edited</span>}

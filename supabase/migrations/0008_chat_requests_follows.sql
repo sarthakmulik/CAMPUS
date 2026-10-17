@@ -169,6 +169,12 @@ with check (
   and public.can_send_chat(conversation_id, auth.uid())
 );
 
+/* sender identity is the session itself: an insert that omits sender_id
+   defaults to auth.uid() instead of NULL (a NULL would fail the policy above —
+   the exact "new row violates row-level security policy" on the first real
+   send). Re-runnable. */
+alter table public.chat_messages alter column sender_id set default auth.uid();
+
 /* ------------------------------------------------------------------ */
 /* 2. The Chats list: requests included, declined hidden appropriately  */
 /* ------------------------------------------------------------------ */
@@ -234,7 +240,8 @@ language sql stable security definer set search_path = public as $$
   where c.kind in ('dm', 'group')
     and (
       c.status = 'accepted'
-      or (c.kind = 'dm' and c.created_by = auth.uid()) -- my pending/declined requests stay visible to me
+      or (c.kind = 'dm' and c.status = 'pending') -- outgoing AND incoming requests (the recipient must see theirs)
+      or (c.kind = 'dm' and c.status = 'declined' and c.created_by = auth.uid())
     )
   order by
     (c.created_by <> auth.uid() and c.status = 'pending') desc, -- incoming requests first
@@ -296,6 +303,11 @@ drop policy if exists "members unfollow" on public.follows;
 create policy "members unfollow" on public.follows
   for delete to authenticated
   using (follower_id = auth.uid());
+
+/* follower identity is the session itself: an insert that omits follower_id
+   defaults to auth.uid() instead of NULL (a NULL would fail the policy above
+   with "new row violates row-level security policy"). Re-runnable. */
+alter table public.follows alter column follower_id set default auth.uid();
 
 /* ------------------------------------------------------------------ */
 /* 4. Profile: stats and uploaded content                              */

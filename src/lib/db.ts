@@ -838,9 +838,11 @@ export async function respondChatRequest(
 /* Follows                                                             */
 /* ------------------------------------------------------------------ */
 
-export async function followUser(followedId: string): Promise<void> {
+export async function followUser(followerId: string, followedId: string): Promise<void> {
   if (!supabase) throw new Error('CAMPUS is not connected.')
-  const { error } = await supabase.from('follows').insert({ followed_id: followedId })
+  // follower_id must be sent explicitly — the RLS policy checks it against
+  // auth.uid(), and a NULL follower would fail that check
+  const { error } = await supabase.from('follows').insert({ follower_id: followerId, followed_id: followedId })
   if (error) throw new Error(friendlyMessage(error))
 }
 
@@ -851,21 +853,23 @@ export async function unfollowUser(followedId: string): Promise<void> {
 }
 
 /** The people the signed-in member follows (handles list, for feed filters). */
-export async function fetchFollowing(): Promise<string[]> {
+export async function fetchFollowing(followerId: string): Promise<string[]> {
   if (!supabase) throw new Error('CAMPUS is not connected.')
   const { data, error } = await supabase
     .from('follows')
     .select('followed_id')
+    .eq('follower_id', followerId)
   if (error) throw new Error(friendlyMessage(error))
   return (data ?? []).map(row => (row as { followed_id: string }).followed_id)
 }
 
 /** True when the signed-in member follows the given profile. */
-export async function isFollowing(followedId: string): Promise<boolean> {
+export async function isFollowing(followerId: string, followedId: string): Promise<boolean> {
   if (!supabase) throw new Error('CAMPUS is not connected.')
   const { data, error } = await supabase
     .from('follows')
     .select('followed_id')
+    .eq('follower_id', followerId)
     .eq('followed_id', followedId)
     .maybeSingle()
   if (error) throw new Error(friendlyMessage(error))
@@ -940,11 +944,13 @@ export async function fetchChatMessages(
 }
 
 /** Send one message; RLS guarantees sender = caller and membership. */
-export async function sendChatMessage(conversationId: string, body: string): Promise<ChatMessage> {
+export async function sendChatMessage(conversationId: string, body: string, senderId: string): Promise<ChatMessage> {
   if (!supabase) throw new Error('CAMPUS is not connected.')
+  // sender_id must be sent explicitly — the RLS policy checks it against
+  // auth.uid(), and a NULL sender would fail that check
   const { data, error } = await supabase
     .from('chat_messages')
-    .insert({ conversation_id: conversationId, body })
+    .insert({ conversation_id: conversationId, sender_id: senderId, body })
     .select('id, conversation_id, sender_id, body, created_at, edited_at')
     .single()
   if (error) throw new Error(friendlyMessage(error))

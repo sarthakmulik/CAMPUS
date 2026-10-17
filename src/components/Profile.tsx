@@ -17,7 +17,7 @@ type Props = {
   reloadProfile: () => void
   ownProfile: DbProfile | null
   onMessagePerson: (id: string) => void
-  onToggleFollow: (id: string, current: boolean) => Promise<void>
+  onToggleFollow: (id: string, current: boolean) => Promise<boolean>
   onOpenMention: (profileId: string) => void
   onOpenHashtag: (query: string) => void
   onSignOut: () => void
@@ -46,6 +46,13 @@ export default function Profile({ profileId, myUserId, colleges, isMember, caps,
 
   const load = useCallback(async () => {
     if (!canQuery) return
+    // member profiles are hidden from signed-out visitors by RLS — invite them
+    // in instead of pretending the member does not exist
+    if (!isMember && profileId) {
+      setError('Sign in to view member profiles — CAMPUS hides profiles from visitors.')
+      setLoading(false)
+      return
+    }
     setLoading(true)
     setError(null)
     try {
@@ -62,17 +69,17 @@ export default function Profile({ profileId, myUserId, colleges, isMember, caps,
     } finally {
       setLoading(false)
     }
-  }, [profileId, myUserId])
+  }, [profileId, myUserId, isMember])
 
   useEffect(() => { void load() }, [load])
 
   // the viewer follows this member?
   useEffect(() => {
     setFollowing(false)
-    if (isSelf || !isMember) return
-    void db.isFollowing(profileId!).then(setFollowing).catch(() => {})
+    if (isSelf || !isMember || !myUserId) return
+    void db.isFollowing(myUserId, profileId!).then(setFollowing).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profileId, isMember, isSelf])
+  }, [profileId, myUserId, isMember, isSelf])
 
   // uploads for the active tab (self always sees their own)
   useEffect(() => {
@@ -108,8 +115,8 @@ export default function Profile({ profileId, myUserId, colleges, isMember, caps,
     if (!isMember) return
     setFollowBusy(true)
     try {
-      await onToggleFollow(profile.id, following)
-      setFollowing(value => !value)
+      const ok = await onToggleFollow(profile.id, following)
+      if (ok) setFollowing(value => !value)
     } finally {
       setFollowBusy(false)
     }
@@ -227,11 +234,13 @@ export default function Profile({ profileId, myUserId, colleges, isMember, caps,
           )}
           {memberList.rows.map(person => (
             <div key={person.id} className="search-row">
-              <span className="avatar small">{initialsFor(person.displayName, person.username ?? '')}</span>
-              <span className="search-row-copy">
-                <b>{person.displayName}</b>
-                <small>{person.username ? `@${person.username}` : ''}{person.isPrivate ? ' · private' : ''}</small>
-              </span>
+              <button className="search-row-link" onClick={() => onOpenMention(person.id)} aria-label={`Open ${person.displayName}'s profile`}>
+                <span className="avatar small">{initialsFor(person.displayName, person.username ?? '')}</span>
+                <span className="search-row-copy">
+                  <b>{person.displayName}</b>
+                  <small>{person.username ? `@${person.username}` : ''}{person.isPrivate ? ' · private' : ''}</small>
+                </span>
+              </button>
               {!isSelf && person.id !== myUserId && (
                 <button className="search-message" onClick={() => onMessagePerson(person.id)}><MessageCircle size={13}/> Message</button>
               )}

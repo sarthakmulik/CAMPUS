@@ -147,19 +147,28 @@ export default function Chats({ identity, configured, autoOpen, onAutoOpened }: 
   const openSummary = openId ? conversations.find(c => c.id === openId) ?? peek : null
   const openStatus: 'pending' | 'accepted' | 'declined' | 'unknown' = openSummary?.status ?? 'unknown'
   const openMine = openSummary?.iRequested ?? false
+  // the request creator may send exactly ONE opening note — once it exists,
+  // the composer closes until they accept (mirrors the server rule honestly
+  // instead of letting a second message die on the RLS policy)
+  const myPendingUsed =
+    openStatus === 'pending'
+    && openMine
+    && messages.some(message => message.senderId === identity?.id)
   const sendBlocked =
     openStatus === 'unknown'
     || openStatus === 'declined'
     || (openStatus === 'pending' && !openMine)
+    || myPendingUsed
 
   const send = useCallback(async () => {
     const body = draft.trim()
-    if (!body || !openId || sending) return
+    if (!body || !openId || sending || !identity) return
     // unknown/expired states resolve first; declined and pending recipients never send
-    if (openStatus === 'unknown' || openStatus === 'declined' || (openStatus === 'pending' && !openMine)) return
+    if (openStatus === 'unknown' || openStatus === 'declined' || (openStatus === 'pending' && !openMine) || myPendingUsed) return
     setSending(true)
+    setThreadError(null)
     try {
-      const sent = await db.sendChatMessage(openId, body)
+      const sent = await db.sendChatMessage(openId, body, identity.id)
       if (!seenIds.current.has(sent.id)) {
         seenIds.current.add(sent.id)
         setMessages(list => [...list, { ...sent, senderName: identity?.name ?? 'You' }])
@@ -173,7 +182,7 @@ export default function Chats({ identity, configured, autoOpen, onAutoOpened }: 
     } finally {
       setSending(false)
     }
-  }, [draft, openId, sending, openStatus, openMine, identity?.name])
+  }, [draft, openId, sending, openStatus, openMine, myPendingUsed, identity?.id, identity?.name])
 
   const addGroupMember = useCallback(async () => {
     if (!identity) return
@@ -373,7 +382,9 @@ export default function Chats({ identity, configured, autoOpen, onAutoOpened }: 
                 onChange={event => setDraft(event.target.value)}
                 onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() } }}
                 placeholder={sendBlocked
-                  ? (openStatus === 'unknown' ? 'Loading conversation…' : 'Accept the chat request to reply')
+                  ? myPendingUsed
+                    ? `Request sent — waiting for ${peerName} to accept`
+                    : (openStatus === 'unknown' ? 'Loading conversation…' : 'Accept the chat request to reply')
                   : `Message ${peerName}…`}
                 maxLength={2000}
                 disabled={sendBlocked}

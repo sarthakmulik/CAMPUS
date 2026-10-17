@@ -347,31 +347,39 @@ function CAMPUSApp() {
   const [reelAutoOpen, setReelAutoOpen] = useState<string | null>(null)
   // deep links (#p/<id>) from shared posts: reels open in Discover, posts in
   // feed. The hash stays until the post actually lands (boot may re-run this
-  // effect); a module flag keeps StrictMode's remount from fetching twice.
+  // effect). A module flag keeps StrictMode's remount — and repeat
+  // hashchange events — from fetching the same id twice. hashchange matters:
+  // pasting a link into an already-open tab is a same-document navigation
+  // (no reload, only the fragment changes).
   useEffect(() => {
     if (!configured) return
-    const match = /#p\/([0-9a-f-]{8}-[0-9a-f-]{4}-[0-9a-f-]{4}-[0-9a-f-]{4}-[0-9a-f-]{12})$/i.exec(window.location.hash)
-    if (!match) return
-    const id = match[1]
-    if (handledDeepLinkId === id) return
-    handledDeepLinkId = id
-    // a shared link is a destination: first-time visitors land on the content,
-    // not on the marketing page (exploring is free and read-only anyway)
-    markWelcomeSeen()
-    setExplored(true)
-    db.fetchPostById(id)
-      .then(post => {
-        if (!post) { flash('That post is not available — it may have been deleted or is a confession.'); return }
-        if (post.kind === 'reel') {
-          setActiveNav('Discover')
-          setReelAutoOpen(id)
-        } else {
-          setPosts(current => current.some(p => p.id === id) ? current : [post, ...current])
-          setActiveNav('Home')
-        }
-        window.history.replaceState(null, '', window.location.pathname + window.location.search)
-      })
-      .catch(error => flash(db.friendlyMessage(error)))
+    const handleDeepLink = () => {
+      const match = /#p\/([0-9a-f-]{8}-[0-9a-f-]{4}-[0-9a-f-]{4}-[0-9a-f-]{4}-[0-9a-f-]{12})$/i.exec(window.location.hash)
+      if (!match) return
+      const id = match[1]
+      if (handledDeepLinkId === id) return
+      handledDeepLinkId = id
+      // a shared link is a destination: first-time visitors land on the content,
+      // not on the marketing page (exploring is free and read-only anyway)
+      markWelcomeSeen()
+      setExplored(true)
+      db.fetchPostById(id)
+        .then(post => {
+          if (!post) { flash('That post is not available — it may have been deleted or is a confession.'); return }
+          if (post.kind === 'reel') {
+            setActiveNav('Discover')
+            setReelAutoOpen(id)
+          } else {
+            setPosts(current => current.some(p => p.id === id) ? current : [post, ...current])
+            setActiveNav('Home')
+          }
+          window.history.replaceState(null, '', window.location.pathname + window.location.search)
+        })
+        .catch(error => flash(db.friendlyMessage(error)))
+    }
+    handleDeepLink()
+    window.addEventListener('hashchange', handleDeepLink)
+    return () => window.removeEventListener('hashchange', handleDeepLink)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configured, status])
   const openReport = (post: CampusPost) => {
@@ -432,14 +440,16 @@ function CAMPUSApp() {
     }
   }
   // Follow / unfollow straight through the follows table.
-  const toggleFollowFor = async (targetId: string, current: boolean) => {
-    if (!requireAuth('follow classmates')) return
-    if (!user) return
+  const toggleFollowFor = async (targetId: string, current: boolean): Promise<boolean> => {
+    if (!requireAuth('follow classmates')) return false
+    if (!user) return false
     try {
       if (current) await db.unfollowUser(targetId)
-      else await db.followUser(targetId)
+      else await db.followUser(user.id, targetId)
+      return true
     } catch (error) {
       flash(db.friendlyMessage(error))
+      return false
     }
   }
   const setRelation = async (table: 'user_blocks' | 'user_mutes', post: CampusPost) => {
@@ -1230,6 +1240,7 @@ function CAMPUSApp() {
                 flash={flash}
                 onReport={openReport}
                 onCreateReel={() => openComposer('reel')}
+                onOpenAuthor={openMentionProfile}
                 autoOpenId={reelAutoOpen}
                 onAutoOpened={() => setReelAutoOpen(null)}
               />
@@ -1482,11 +1493,18 @@ function PostCard({post,isOwn,onLike,onSave,onComment,onShare,onReport,onRepost,
   ) : null
   return <article className="post-card">
     <div className="post-head">
-      <div className={`avatar post-avatar ${post.anonymous?'anonymous-avatar':''}`}>{post.anonymous?<BookOpen size={21}/>:post.initials}</div>
-      <div className="post-id">
-        <div className="post-namerow"><b>{post.author}</b>{post.authorVerified&&<BadgeCheck size={15} className="verified-tick" aria-label="Verified"/>}</div>
-        <div className="post-idline">{post.handle&&<span>{post.handle}</span>}<i>·</i><span>{post.time}</span>{post.editedAt&&<><i>·</i><span className="edited-marker">edited {db.relativeTime(post.editedAt)}</span></>}{post.college&&<><i>·</i><span>{post.college}</span></>}</div>
-      </div>
+      <button
+        className={`post-author-link${post.anonymous || !post.authorId ? ' static' : ''}`}
+        onClick={() => { if (!post.anonymous && post.authorId) onOpenMention(post.authorId) }}
+        aria-label={post.anonymous ? 'Anonymous confession' : `Open ${post.author}'s profile`}
+        tabIndex={post.anonymous || !post.authorId ? -1 : 0}
+      >
+        <span className={`avatar post-avatar ${post.anonymous?'anonymous-avatar':''}`}>{post.anonymous?<BookOpen size={21}/>:post.initials}</span>
+        <span className="post-id">
+          <span className="post-namerow"><b>{post.author}</b>{post.authorVerified&&<BadgeCheck size={15} className="verified-tick" aria-label="Verified"/>}</span>
+          <span className="post-idline">{post.handle&&<span>{post.handle}</span>}<i>·</i><span>{post.time}</span>{post.editedAt&&<><i>·</i><span className="edited-marker">edited {db.relativeTime(post.editedAt)}</span></>}{post.college&&<><i>·</i><span>{post.college}</span></>}</span>
+        </span>
+      </button>
       <button className="icon-button more-button" onClick={() => setMenuOpen(v=>!v)} aria-label="More options"><MoreHorizontal size={20}/></button>{menuOpen&&<div className="post-menu">{isOwn&&<button onClick={()=>{onEdit();setMenuOpen(false)}}><Pencil size={15}/> Edit post</button>}{isOwn&&<button className="danger" onClick={()=>{onDelete();setMenuOpen(false)}}><Trash2 size={15}/> Delete post</button>}<button onClick={()=>{onReport();setMenuOpen(false)}}><Flag size={15}/> Report post</button><button onClick={()=>{onShare();setMenuOpen(false)}}><Share2 size={15}/> Copy post text</button>{canActOnAuthor&&<button onClick={()=>{onMute();setMenuOpen(false)}}><VolumeX size={15}/> Mute {post.handle}</button>}{canActOnAuthor&&<button onClick={()=>{onBlock();setMenuOpen(false)}}><EyeOff size={15}/> Block {post.handle}</button>}{canActOnAuthor&&!isOwn&&<button onClick={()=>{onMessage();setMenuOpen(false)}}><MessageCircle size={15}/> Message {post.handle}</button>}</div>}
     </div>
     <div className="post-content">

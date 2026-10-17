@@ -3646,3 +3646,59 @@
   background: #fbfaff;
 }
 .chats-list-pane { position: relative; }
+
+/* ---- tappable author identities (Instagram-style) ---------------------- */
+/* feed post header: avatar + name open the author's profile */
+.post-author-link {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 10px;
+}
+.post-author-link.static { cursor: default; }
+.post-author-link .post-avatar { display: flex; flex: none; }
+.post-author-link .post-id { flex: 1; }
+.post-author-link:not(.static):hover .post-namerow b { text-decoration: underline; }
+
+/* profile followers/following rows: the member opens their profile,
+   the Message button beside it stays separate */
+.search-row-link {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 10px;
+}
+.search-row-link .avatar { display: flex; flex: none; }
+.search-row-link:hover b { text-decoration: underline; }
+
+/* reel overlay: avatar + author name tap through to the profile */
+.reel-author-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.reel-author-link.reel-info-avatar { display: flex; align-items: center; justify-content: center; }
+.reel-author-link.reel-author-name { font-weight: 700; text-align: left; }
+.reel-author-link:hover { text-decoration: underline; }
