@@ -727,9 +727,12 @@ export type ChatMessage = {
   conversationId: string
   senderId: string | null
   senderName: string
+  /** empty for an unsent message — render the tombstone instead */
   body: string
   createdAt: string
   editedAt: string | null
+  /** set when the sender unsent the message (Instagram-style tombstone) */
+  deletedAt: string | null
 }
 
 type ChatMessageRow = {
@@ -738,21 +741,24 @@ type ChatMessageRow = {
   sender_id: string | null
   sender_username: string | null
   sender_display_name: string | null
-  body: string
+  body: string | null
   created_at: string
   edited_at: string | null
+  deleted_at: string | null
 }
 
 export function mapChatMessage(row: ChatMessageRow): ChatMessage {
   const name = row.sender_display_name?.trim() || 'Student'
+  const unsent = Boolean(row.deleted_at)
   return {
     id: row.id,
     conversationId: row.conversation_id,
     senderId: row.sender_id,
     senderName: name,
-    body: row.body,
+    body: unsent ? '' : (row.body as string),
     createdAt: row.created_at,
     editedAt: row.edited_at,
+    deletedAt: row.deleted_at,
   }
 }
 
@@ -951,7 +957,7 @@ export async function sendChatMessage(conversationId: string, body: string, send
   const { data, error } = await supabase
     .from('chat_messages')
     .insert({ conversation_id: conversationId, sender_id: senderId, body })
-    .select('id, conversation_id, sender_id, body, created_at, edited_at')
+    .select('id, conversation_id, sender_id, body, created_at, edited_at, deleted_at')
     .single()
   if (error) throw new Error(friendlyMessage(error))
   const row = (data ?? {}) as Record<string, unknown>
@@ -962,10 +968,27 @@ export async function sendChatMessage(conversationId: string, body: string, send
     sender_id: row.sender_id as string | null,
     sender_username: null,
     sender_display_name: null,
-    body: row.body as string,
+    body: row.body as string | null,
     created_at: row.created_at as string,
     edited_at: (row.edited_at as string | null) ?? null,
+    deleted_at: (row.deleted_at as string | null) ?? null,
   })
+}
+
+/** Edit one of your own sent messages (server rule: sender only, within 24h). */
+export async function editChatMessage(messageId: string, body: string): Promise<string | null> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('edit_chat_message', { p_message: messageId, p_body: body })
+  if (error) throw new Error(friendlyMessage(error))
+  return (data as string | null) ?? null
+}
+
+/** Unsend one of your own messages — the text leaves the DB, a tombstone stays. */
+export async function unsendChatMessage(messageId: string): Promise<string | null> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('unsend_chat_message', { p_message: messageId })
+  if (error) throw new Error(friendlyMessage(error))
+  return (data as string | null) ?? null
 }
 
 /** Mark a conversation read by the caller (drives unread badges). */
@@ -979,32 +1002,74 @@ export async function markConversationRead(conversationId: string): Promise<void
 }
 
 /**
- * Live message stream for one conversation via Supabase Realtime.
- * Returns an unsubscribe function; callers dedupe by message id.
- */export function subscribeChatMessages(
+ * Live message stream for one conversation via Supabase Realtime: INSERT for
+ * new messages AND UPDATE for edits / unsends, so an open thread stays
+ * up-to-the-second without any refetch. Returns an unsubscribe function;
+ * callers dedupe inserts by message id and replace rows on update.
+ */
+export function subscribeChatMessages(
   conversationId: string,
-  onInsert: (message: ChatMessage) => void,
+  onChange: (message: ChatMessage, type: 'insert' | 'update') => void,
 ): () => void {
   if (!supabase) return () => {}
   const client = supabase
+  const handle = (row: Record<string, unknown>, type: 'insert' | 'update') => {
+    if (!row?.id) return
+    onChange(mapChatMessage({
+      id: row.id as string,
+      conversation_id: (row.conversation_id as string) ?? conversationId,
+      sender_id: (row.sender_id as string | null) ?? null,
+      sender_username: null,
+      sender_display_name: null,
+      body: (row.body as string | null) ?? '',
+      created_at: (row.created_at as string) ?? new Date().toISOString(),
+      edited_at: (row.edited_at as string | null) ?? null,
+      deleted_at: (row.deleted_at as string | null) ?? null,
+    }), type)
+  }
   const channel = client
     .channel(`chat:${conversationId}`)
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `conversation_id=eq.${conversationId}` },
+      payload => handle(payload.new as Record<string, unknown>, 'insert'),
+    )
+    .on(
+      'postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'chat_messages', filter: `conversation_id=eq.${conversationId}` },
+      payload => handle(payload.new as Record<string, unknown>, 'update'),
+    )
+    .subscribe()
+  return () => {
+    void client.removeChannel(channel)
+  }
+}
+
+/**
+ * Chats-level live feed: every insert / edit / unsend across your
+ * conversations pings the callback, so the Chats list reorders, updates
+ * previews and unread badges without any navigation or polling. The server
+ * already applies RLS to deliver only rows you may read.
+ */
+export function subscribeChatActivity(onChange: (conversationId: string) => void): () => void {
+  if (!supabase) return () => {}
+  const client = supabase
+  const channel = client
+    .channel('chats-activity')
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'chat_messages' },
       payload => {
         const row = payload.new as Record<string, unknown>
-        if (!row?.id) return
-        onInsert(mapChatMessage({
-          id: row.id as string,
-          conversation_id: conversationId,
-          sender_id: (row.sender_id as string | null) ?? null,
-          sender_username: null,
-          sender_display_name: null,
-          body: (row.body as string) ?? '',
-          created_at: (row.created_at as string) ?? new Date().toISOString(),
-          edited_at: (row.edited_at as string | null) ?? null,
-        }))
+        onChange((row?.conversation_id as string) ?? '')
+      },
+    )
+    .on(
+      'postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'chat_messages' },
+      payload => {
+        const row = payload.new as Record<string, unknown>
+        onChange((row?.conversation_id as string) ?? '')
       },
     )
     .subscribe()

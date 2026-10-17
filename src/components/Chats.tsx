@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ArrowLeft, MessageCircle, Send, X, Users } from 'lucide-react'
+import { ArrowLeft, MessageCircle, Pencil, Send, Trash2, X, Users } from 'lucide-react'
 import * as db from '../lib/db'
 import type { ChatMessage, ChatSummary } from '../lib/db'
 import { initialsFor, relativeTime } from '../lib/db'
@@ -40,6 +40,9 @@ export default function Chats({ identity, configured, autoOpen, onAutoOpened }: 
   const [groupMembers, setGroupMembers] = useState<{ id: string; name: string }[]>([])
   const [groupBusy, setGroupBusy] = useState(false)
   const [groupError, setGroupError] = useState<string | null>(null)
+  /* message actions (Instagram): hover ⋯ on your own bubbles → Edit / Unsend */
+  const [actionsFor, setActionsFor] = useState<string | null>(null)
+  const [editing, setEditing] = useState<{ id: string; original: string } | null>(null)
 
   const seenIds = useRef<Set<string>>(new Set())
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -70,6 +73,8 @@ export default function Chats({ identity, configured, autoOpen, onAutoOpened }: 
     setMessages([])
     seenIds.current = new Set()
     if (scrollRef.current) scrollRef.current.scrollTop = 0
+    setEditing(null)
+    setActionsFor(null)
     try {
       const rows = await db.fetchChatMessages(conversationId)
       rows.forEach(row => seenIds.current.add(row.id))
@@ -106,15 +111,23 @@ export default function Chats({ identity, configured, autoOpen, onAutoOpened }: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoOpen])
 
-  /* realtime: new messages in the open thread arrive live */
+  /* realtime: new messages in the open thread arrive live; edits and unsends
+     replace the row in place — no refetch, no navigation */
   useEffect(() => {
     if (!openId) return
-    const unsubscribe = db.subscribeChatMessages(openId, message => {
+    const unsubscribe = db.subscribeChatMessages(openId, (message, type) => {
+      if (type === 'update') {
+        setMessages(list => list.map(item => item.id === message.id ? message : item))
+        // the other side edited/unsent: refresh list previews + badges quietly
+        void db.fetchConversations().then(rows => setConversations(rows)).catch(() => {})
+        return
+      }
       if (seenIds.current.has(message.id)) return
       seenIds.current.add(message.id)
       setMessages(list => [...list, message])
       if (message.senderId !== identity?.id) {
         void db.markConversationRead(openId)
+        void db.fetchConversations().then(rows => setConversations(rows)).catch(() => {})
       }
     })
     return () => {
@@ -123,11 +136,64 @@ export default function Chats({ identity, configured, autoOpen, onAutoOpened }: 
     }
   }, [openId, identity?.id])
 
+  /* the chats list itself stays live: every new message, edit or unsend
+     anywhere re-runs the list query, so previews, order and unread badges
+     update without any navigation or polling */
+  useEffect(() => {
+    if (!identity) return
+    let timer: number | null = null
+    const throttled = () => {
+      if (timer) return
+      timer = window.setTimeout(() => {
+        timer = null
+        void db.fetchConversations().then(rows => setConversations(rows)).catch(() => {})
+      }, 900)
+    }
+    const unsubscribe = db.subscribeChatActivity(throttled)
+    return () => {
+      if (timer) window.clearTimeout(timer)
+      unsubscribe()
+    }
+  }, [identity?.id])
+
   /* keep the newest message in view */
   useLayoutEffect(() => {
     const box = scrollRef.current
     if (box) box.scrollTop = box.scrollHeight
   }, [messages.length, loadingThread, openId])
+
+  /* Instagram flows: send completes your stream; Edit rewrites in place;
+     Unsend tombstones it — the text leaves the database for everyone. */
+  const saveEdit = useCallback(async () => {
+    const body = draft.trim()
+    if (!editing || !body || sending) return
+    setSending(true)
+    setThreadError(null)
+    try {
+      await db.editChatMessage(editing.id, body)
+      const at = new Date().toISOString()
+      setMessages(list => list.map(item => item.id === editing.id ? { ...item, body, editedAt: at } : item))
+      setEditing(null)
+      setDraft('')
+      void db.fetchConversations().then(rows => setConversations(rows)).catch(() => {})
+    } catch (error) {
+      setThreadError(db.friendlyMessage(error))
+    } finally {
+      setSending(false)
+    }
+  }, [draft, editing, sending])
+
+  const unsendMessage = useCallback(async (messageId: string) => {
+    setThreadError(null)
+    try {
+      await db.unsendChatMessage(messageId)
+      const at = new Date().toISOString()
+      setMessages(list => list.map(item => item.id === messageId ? { ...item, body: '', deletedAt: at } : item))
+      void db.fetchConversations().then(rows => setConversations(rows)).catch(() => {})
+    } catch (error) {
+      setThreadError(db.friendlyMessage(error))
+    }
+  }, [])
 
   /* incoming chat requests: the recipient accepts or declines once */
   const respondRequest = useCallback(async (action: 'accept' | 'decline') => {
@@ -163,6 +229,7 @@ export default function Chats({ identity, configured, autoOpen, onAutoOpened }: 
   const send = useCallback(async () => {
     const body = draft.trim()
     if (!body || !openId || sending || !identity) return
+    if (editing) { void saveEdit(); return }
     // unknown/expired states resolve first; declined and pending recipients never send
     if (openStatus === 'unknown' || openStatus === 'declined' || (openStatus === 'pending' && !openMine) || myPendingUsed) return
     setSending(true)
@@ -182,7 +249,7 @@ export default function Chats({ identity, configured, autoOpen, onAutoOpened }: 
     } finally {
       setSending(false)
     }
-  }, [draft, openId, sending, openStatus, openMine, myPendingUsed, identity?.id, identity?.name])
+  }, [draft, openId, sending, openStatus, openMine, myPendingUsed, editing, saveEdit, identity?.id, identity?.name])
 
   const addGroupMember = useCallback(async () => {
     if (!identity) return
@@ -345,15 +412,48 @@ export default function Chats({ identity, configured, autoOpen, onAutoOpened }: 
               {messages.map(message => {
                 const mine = message.senderId === identity.id
                 const isGroup = active?.kind === 'group'
+                const unsent = Boolean(message.deletedAt)
+                const editable = mine && !unsent
                 return (
                   <div key={message.id} className={`chat-bubble-row ${mine ? 'mine' : 'theirs'}`}>
                     {!mine && <span className="avatar small">{initialsFor(message.senderName, active?.peerUsername ?? '')}</span>}
+                    {mine && editable && (
+                      <button
+                        className="chat-msg-actions"
+                        aria-label="Message options"
+                        onClick={() => setActionsFor(current => current === message.id ? null : message.id)}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
+                      </button>
+                    )}
+                    {mine && editable && actionsFor === message.id && (
+                      <div className="chat-msg-menu">
+                        <button
+                          onClick={() => {
+                            setEditing({ id: message.id, original: message.body })
+                            setDraft(message.body)
+                            setActionsFor(null)
+                          }}
+                        >
+                          <Pencil size={13}/> Edit
+                        </button>
+                        <button className="danger" onClick={() => { setActionsFor(null); setEditing(null); setDraft(''); void unsendMessage(message.id) }}>
+                          <Trash2 size={13}/> Unsend
+                        </button>
+                      </div>
+                    )}
                     <div className="chat-msg-stack">
                       {isGroup && !mine && <small className="chat-sender">{message.senderName}</small>}
-                      <div className={`chat-bubble ${mine ? 'mine' : 'theirs'}`}>
-                        <p>{message.body}</p>
-                        <small>{relativeTime(message.createdAt)}{message.editedAt ? ' · edited' : ''}</small>
-                      </div>
+                      {unsent ? (
+                        <div className={`chat-bubble unsent ${mine ? 'mine' : 'theirs'}`}>
+                          <p>{mine ? 'You unsent a message' : `${isGroup ? message.senderName : peerName} unsent a message`}</p>
+                        </div>
+                      ) : (
+                        <div className={`chat-bubble ${mine ? 'mine' : 'theirs'}`}>
+                          <p>{message.body}</p>
+                          <small>{relativeTime(message.createdAt)}{message.editedAt ? ' · edited' : ''}</small>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )
@@ -377,25 +477,31 @@ export default function Chats({ identity, configured, autoOpen, onAutoOpened }: 
             )}
 
             <div className="chat-input-row">
+              {editing && <div className="chat-editing-hint">Editing a message <button className="link-button" onClick={() => { setEditing(null); setDraft('') }}>Cancel</button></div>}
               <input
                 value={draft}
                 onChange={event => setDraft(event.target.value)}
-                onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() } }}
-                placeholder={sendBlocked
-                  ? myPendingUsed
-                    ? `Request sent — waiting for ${peerName} to accept`
-                    : (openStatus === 'unknown' ? 'Loading conversation…' : 'Accept the chat request to reply')
-                  : `Message ${peerName}…`}
+                onKeyDown={event => {
+                  if (event.key === 'Escape' && editing) { setEditing(null); setDraft(''); return }
+                  if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() }
+                }}
+                placeholder={editing
+                  ? 'Rewrite your message…'
+                  : sendBlocked
+                    ? (myPendingUsed
+                      ? `Request sent — waiting for ${peerName} to accept`
+                      : (openStatus === 'unknown' ? 'Loading conversation…' : 'Accept the chat request to reply'))
+                    : `Message ${peerName}…`}
                 maxLength={2000}
-                disabled={sendBlocked}
+                disabled={sendBlocked && !editing}
               />
               <button
                 className="chat-send"
-                aria-label="Send message"
-                disabled={sending || !draft.trim() || sendBlocked}
+                aria-label={editing ? 'Save edited message' : 'Send message'}
+                disabled={(sending || !draft.trim() || sendBlocked) && !editing}
                 onClick={() => void send()}
               >
-                {sending ? <span className="mini-spinner"/> : <Send size={17}/>}
+                {sending ? <span className="mini-spinner"/> : editing ? <Pencil size={16}/> : <Send size={17}/>}
               </button>
             </div>
             {threadError && <button className="chat-clear-error" onClick={() => setThreadError(null)} aria-label="Dismiss error"><X size={14}/></button>}
