@@ -1379,6 +1379,84 @@
   white-space: nowrap;
 }
 
+/* ---- Mobile swipe navigation + sliding nav drawer (≤650px) ------------------- */
+
+@media (max-width: 650px) {
+  /* the nav drawer lives off-canvas and slides in/out */
+  .left-sidebar {
+    display: flex;
+    position: fixed;
+    inset: 50px 0 60px;
+    width: 100%;
+    height: auto;
+    padding: 14px;
+    background: white;
+    border: 0;
+    z-index: 38;
+    transform: translateX(-105%);
+    visibility: hidden;
+    transition: transform 0.3s cubic-bezier(0.22, 0.61, 0.36, 1), visibility 0s linear 0.3s;
+  }
+
+  .left-sidebar.mobile-open {
+    transform: none;
+    visibility: visible;
+    box-shadow: 0 18px 54px rgba(10, 8, 30, 0.22);
+    transition: transform 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
+  }
+
+  .left-sidebar.swiping,
+  .left-sidebar.swiping.mobile-open {
+    transition: none;
+  }
+
+  .sidebar-close {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    color: #5a6b83;
+  }
+
+  .sidebar-scrim {
+    position: fixed;
+    inset: 0;
+    background: rgba(12, 9, 28, 0.42);
+    z-index: 37;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.28s ease;
+  }
+
+  .sidebar-scrim.open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* page follow-the-finger dragging + slide-in transitions */
+  .main-column {
+    transition: transform 0.26s cubic-bezier(0.22, 0.61, 0.36, 1);
+    will-change: transform;
+  }
+
+  .main-column.swiping,
+  .main-column.swiping.page-anim {
+    transition: none;
+  }
+
+  .main-column.page-anim.from-right { animation: page-in-right 0.3s cubic-bezier(0.22, 0.61, 0.36, 1); }
+  .main-column.page-anim.from-left { animation: page-in-left 0.3s cubic-bezier(0.22, 0.61, 0.36, 1); }
+}
+
+@keyframes page-in-right {
+  from { transform: translateX(64px); opacity: 0.4; }
+  to { transform: none; opacity: 1; }
+}
+
+@keyframes page-in-left {
+  from { transform: translateX(-64px); opacity: 0.4; }
+  to { transform: none; opacity: 1; }
+}
+
 /* ---- Comments (feed light theme + Discover dark theme) ------------------------ */
 
 .comments-overlay { z-index: 40; }

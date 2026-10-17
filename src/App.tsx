@@ -47,6 +47,9 @@ const suggestions = [{name:'Typical Editing',handle:'@test1',initials:'TE'},{nam
 /** Pages that only make sense for a signed-in member (visitor gate applies). */
 const restrictedNav = ['Chats', 'Notifications', 'Bookmarks']
 const allNav = [...navItems.map(item => item.label), 'Profile']
+
+/** The four primary pages reachable by horizontal swipe on mobile. */
+const swipePageOrder = ['Home', 'Discover', 'Chats', 'Profile']
 const scaffoldNav = allNav.filter(label => !['Home', 'Discover', 'Search', 'Safety Centre'].includes(label))
 
 /**
@@ -371,6 +374,212 @@ function CAMPUSApp() {
     if (scaffoldNav.includes(label)) flash(`${label} is coming soon.`)
   }
 
+  /* ---- mobile swipe navigation (touch only, viewport ≤ 650px) -------------
+   * Left-edge swipe right → the vertical nav drawer follows the finger and
+   * springs open. Anywhere else, horizontal swipes flip between the four main
+   * pages (Home → Discover → Chats → Profile and back) with the current page
+   * following the finger: commit on distance or velocity, spring back
+   * otherwise, and the incoming page slides in. Vertical scrolling, image
+   * carousels, inputs and sheets are never hijacked. */
+
+  const mainRef = useRef<HTMLElement | null>(null)
+  const sidebarRef = useRef<HTMLElement | null>(null)
+  const [slideDir, setSlideDir] = useState<'none' | 'from-right' | 'from-left'>('none')
+  const slideTimer = useRef<number | null>(null)
+  const swipe = useRef({
+    startX: 0, startY: 0, lastX: 0, lastT: 0, prevX: 0, prevT: 0,
+    dx: 0, vel: 0, active: false, mode: '' as '' | 'page' | 'sidebar',
+  })
+  const activeNavRef = useRef(activeNav); activeNavRef.current = activeNav
+  const navigateRef = useRef(navigate); navigateRef.current = navigate
+  const mobileMenuRef = useRef(mobileMenu); mobileMenuRef.current = mobileMenu
+
+  const beginSlide = (dir: 'from-right' | 'from-left') => {
+    if (slideTimer.current) window.clearTimeout(slideTimer.current)
+    setSlideDir(dir)
+    slideTimer.current = window.setTimeout(() => setSlideDir('none'), 360)
+  }
+
+  const clearDragStyles = () => {
+    const main = mainRef.current
+    if (main) { main.classList.remove('swiping'); main.style.transform = '' }
+    const sidebar = sidebarRef.current
+    if (sidebar) { sidebar.classList.remove('swiping'); sidebar.style.transform = ''; sidebar.style.transition = '' }
+  }
+
+  const neighborPage = (dx: number): string | null => {
+    const current = activeNavRef.current
+    const index = swipePageOrder.indexOf(current)
+    if (dx < 0) { // finger right → left: next page
+      if (index === -1) return 'Home'
+      return index < swipePageOrder.length - 1 ? swipePageOrder[index + 1] : null
+    }
+    // finger left → right: previous page (the left edge already opens the drawer)
+    if (index <= 0) return null
+    return swipePageOrder[index - 1]
+  }
+
+  // The shell (main + drawer) mounts after the boot screens clear, so the
+  // gesture handlers attach through ref callbacks — they fire whenever the
+  // elements are actually placed in the DOM, boot or no boot.
+  const cleanupRef = useRef<(() => void) | null>(null)
+  const sidebarCleanupRef = useRef<(() => void) | null>(null)
+
+  const attachMainRef = useCallback((el: HTMLElement | null) => {
+    if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null }
+    mainRef.current = el
+    if (!el) return
+    const isMobile = () => window.matchMedia('(max-width: 650px)').matches
+    const main = el
+
+    const onSwipeStart = (event: TouchEvent) => {
+      if (!isMobile() || mobileMenuRef.current || event.touches.length > 1) return
+      const target = event.target as Element
+      if (target.closest?.('input, textarea, select, .overlay, .bottom-sheet, .post-menu, .reel-more-pop, .carousel-track, .carousel-dots, .picker-thumb, .mobile-bottom-nav')) {
+        swipe.current.active = false
+        return
+      }
+      const touch = event.touches[0]
+      swipe.current = {
+        startX: touch.clientX, startY: touch.clientY,
+        lastX: touch.clientX, lastT: performance.now(),
+        prevX: touch.clientX, prevT: performance.now(),
+        dx: 0, vel: 0, active: true, mode: '',
+      }
+    }
+
+    const onSwipeMove = (event: TouchEvent) => {
+      const state = swipe.current
+      if (!state.active || event.touches.length > 1) return
+      const touch = event.touches[0]
+      const dx = touch.clientX - state.startX
+      const dy = touch.clientY - state.startY
+
+      if (!state.mode) {
+        if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+          // The left edge belongs to the nav drawer; everywhere else is paging
+          state.mode = dx > 0 && state.startX < 44 ? 'sidebar' : 'page'
+        } else if (Math.abs(dy) > 14) {
+          state.active = false // vertical scroll — never hijack
+          return
+        } else {
+          return
+        }
+      }
+
+      const now = performance.now()
+      const dt = now - state.prevT
+      if (dt > 0) state.vel = (touch.clientX - state.prevX) / dt
+      state.prevX = touch.clientX; state.prevT = now
+      state.dx = dx
+      state.lastX = touch.clientX; state.lastT = now
+
+      const width = main.clientWidth
+      if (state.mode === 'page') {
+        main.classList.add('swiping')
+        const shift = Math.max(-width * 0.8, Math.min(width * 0.8, dx * 0.9))
+        main.style.transform = `translateX(${shift}px)`
+      } else if (state.mode === 'sidebar') {
+        const sidebar = sidebarRef.current
+        if (sidebar) {
+          sidebar.classList.add('swiping')
+          const shown = Math.min(Math.max(dx, 0), width)
+          sidebar.style.transform = `translateX(${shown - sidebar.offsetWidth}px)`
+        }
+      }
+    }
+
+    const finishOrCancel = (event: TouchEvent) => {
+      const state = swipe.current
+      if (!state.active) return
+      state.active = false
+      if (!state.mode) return
+
+      const width = main.clientWidth
+      if (state.mode === 'page') {
+        const commit = Math.abs(state.dx) > width * 0.24 || Math.abs(state.vel) > 0.55
+        const target = commit ? neighborPage(state.dx) : null
+        if (target && state.dx < 0) {
+          // current page slides off to the left, then the next page slides in
+          main.style.transform = `translateX(${-width}px)`
+          window.setTimeout(() => {
+            clearDragStyles()
+            navigateRef.current(target)
+            beginSlide('from-right')
+          }, 170)
+        } else if (target && state.dx > 0) {
+          main.style.transform = `translateX(${width}px)`
+          window.setTimeout(() => {
+            clearDragStyles()
+            navigateRef.current(target)
+            beginSlide('from-left')
+          }, 170)
+        } else {
+          clearDragStyles() // spring back
+        }
+      } else {
+        const sidebar = sidebarRef.current
+        const open = state.dx > width * 0.28 || state.vel > 0.55
+        if (open) {
+          setMobileMenu(true)
+          if (sidebar) {
+            sidebar.style.transform = ''
+            window.setTimeout(() => clearDragStyles(), 340)
+          }
+        } else {
+          clearDragStyles() // slides back under its own transition
+        }
+      }
+    }
+
+    main.addEventListener('touchstart', onSwipeStart, { passive: true })
+    main.addEventListener('touchmove', onSwipeMove, { passive: true })
+    main.addEventListener('touchend', finishOrCancel, { passive: true })
+    main.addEventListener('touchcancel', finishOrCancel, { passive: true })
+    cleanupRef.current = () => {
+      main.removeEventListener('touchstart', onSwipeStart)
+      main.removeEventListener('touchmove', onSwipeMove)
+      main.removeEventListener('touchend', finishOrCancel)
+      main.removeEventListener('touchcancel', finishOrCancel)
+      if (slideTimer.current) window.clearTimeout(slideTimer.current)
+    }
+  }, [])
+
+  // Drawer close gestures: swipe it back to the left, or tap the scrim behind it.
+  const attachSidebarRef = useCallback((el: HTMLElement | null) => {
+    if (sidebarCleanupRef.current) { sidebarCleanupRef.current(); sidebarCleanupRef.current = null }
+    sidebarRef.current = el
+    if (!el) return
+    const sidebar = el
+    let start: { x: number; y: number } | null = null
+
+    const onDrawerStart = (event: TouchEvent) => {
+      if (!window.matchMedia('(max-width: 650px)').matches) return
+      const touch = event.touches[0]
+      start = { x: touch.clientX, y: touch.clientY }
+    }
+    const onDrawerMove = (event: TouchEvent) => {
+      if (!start || !mobileMenuRef.current) return
+      const touch = event.touches[0]
+      const dx = touch.clientX - start.x
+      const dy = touch.clientY - start.y
+      if (dx < -60 && Math.abs(dx) > Math.abs(dy) * 1.3) {
+        setMobileMenu(false)
+        start = null
+      }
+    }
+    const onDrawerEnd = () => { start = null }
+
+    sidebar.addEventListener('touchstart', onDrawerStart, { passive: true })
+    sidebar.addEventListener('touchmove', onDrawerMove, { passive: true })
+    sidebar.addEventListener('touchend', onDrawerEnd, { passive: true })
+    sidebarCleanupRef.current = () => {
+      sidebar.removeEventListener('touchstart', onDrawerStart)
+      sidebar.removeEventListener('touchmove', onDrawerMove)
+      sidebar.removeEventListener('touchend', onDrawerEnd)
+    }
+  }, [])
+
   const openComposer = (kind: PostKind = 'post'): boolean => {
     if (!requireAuth('create posts, polls and confessions')) return false
     setComposerKind(kind)
@@ -656,7 +865,8 @@ function CAMPUSApp() {
         </div>
       </header>
 
-      <aside className={`left-sidebar ${mobileMenu ? 'mobile-open' : ''}`}>
+      <aside ref={attachSidebarRef} className={`left-sidebar ${mobileMenu ? 'mobile-open' : ''}`}>
+        <button className="icon-button sidebar-close" aria-label="Close menu" onClick={() => setMobileMenu(false)}><X size={20}/></button>
         <button className="brand" onClick={() => navigate('Home')}><span className="brand-mark">C</span><span>CAMPUS</span></button>
         <div className="sidebar-campus-card">
           <div className="sidebar-campus-art"><Building2 size={28}/><span>{activeCollege?.short_name ?? 'SPPU'}</span></div>
@@ -686,7 +896,8 @@ function CAMPUSApp() {
         </div>
       </aside>
 
-      <main className="main-column">
+      <main ref={attachMainRef} className={`main-column ${slideDir !== 'none' ? `page-anim ${slideDir}` : ''}`}>
+        <div className={`sidebar-scrim ${mobileMenu ? 'open' : ''}`} onClick={() => setMobileMenu(false)} aria-hidden="true"/>
         <div className="desktop-page-title"><h1>{activeNav}</h1>{activeNav !== 'Home' && <span className="section-kicker">YOUR CAMPUS SPACE</span>}</div>
 
         {status === 'visitor' && (
