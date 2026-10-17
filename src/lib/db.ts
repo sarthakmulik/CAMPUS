@@ -34,10 +34,14 @@ export type Profile = {
   course: string | null
   department: string | null
   year_of_study: number | null
+  /** 0010: verification lives here — only admins can flip it (trigger + RPC) */
+  is_verified: boolean
   is_private: boolean
   role: string
   onboarding_step: number | null
   onboarding_completed_at: string | null
+  /** 0009: last time the username changed — null until the first change */
+  username_changed_at: string | null
 }
 
 export type Caps = {
@@ -72,7 +76,7 @@ export const EMPTY_CAPS: Caps = {
 export const PROFILE_BASE_COLUMNS =
   'id, username, display_name, bio, avatar_url, college_id, course, year_of_study, is_private'
 export const PROFILE_EXTRA_COLUMNS =
-  'first_name, last_name, department, role, onboarding_step, onboarding_completed_at'
+  'first_name, last_name, department, role, onboarding_step, onboarding_completed_at, username_changed_at, is_verified'
 
 const USERNAME_RE = /^[a-z0-9_]{3,20}$/
 
@@ -107,7 +111,9 @@ export function friendlyMessage(error: unknown): string {
     return 'That username was just taken by someone else. Please choose another.'
   }
   if (/permission denied|row-level security/i.test(raw)) {
-    return 'Your account is not allowed to do that yet. Sign in again, or ask the admin to apply the database migration.'
+    // keep the raw message — it names the exact table/policy that refused,
+    // which is what honest diagnosis of RLS failures needs
+    return raw
   }
   if (/does not exist|schema cache|PGRST20|PGRST3/i.test(raw)) {
     return 'A required database piece is missing. Apply supabase/migrations/0001_explore_first_onboarding.sql and 0002_real_feed.sql in the Supabase SQL editor.'
@@ -410,8 +416,22 @@ export async function findProfileIdByUsername(username: string): Promise<string 
 
 export type RelationRow = { id: string; username: string | null; display_name: string | null }
 
-/** Block or mute someone. Re-adding an existing relation is not an error. */
-export async function setUserRelation(
+/** Remove a block or mute relation of the signed-in member. */
+export async function unsetUserRelation(
+  table: 'user_blocks' | 'user_mutes',
+  blockerId: string,
+  targetId: string,
+): Promise<void> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { error } = await supabase
+    .from(table)
+    .delete()
+    .eq('blocker_id', blockerId)
+    .eq('blocked_id', targetId)
+  if (error) throw new Error(friendlyMessage(error))
+}
+
+/** Block or mute someone. Re-adding an existing relation is not an error. */export async function setUserRelation(
   table: 'user_blocks' | 'user_mutes',
   blockerId: string,
   targetId: string,
@@ -476,6 +496,20 @@ export async function setPrivateProfile(userId: string, value: boolean): Promise
   if (error) throw new Error(friendlyMessage(error))
 }
 
+/** Change the signed-in member's auth password (Supabase auth session). */
+export async function changePassword(newPassword: string): Promise<void> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { error } = await supabase.auth.updateUser({ password: newPassword })
+  if (error) throw new Error(friendlyMessage(error))
+}
+
+/** The email behind the current session — shown read-only in Account. */
+export async function currentEmail(): Promise<string | null> {
+  if (!supabase) return null
+  const { data } = await supabase.auth.getUser()
+  return data.user?.email ?? null
+}
+
 /* -------------------------------------------------------------------------- */
 /* Avatars                                                                     */
 /* -------------------------------------------------------------------------- */
@@ -504,6 +538,7 @@ export async function uploadAvatar(userId: string, file: File): Promise<string> 
 /* -------------------------------------------------------------------------- */
 
 import type { CampusPost, PostKind } from '../types'
+export type { CampusPost }
 
 type FeedRow = {
   id: string
@@ -517,6 +552,7 @@ type FeedRow = {
   author_display_name: string | null
   author_username: string | null
   author_avatar_url: string | null
+  author_is_verified?: boolean | null
   college_id: string | null
   college_short_name: string | null
   like_count: number | string | null
@@ -562,6 +598,7 @@ export function mapFeedRow(row: FeedRow): CampusPost {
     id: row.id,
     author: name,
     handle: username ? `@${username}` : '',
+    createdAt: row.created_at,
     initials: anonymous ? '' : initialsFor(name, username),
     college: row.college_short_name ?? '',
     time: relativeTime(row.created_at),
@@ -573,6 +610,7 @@ export function mapFeedRow(row: FeedRow): CampusPost {
     media: row.media_urls ?? [],
     authorId: row.author_id,
     editedAt: row.edited_at,
+    authorVerified: Boolean(row.author_is_verified),
     trending: Number(row.like_count ?? 0) >= 30,
     anonymous,
     liked: Boolean(row.liked_by_me),
@@ -627,6 +665,44 @@ export async function fetchTrendingTags(limit = 8): Promise<[string, number][]> 
 
 export type FollowSuggestion = { username: string; name: string }
 
+/**
+ * Instagram-style For You ranking. Recency dominates: the ranking only gets
+ * to shuffle posts once engagement or affinity is genuinely large, so a
+ * "just now" post already outranks an old, mildly-liked one. Heavy virality
+ * (dozens of likes) can still cut through a day later, like Instagram's.
+ */
+export function forYouScore(post: CampusPost, viewerFollowed: boolean, sameCollege: boolean): number {
+  const ageHours = post.createdAt
+    ? Math.max(0, (Date.now() - new Date(post.createdAt).getTime()) / 3_600_000)
+    : 24
+  const recency = Math.exp(-ageHours / 12) // fresh ≈ 1, 12h ≈ 0.37, a day ≈ 0.14, a week ≈ 0
+  const engagement = Math.log2(1 + post.likes * 2 + post.comments * 3)
+  const affinity = (viewerFollowed ? 0.6 : 0) + (sameCollege ? 0.3 : 0)
+  return 8 * recency + 1.2 * engagement + affinity
+}
+
+/** Resolve a @username to a profile id for mention links (cached per session). */
+const mentionIdCache = new Map<string, Promise<string | null>>()
+
+export function fetchProfileIdByUsername(username: string): Promise<string | null> {
+  const key = username.toLowerCase()
+  let cached = mentionIdCache.get(key)
+  if (!cached) {
+    cached = (async () => {
+      if (!supabase) return null
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('username', key)
+        .maybeSingle()
+      if (error || !data) return null
+      return (data as { id: string }).id
+    })().catch(() => null)
+    mentionIdCache.set(key, cached)
+  }
+  return cached
+}
+
 /* -------------------------------------------------------------------------- */
 /* Chats (1:1 direct messages)                                                 */
 /* -------------------------------------------------------------------------- */
@@ -634,6 +710,8 @@ export type FollowSuggestion = { username: string; name: string }
 export type ChatSummary = {
   id: string
   kind: 'dm' | 'group'
+  status: 'pending' | 'accepted' | 'declined'
+  iRequested: boolean
   title: string | null
   peerId: string | null
   peerName: string
@@ -682,9 +760,13 @@ function mapConversationRow(row: Record<string, unknown>): ChatSummary {
   const kind = row.kind === 'group' ? 'group' : 'dm'
   const username = ((row.peer_username as string) ?? '')
   const displayName = ((row.display_name as string) ?? '').trim()
+  const status = row.status === 'pending' ? 'pending'
+    : row.status === 'declined' ? 'declined' : 'accepted'
   return {
     id: row.conversation_id as string,
     kind,
+    status,
+    iRequested: kind !== 'group' && status !== 'accepted' && Boolean(row.i_requested),
     title: (row.title as string) ?? null,
     peerId: kind === 'dm' ? ((row.peer_id as string) ?? null) : null,
     peerName: displayName || (username ? `@${username}` : 'Classmate'),
@@ -733,6 +815,107 @@ export async function createGroup(title: string, memberIds: string[]): Promise<s
   if (error) throw new Error(friendlyMessage(error))
   if (!data) throw new Error('The group could not be created.')
   return data as string
+}
+
+/**
+ * The classmate receiving a chat request accepts or declines it. Only the
+ * recipient may respond, and only once.
+ */
+export async function respondChatRequest(
+  conversationId: string,
+  action: 'accept' | 'decline',
+): Promise<'accepted' | 'declined'> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('respond_dm', {
+    p_conversation: conversationId,
+    p_action: action,
+  })
+  if (error) throw new Error(friendlyMessage(error))
+  return (data as 'accepted' | 'declined') ?? (action === 'accept' ? 'accepted' : 'declined')
+}
+
+/* ------------------------------------------------------------------ */
+/* Follows                                                             */
+/* ------------------------------------------------------------------ */
+
+export async function followUser(followedId: string): Promise<void> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { error } = await supabase.from('follows').insert({ followed_id: followedId })
+  if (error) throw new Error(friendlyMessage(error))
+}
+
+export async function unfollowUser(followedId: string): Promise<void> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { error } = await supabase.from('follows').delete().eq('followed_id', followedId)
+  if (error) throw new Error(friendlyMessage(error))
+}
+
+/** The people the signed-in member follows (handles list, for feed filters). */
+export async function fetchFollowing(): Promise<string[]> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase
+    .from('follows')
+    .select('followed_id')
+  if (error) throw new Error(friendlyMessage(error))
+  return (data ?? []).map(row => (row as { followed_id: string }).followed_id)
+}
+
+/** True when the signed-in member follows the given profile. */
+export async function isFollowing(followedId: string): Promise<boolean> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase
+    .from('follows')
+    .select('followed_id')
+    .eq('followed_id', followedId)
+    .maybeSingle()
+  if (error) throw new Error(friendlyMessage(error))
+  return Boolean(data)
+}
+
+export type ProfileStats = { postCount: number; reelCount: number; followerCount: number; followingCount: number }
+
+export async function fetchProfileStats(profileId: string): Promise<ProfileStats> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('profile_stats', { p_profile: profileId })
+  if (error) throw new Error(friendlyMessage(error))
+  const row = (data ?? [{}]) as Record<string, unknown>[]
+  const first = row[0] ?? {}
+  return {
+    postCount: Number(first.post_count ?? 0),
+    reelCount: Number(first.reel_count ?? 0),
+    followerCount: Number(first.follower_count ?? 0),
+    followingCount: Number(first.following_count ?? 0),
+  }
+}
+
+// list_member_posts/list_followers share row shapes with list_public_posts/search_members
+export async function fetchMemberPosts(profileId: string, kind: 'post' | 'reel', limit = 24): Promise<CampusPost[]> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('list_member_posts', {
+    p_profile: profileId,
+    p_kind: kind,
+    p_limit: limit,
+  })
+  if (error) throw new Error(friendlyMessage(error))
+  return ((data ?? []) as FeedRow[]).map(mapFeedRow)
+}
+
+export async function fetchFollowersList(profileId: string, followers: boolean, limit = 50) {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('list_followers', {
+    p_profile: profileId,
+    p_followers: followers,
+  })
+  if (error) throw new Error(friendlyMessage(error))
+  return ((data ?? []) as MemberRow[]).slice(0, limit).map<PersonResult>(row => ({
+    id: row.id,
+    username: row.username,
+    displayName: row.display_name?.trim() || (row.username ? `@${row.username}` : 'Student'),
+    avatarUrl: row.avatar_url,
+    collegeShort: null,
+    isPrivate: Boolean(row.is_private),
+    isVerified: Boolean(row.is_verified),
+  }))
 }
 
 /**
@@ -792,8 +975,7 @@ export async function markConversationRead(conversationId: string): Promise<void
 /**
  * Live message stream for one conversation via Supabase Realtime.
  * Returns an unsubscribe function; callers dedupe by message id.
- */
-export function subscribeChatMessages(
+ */export function subscribeChatMessages(
   conversationId: string,
   onInsert: (message: ChatMessage) => void,
 ): () => void {
@@ -822,6 +1004,98 @@ export function subscribeChatMessages(
     .subscribe()
   return () => {
     void client.removeChannel(channel)
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Search                                                                      */
+/* -------------------------------------------------------------------------- */
+
+export type PersonResult = {
+  id: string
+  username: string | null
+  displayName: string
+  avatarUrl: string | null
+  collegeShort: string | null
+  isPrivate: boolean
+  isVerified: boolean
+}
+
+type MemberRow = {
+  id: string
+  username: string | null
+  display_name: string | null
+  avatar_url: string | null
+  college_short_name: string | null
+  is_private: boolean
+  is_verified?: boolean | null
+}
+
+/** Find members by display name or @username (self excluded server-side). */
+export async function searchMembers(query: string, limit = 10): Promise<PersonResult[]> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const trimmed = query.trim()
+  if (!trimmed) return []
+  const { data, error } = await supabase.rpc('search_members', { p_query: trimmed, p_limit: limit })
+  if (error) throw new Error(friendlyMessage(error))
+  return ((data ?? []) as MemberRow[]).map(row => ({
+    id: row.id,
+    username: row.username,
+    displayName: row.display_name?.trim() || (row.username ? `@${row.username}` : 'Student'),
+    avatarUrl: row.avatar_url,
+    collegeShort: row.college_short_name,
+    isPrivate: Boolean(row.is_private),
+    isVerified: Boolean(row.is_verified),
+  }))
+}
+
+/** Verify (or unverify) a member's profile — admin-only; server re-checks. */
+export async function setProfileVerified(targetId: string, verified: boolean): Promise<void> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { error } = await supabase.rpc('set_profile_verified', {
+    p_user: targetId,
+    p_verified: verified,
+  })
+  if (error) throw new Error(friendlyMessage(error))
+}
+
+/** Find published posts whose body matches; authors stay hidden if anonymous. */
+export async function searchPosts(query: string, limit = 10): Promise<CampusPost[]> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const trimmed = query.trim()
+  if (!trimmed) return []
+  const { data, error } = await supabase.rpc('search_posts', { p_query: trimmed, p_limit: limit })
+  if (error) throw new Error(friendlyMessage(error))
+  return ((data ?? []) as FeedRow[]).map(mapFeedRow)
+}
+
+/**
+ * Load one post (or reel) by id for shared deep links (#p/<id>). Anonymous
+ * or missing posts return null — the caller decides the message. Requires
+ * migration 0012_share_links.sql.
+ */
+export async function fetchPostById(postId: string): Promise<CampusPost | null> {
+  if (!supabase) return null
+  const { data, error } = await supabase.rpc('get_public_post', { p_post: postId })
+  if (error) throw new Error(friendlyMessage(error))
+  const rows = (data ?? []) as FeedRow[]
+  return rows.length ? mapFeedRow(rows[0]) : null
+}
+
+/** Shareable link for a post or reel — a hash the app reads on boot. */
+export function postLink(postId: string): string {
+  if (typeof window === 'undefined') return `/#p/${postId}`
+  return `${window.location.origin}${window.location.pathname}#p/${postId}`
+}
+
+/** Copy text to the clipboard; returns an error message or null. */
+export async function copyToClipboard(text: string): Promise<string | null> {
+  try {
+    if (!navigator.clipboard?.writeText) return 'Your browser does not offer a clipboard here.'
+    await navigator.clipboard.writeText(text)
+    return null
+  } catch {
+    return 'Your browser blocked the clipboard. Select the text instead.'
   }
 }
 
@@ -982,6 +1256,8 @@ export const MAX_MEDIA_BYTES = 25 * 1024 * 1024
 
 export type CampusComment = {
   id: string
+  parentId: string | null
+  pinnedAt: string | null
   body: string
   time: string
   editedAt: string | null
@@ -989,17 +1265,26 @@ export type CampusComment = {
   author: string
   handle: string
   initials: string
+  authorVerified: boolean
+  likes: number
+  likedByMe: boolean
 }
 
 type CommentRow = {
   id: string
+  post_id: string
+  parent_id: string | null
   body: string
   created_at: string
   edited_at: string | null
+  pinned_at: string | null
   author_id: string
   author_display_name: string | null
   author_username: string | null
   author_avatar_url: string | null
+  author_is_verified?: boolean | null
+  like_count?: number | string | null
+  liked_by_me?: boolean | null
 }
 
 function mapComment(row: CommentRow): CampusComment {
@@ -1007,6 +1292,8 @@ function mapComment(row: CommentRow): CampusComment {
   const username = row.author_username
   return {
     id: row.id,
+    parentId: row.parent_id,
+    pinnedAt: row.pinned_at,
     body: row.body,
     time: relativeTime(row.created_at),
     editedAt: row.edited_at,
@@ -1014,6 +1301,9 @@ function mapComment(row: CommentRow): CampusComment {
     author: name,
     handle: username ? `@${username}` : '',
     initials: initialsFor(name, username ?? ''),
+    authorVerified: Boolean(row.author_is_verified),
+    likes: Number(row.like_count ?? 0),
+    likedByMe: Boolean(row.liked_by_me),
   }
 }
 
@@ -1027,9 +1317,9 @@ export async function fetchComments(postId: string): Promise<CampusComment[]> {
 }
 
 /**
- * Add a comment as the signed-in member and return the fresh row. The caller
- * supplies their identity for the bubble; authorship is enforced by RLS
- * (author_id = auth.uid()).
+ * Add a comment (or a one-level reply when `parentId` is given) as the
+ * signed-in member and return the fresh row. Authorship is enforced by RLS
+ * (author_id = auth.uid()); reply depth by the 0011 trigger.
  */
 export async function addComment(
   postId: string,
@@ -1037,11 +1327,12 @@ export async function addComment(
   body: string,
   authorName: string,
   authorUsername: string,
+  parentId?: string | null,
 ): Promise<CampusComment> {
   if (!supabase) throw new Error('CAMPUS is not connected.')
   const { data, error } = await supabase
     .from('post_comments')
-    .insert({ post_id: postId, author_id: userId, body })
+    .insert({ post_id: postId, author_id: userId, body, parent_id: parentId ?? null })
     .select('id, post_id, body, created_at, edited_at, author_id')
     .single()
   if (error) throw new Error(friendlyMessage(error))
@@ -1055,6 +1346,8 @@ export async function addComment(
   }
   return {
     id: row.id,
+    parentId: parentId ?? null,
+    pinnedAt: null,
     body: row.body,
     time: relativeTime(row.created_at),
     editedAt: row.edited_at,
@@ -1062,7 +1355,33 @@ export async function addComment(
     author: authorName || 'Student',
     handle: authorUsername ? `@${authorUsername}` : '',
     initials: initialsFor(authorName || 'Student', authorUsername),
+    authorVerified: false,
+    likes: 0,
+    likedByMe: false,
   }
+}
+
+/** Toggle your like on a comment. The count on screen follows the database. */
+export async function toggleCommentLike(commentId: string, userId: string, liked: boolean): Promise<void> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  if (liked) {
+    const { error } = await supabase.from('comment_likes').insert({ comment_id: commentId, user_id: userId })
+    if (error && !/duplicate key|23505/i.test(error.message ?? '')) throw new Error(friendlyMessage(error))
+  } else {
+    const { error } = await supabase
+      .from('comment_likes')
+      .delete()
+      .eq('comment_id', commentId)
+      .eq('user_id', userId)
+    if (error) throw new Error(friendlyMessage(error))
+  }
+}
+
+/** Pin (or unpin) one comment to the top of the thread — post author or admin. */
+export async function setCommentPinned(commentId: string, pinned: boolean): Promise<void> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { error } = await supabase.rpc('set_comment_pinned', { p_comment: commentId, p_pinned: pinned })
+  if (error) throw new Error(friendlyMessage(error))
 }
 
 /** Edit your own comment; stamps edited_at like posts do. */

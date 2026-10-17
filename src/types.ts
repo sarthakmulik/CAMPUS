@@ -6,6 +6,8 @@ export type CampusPost = {
   initials: string
   college: string
   time: string
+  /** raw created_at — used by the For You ranking (recency) */
+  createdAt?: string
   body: string
   likes: number
   comments: number
@@ -14,6 +16,7 @@ export type CampusPost = {
   media?: string[]
   authorId?: string | null
   editedAt?: string | null
+  authorVerified?: boolean
   trending?: boolean
   anonymous?: boolean
   liked?: boolean

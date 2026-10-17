@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Bookmark, Copy, Flag, Heart, MessageCircle, MoreHorizontal,
+  Bookmark, Flag, Heart, MessageCircle, MoreHorizontal,
   Play, Share2, Volume2, VolumeX,
 } from 'lucide-react'
 import {
-  fetchReels, toggleLike as dbToggleLike, friendlyMessage,
+  fetchPostById, fetchReels, postLink, toggleLike as dbToggleLike, copyToClipboard, friendlyMessage,
   initialsFor,
 } from '../lib/db'
 import type { CampusPost } from '../types'
@@ -17,6 +17,9 @@ type ReelsFeedProps = {
   flash: (message: string) => void
   onReport: (post: CampusPost) => void
   onCreateReel: () => void
+  /** deep-linked reel id — the stage slides to it (fetching it if needed) */
+  autoOpenId?: string | null
+  onAutoOpened?: () => void
 }
 
 const PAGE_SIZE = 8
@@ -28,7 +31,7 @@ const PAGE_SIZE = 8
  * caption + author overlay and a live progress line — everything reads its
  * numbers from the database (list_public_reels, migration 0004).
  */
-export default function ReelsFeed({ userId, identity, requireAuth, flash, onReport, onCreateReel }: ReelsFeedProps) {
+export default function ReelsFeed({ userId, identity, requireAuth, flash, onReport, onCreateReel, autoOpenId, onAutoOpened }: ReelsFeedProps) {
   const [reels, setReels] = useState<CampusPost[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -62,6 +65,37 @@ export default function ReelsFeed({ userId, identity, requireAuth, flash, onRepo
   }, [])
 
   useEffect(() => { void loadPage() }, [loadPage])
+
+  // deep link: slide the stage to the shared reel once the list is here;
+  // if it is not in the loaded pages, fetch it alone and put it in front.
+  useEffect(() => {
+    if (!autoOpenId || loading) return
+    let cancelled = false
+    const scrollToIndex = (index: number) => {
+      requestAnimationFrame(() => {
+        const stage = stageRef.current
+        if (stage) { stage.scrollTop = index * stage.clientHeight; setActiveIndex(index) }
+        onAutoOpened?.()
+      })
+    }
+    const existing = reels.findIndex(r => r.id === autoOpenId)
+    if (existing >= 0) { scrollToIndex(existing); return }
+    void (async () => {
+      try {
+        const post = await fetchPostById(autoOpenId)
+        if (cancelled) return
+        if (!post) { flash('That reel is not available — it may have been deleted.'); onAutoOpened?.(); return }
+        if (post.kind !== 'reel') { flash('That link points to a post, not a reel.'); onAutoOpened?.(); return }
+        setReels(current => current.some(r => r.id === post.id) ? current : [post, ...current])
+        scrollToIndex(0)
+      } catch (err) {
+        if (!cancelled) flash(friendlyMessage(err))
+        onAutoOpened?.()
+      }
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpenId, loading])
 
   const retry = () => {
     nextPage.current = 0
@@ -107,12 +141,19 @@ export default function ReelsFeed({ userId, identity, requireAuth, flash, onRepo
   }
 
   const copyCaption = async (post: CampusPost) => {
-    try {
-      await navigator.clipboard.writeText(`${post.author}: ${post.body}`)
-      flash('Caption copied.')
-    } catch {
-      flash('Your browser blocked the clipboard. Select the caption text instead.')
+    if (!requireAuth('share reels')) return
+    const url = postLink(post.id)
+    const nav = navigator as Navigator & { share?: (data: { title?: string; text?: string; url?: string }) => Promise<void> }
+    if (nav.share) {
+      try {
+        await nav.share({ title: 'CAMPUS', text: post.body.trim() ? `${post.author}: ${post.body.trim().slice(0, 90)}` : `A reel by ${post.author} on CAMPUS`, url })
+        return
+      } catch {
+        // sheet dismissed — fall through to copying the link
+      }
     }
+    const failure = await copyToClipboard(url)
+    flash(failure ?? 'Reel link copied — paste it anywhere to share.')
   }
 
   if (loading && reels.length === 0) {
@@ -342,7 +383,7 @@ function ReelSlide({
             <span>{post.comments}</span>
           </div>
           <div className="reel-rail-item">
-            <button onClick={onShare} aria-label="Copy caption"><Share2 size={25}/></button>
+            <button onClick={onShare} aria-label="Share reel"><Share2 size={25}/></button>
           </div>
           <div className="reel-rail-item">
             <button className={post.saved ? 'saved' : ''} onClick={onSave} aria-label="Save reel">
@@ -357,7 +398,7 @@ function ReelSlide({
         {menuOpen && (
           <div className="reel-more-pop" onClick={stop}>
             <button onClick={onReport}><Flag size={15}/> Report reel</button>
-            <button onClick={onShare}><Copy size={15}/> Copy caption</button>
+            <button onClick={onShare}><Share2 size={15}/> Share reel link</button>
           </div>
         )}
 

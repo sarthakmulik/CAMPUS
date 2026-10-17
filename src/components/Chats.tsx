@@ -33,7 +33,7 @@ export default function Chats({ identity, configured, autoOpen, onAutoOpened }: 
   const [peerName, setPeerName] = useState('')
   const [mobileThread, setMobileThread] = useState(false)
   const [peek, setPeek] = useState<ChatSummary | null>(null)
-  // group creation panel
+  /* group creation panel */
   const [groupPanel, setGroupPanel] = useState(false)
   const [groupTitle, setGroupTitle] = useState('')
   const [groupHandle, setGroupHandle] = useState('')
@@ -129,9 +129,34 @@ export default function Chats({ identity, configured, autoOpen, onAutoOpened }: 
     if (box) box.scrollTop = box.scrollHeight
   }, [messages.length, loadingThread, openId])
 
+  /* incoming chat requests: the recipient accepts or declines once */
+  const respondRequest = useCallback(async (action: 'accept' | 'decline') => {
+    if (!openId) return
+    setThreadError(null)
+    try {
+      await db.respondChatRequest(openId, action)
+      const rows = await db.fetchConversations()
+      setConversations(rows)
+      setPeek(rows.find(c => c.id === openId) ?? null)
+    } catch (error) {
+      setThreadError(db.friendlyMessage(error))
+    }
+  }, [openId])
+
+  // state of the open thread (request handling)
+  const openSummary = openId ? conversations.find(c => c.id === openId) ?? peek : null
+  const openStatus: 'pending' | 'accepted' | 'declined' | 'unknown' = openSummary?.status ?? 'unknown'
+  const openMine = openSummary?.iRequested ?? false
+  const sendBlocked =
+    openStatus === 'unknown'
+    || openStatus === 'declined'
+    || (openStatus === 'pending' && !openMine)
+
   const send = useCallback(async () => {
     const body = draft.trim()
     if (!body || !openId || sending) return
+    // unknown/expired states resolve first; declined and pending recipients never send
+    if (openStatus === 'unknown' || openStatus === 'declined' || (openStatus === 'pending' && !openMine)) return
     setSending(true)
     try {
       const sent = await db.sendChatMessage(openId, body)
@@ -148,7 +173,7 @@ export default function Chats({ identity, configured, autoOpen, onAutoOpened }: 
     } finally {
       setSending(false)
     }
-  }, [draft, openId, sending, identity?.name])
+  }, [draft, openId, sending, openStatus, openMine, identity?.name])
 
   const addGroupMember = useCallback(async () => {
     if (!identity) return
@@ -210,7 +235,6 @@ export default function Chats({ identity, configured, autoOpen, onAutoOpened }: 
       <div className={`chats-list-pane ${mobileThread ? 'thread-open' : ''}`}>
         <div className="chats-list-head">
           <h1>Chats</h1>
-          <span className="chats-kicker">DIRECT · GROUPS</span>
           <button className="new-group-button" onClick={() => { setGroupPanel(v => !v); setGroupError(null) }}>
             <Users size={15}/><span>New group</span>
           </button>
@@ -276,6 +300,8 @@ export default function Chats({ identity, configured, autoOpen, onAutoOpened }: 
               </span>
               <span className="chat-row-meta">
                 <small>{conversation.lastAt ? relativeTime(conversation.lastAt) : ''}</small>
+                {conversation.status === 'pending' && <i className="request-tag">{conversation.iRequested ? 'Sent' : 'Request'}</i>}
+                {conversation.status === 'declined' && <i className="request-tag declined-tag">Declined</i>}
                 {conversation.unread > 0 && <i className="unread-pill">{conversation.unread}</i>}
               </span>
             </button>
@@ -325,15 +351,39 @@ export default function Chats({ identity, configured, autoOpen, onAutoOpened }: 
               })}
             </div>
 
+            {(openStatus === 'pending' || openStatus === 'declined') && openSummary?.kind === 'dm' && (
+              <div className={`chat-request-banner ${openStatus === 'declined' ? 'declined' : ''}`}>
+                {openStatus === 'declined' ? (
+                  <span>{openMine ? 'Your chat request was not accepted — sending is closed.' : 'You declined this chat request.'}</span>
+                ) : openMine ? (
+                  <span>Chat request sent — {peerName} needs to accept before the chat opens.</span>
+                ) : (
+                  <>
+                    <span>{peerName} wants to chat with you.</span>
+                    <button className="chat-request-accept" onClick={() => void respondRequest('accept')}>Accept</button>
+                    <button className="chat-request-decline" onClick={() => void respondRequest('decline')}>Decline</button>
+                  </>
+                )}
+              </div>
+            )}
+
             <div className="chat-input-row">
               <input
                 value={draft}
                 onChange={event => setDraft(event.target.value)}
                 onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() } }}
-                placeholder={`Message ${peerName}…`}
+                placeholder={sendBlocked
+                  ? (openStatus === 'unknown' ? 'Loading conversation…' : 'Accept the chat request to reply')
+                  : `Message ${peerName}…`}
                 maxLength={2000}
+                disabled={sendBlocked}
               />
-              <button className="chat-send" aria-label="Send message" disabled={sending || !draft.trim()} onClick={() => void send()}>
+              <button
+                className="chat-send"
+                aria-label="Send message"
+                disabled={sending || !draft.trim() || sendBlocked}
+                onClick={() => void send()}
+              >
                 {sending ? <span className="mini-spinner"/> : <Send size={17}/>}
               </button>
             </div>

@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, MessageCircle, Pencil, Send, Trash2, X } from 'lucide-react'
+import { BadgeCheck, Check, Heart, MessageCircle, Pencil, Pin, Send, Trash2, X } from 'lucide-react'
 import {
   addComment, deleteComment, fetchComments, friendlyMessage, relativeTime,
-  updateComment, type CampusComment,
+  setCommentPinned, toggleCommentLike, updateComment, type CampusComment,
 } from '../lib/db'
 import type { CampusPost } from '../types'
 
@@ -19,11 +19,13 @@ type CommentsSheetProps = {
   onCountChange: (count: number) => void
 }
 
+type ThreadRow = { parent: CampusComment; replies: CampusComment[] }
+
 /**
- * Comment thread for any post kind (text / image / reel). One component for
- * both themes: the feed uses the standard light bottom sheet, Discover opens
- * it in the dark reels theme. Edit + delete are only offered on your own
- * comments, with the same "edited · time" marker used by posts.
+ * Instagram-style comment thread for any post kind (text / image / reel):
+ * replies to comments (one level), comment likes, and pinning by the post
+ * author. One component for both themes: the feed uses the light bottom
+ * sheet, Discover opens it in the dark reels theme.
  */
 export default function CommentsSheet({
   post, userId, identity, requireAuth, theme = 'light', onClose, onCountChange,
@@ -37,7 +39,13 @@ export default function CommentsSheet({
   const [editDraft, setEditDraft] = useState('')
   const [editBusy, setEditBusy] = useState(false)
   const [armedDelete, setArmedDelete] = useState<string | null>(null)
+  const [replyTo, setReplyTo] = useState<CampusComment | null>(null)
+  const [pinBusy, setPinBusy] = useState<string | null>(null)
+  /** parent comment ids whose replies are slid open (Instagram: closed by default) */
+  const [openReplies, setOpenReplies] = useState<Set<string>>(new Set())
   const listRef = useRef<HTMLDivElement | null>(null)
+
+  const isPostAuthor = Boolean(userId && !post.anonymous && post.authorId && post.authorId === userId)
 
   const load = async () => {
     setLoading(true)
@@ -55,11 +63,43 @@ export default function CommentsSheet({
 
   useEffect(() => { void load() /* eslint-disable-line react-hooks/exhaustive-deps */ }, [post.id])
 
-  // Newest comment is at the bottom — keep the thread scrolled to it.
+  // threads render top but a new comment/reply lands at the bottom — keep seen
+  const grouped = useMemo<ThreadRow[]>(() => {
+    const parents = comments.filter(c => !c.parentId)
+    const byParent = new Map<string, CampusComment[]>()
+    for (const c of comments) {
+      if (!c.parentId) continue
+      const list = byParent.get(c.parentId) ?? []
+      list.push(c)
+      byParent.set(c.parentId, list)
+    }
+    return parents.map(parent => ({ parent, replies: byParent.get(parent.id) ?? [] }))
+      .sort((a, b) => Number(Boolean(b.parent.pinnedAt)) - Number(Boolean(a.parent.pinnedAt)))
+  }, [comments])
+
   useEffect(() => {
     const list = listRef.current
     if (list) list.scrollTop = list.scrollHeight
   }, [comments.length, loading])
+
+  const toggleReplies = (parentId: string) => {
+    setOpenReplies(current => {
+      const next = new Set(current)
+      if (next.has(parentId)) next.delete(parentId)
+      else next.add(parentId)
+      return next
+    })
+  }
+
+  /** Replying always targets a parent (one level deep, server-enforced) —
+   *  a reply button on a reply answers that thread's parent. */
+  const startReply = (comment: CampusComment) => {
+    const target = comment.parentId
+      ? comments.find(c => c.id === comment.parentId) ?? comment
+      : comment
+    setReplyTo(target)
+    setOpenReplies(current => new Set(current).add(target.id))
+  }
 
   const armDelete = (id: string) => {
     setArmedDelete(id)
@@ -75,10 +115,16 @@ export default function CommentsSheet({
       const created = await addComment(
         post.id, userId, body,
         identity.name, identity.username,
+        replyTo?.id ?? null,
       )
       setComments(current => [...current, created])
       onCountChange(comments.length + 1)
       setDraft('')
+      if (replyTo) {
+        // slide the thread open so the new reply is visible where it lands
+        setOpenReplies(current => new Set(current).add(replyTo.id))
+        setReplyTo(null)
+      }
     } catch (err) {
       setError(friendlyMessage(err))
     } finally {
@@ -110,15 +156,49 @@ export default function CommentsSheet({
   }
 
   const remove = async (comment: CampusComment) => {
+    // deleting a parent takes its replies with it (server cascade)
     if (armedDelete !== comment.id) { armDelete(comment.id); return }
     try {
       await deleteComment(comment.id)
-      setComments(current => current.filter(c => c.id !== comment.id))
-      onCountChange(Math.max(0, comments.length - 1))
+      const removedCount = comment.parentId
+        ? 1
+        : 1 + (grouped.find(row => row.parent.id === comment.id)?.replies.length ?? 0)
+      setComments(current => current.filter(c => c.id !== comment.id && c.parentId !== comment.id))
+      onCountChange(Math.max(0, comments.length - removedCount))
     } catch (err) {
       setError(friendlyMessage(err))
     } finally {
       setArmedDelete(null)
+    }
+  }
+
+  const like = async (comment: CampusComment) => {
+    if (!userId) { requireAuth('like comments'); return }
+    const target = !comment.likedByMe
+    setComments(current => current.map(c => c.id === comment.id
+      ? { ...c, likedByMe: target, likes: c.likes + (target ? 1 : -1) }
+      : c))
+    try {
+      await toggleCommentLike(comment.id, userId, target)
+    } catch (err) {
+      setError(friendlyMessage(err))
+      setComments(current => current.map(c => c.id === comment.id
+        ? { ...c, likedByMe: comment.likedByMe, likes: comment.likes }
+        : c))
+    }
+  }
+
+  const pin = async (comment: CampusComment) => {
+    if (!isPostAuthor) return
+    setPinBusy(comment.id)
+    try {
+      await setCommentPinned(comment.id, !comment.pinnedAt)
+      // refetch so the pinned comment moves with real server state
+      await load()
+    } catch (err) {
+      setError(friendlyMessage(err))
+    } finally {
+      setPinBusy(null)
     }
   }
 
@@ -127,6 +207,65 @@ export default function CommentsSheet({
       event.preventDefault()
       void submit()
     }
+  }
+
+  const renderBody = (comment: CampusComment, isReply: boolean) => {
+    const isOwn = Boolean(userId && comment.authorId === userId)
+    const editing = editingId === comment.id
+    return (
+      <div className={`comment-row ${isReply ? 'reply' : ''}`} key={comment.id}>
+        <span className="comment-avatar">{comment.initials}</span>
+        <div className="comment-main">
+          {comment.pinnedAt && <span className="comment-pinned"><Pin size={11}/> Pinned</span>}
+          {editing ? (
+            <div className="comment-edit">
+              <textarea value={editDraft} onChange={e => setEditDraft(e.target.value)} rows={2} maxLength={500} autoFocus/>
+              <div className="comment-edit-actions">
+                <button className="comment-mini" onClick={() => { setEditingId(null); setEditDraft('') }}>Cancel</button>
+                <button className="comment-mini primary" disabled={editBusy} onClick={() => void saveEdit(comment)}>
+                  {editBusy ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="comment-head">
+                <b>{comment.author}</b>
+                {comment.authorVerified && <BadgeCheck size={13} className="verified-tick"/>}
+                {comment.handle && <span>{comment.handle}</span>}
+                <span className="comment-time">· {comment.time}</span>
+                {comment.editedAt && <span className="comment-time">· edited {relativeTime(comment.editedAt)}</span>}
+              </div>
+              <p className="comment-body">{comment.body}</p>
+              <div className="comment-tools">
+                <button onClick={() => startReply(comment)}>Reply</button>
+                {isPostAuthor && (
+                  <button disabled={pinBusy !== null} onClick={() => void pin(comment)}>
+                    <Pin size={12}/> {comment.pinnedAt ? 'Unpin' : 'Pin'}
+                  </button>
+                )}
+                {isOwn && (
+                  <>
+                    <button onClick={() => startEdit(comment)}><Pencil size={13}/> Edit</button>
+                    <button className={armedDelete === comment.id ? 'armed' : ''} onClick={() => void remove(comment)}>
+                      {armedDelete === comment.id ? <><Check size={13}/> Tap again</> : <><Trash2 size={13}/> Delete</>}
+                    </button>
+                  </>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+        <button
+          className={`comment-like ${comment.likedByMe ? 'on' : ''}`}
+          onClick={() => void like(comment)}
+          aria-label={comment.likedByMe ? 'Unlike comment' : 'Like comment'}
+        >
+          <Heart size={13} fill={comment.likedByMe ? 'currentColor' : 'none'}/>
+          {comment.likes > 0 && <span>{comment.likes}</span>}
+        </button>
+      </div>
+    )
   }
 
   return createPortal(
@@ -152,47 +291,36 @@ export default function CommentsSheet({
           {!loading && !error && comments.length === 0 && (
             <p className="comments-empty"><MessageCircle size={26}/><b>No comments yet</b><span>Be the first to reply — keep it kind.</span></p>
           )}
-          {comments.map(comment => {
-            const isOwn = Boolean(userId && comment.authorId === userId)
-            const editing = editingId === comment.id
+          {!loading && !error && grouped.map(row => {
+            const open = openReplies.has(row.parent.id)
+            const count = row.replies.length
             return (
-              <div className="comment-row" key={comment.id}>
-                <span className="comment-avatar">{comment.initials}</span>
-                <div className="comment-main">
-                  {editing ? (
-                    <div className="comment-edit">
-                      <textarea value={editDraft} onChange={e => setEditDraft(e.target.value)} rows={2} maxLength={500} autoFocus/>
-                      <div className="comment-edit-actions">
-                        <button className="comment-mini" onClick={() => { setEditingId(null); setEditDraft('') }}>Cancel</button>
-                        <button className="comment-mini primary" disabled={editBusy} onClick={() => void saveEdit(comment)}>
-                          {editBusy ? 'Saving…' : 'Save'}
-                        </button>
-                      </div>
+              <div className="comment-thread" key={row.parent.id}>
+                {renderBody(row.parent, false)}
+                {count > 0 && (
+                  <button className="comment-view-replies" onClick={() => toggleReplies(row.parent.id)}>
+                    <i className={open ? 'up' : ''}/>
+                    {open ? 'Hide replies' : `View ${count} ${count === 1 ? 'reply' : 'replies'}`}
+                  </button>
+                )}
+                {count > 0 && (
+                  <div className={`comment-replies ${open ? 'open' : ''}`}>
+                    <div className="comment-replies-inner">
+                      {row.replies.map(reply => renderBody(reply, true))}
                     </div>
-                  ) : (
-                    <>
-                      <div className="comment-head">
-                        <b>{comment.author}</b>
-                        {comment.handle && <span>{comment.handle}</span>}
-                        <span className="comment-time">· {comment.time}</span>
-                        {comment.editedAt && <span className="comment-time">· edited {relativeTime(comment.editedAt)}</span>}
-                      </div>
-                      <p className="comment-body">{comment.body}</p>
-                      {isOwn && (
-                        <div className="comment-own-actions">
-                          <button onClick={() => startEdit(comment)}><Pencil size={13}/> Edit</button>
-                          <button className={armedDelete === comment.id ? 'armed' : ''} onClick={() => void remove(comment)}>
-                            {armedDelete === comment.id ? <><Check size={13}/> Tap again</> : <><Trash2 size={13}/> Delete</>}
-                          </button>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             )
           })}
         </div>
+
+        {replyTo && (
+          <div className="replying-banner">
+            <span>Replying to <b>{replyTo.author}</b></span>
+            <button onClick={() => setReplyTo(null)}>Cancel</button>
+          </div>
+        )}
 
         <div className="comment-composer">
           <span className="comment-avatar you">{identity.initials}</span>
@@ -201,7 +329,9 @@ export default function CommentsSheet({
             value={draft}
             onChange={e => setDraft(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder={post.anonymous ? 'Reply to this confession…' : 'Add a comment…'}
+            placeholder={replyTo
+              ? `Reply to ${replyTo.author}…`
+              : post.anonymous ? 'Reply to this confession…' : 'Add a comment…'}
             maxLength={500}
             rows={1}
           />
@@ -209,7 +339,7 @@ export default function CommentsSheet({
             className="comment-send"
             disabled={busy || !draft.trim()}
             onClick={() => void submit()}
-            aria-label="Post comment"
+            aria-label={replyTo ? 'Post reply' : 'Post comment'}
           >
             <Send size={16}/>
           </button>
