@@ -19,6 +19,7 @@ import ReelTrim from './components/ReelTrim'
 import ReelPlayer from './components/ReelPlayer'
 import ReelsFeed from './components/ReelsFeed'
 import CommentsSheet from './components/CommentsSheet'
+import Chats from './components/Chats'
 import ReportDialog, { type ReportTarget } from './components/ReportDialog'
 import type { CampusPost, PostKind } from './types'
 import * as media from './lib/media'
@@ -107,6 +108,7 @@ function CAMPUSApp() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [mobileMenu, setMobileMenu] = useState(false)
+  const [openChatId, setOpenChatId] = useState<string | null>(null)
   const [following, setFollowing] = useState<string[]>([])
   const [blockedHandles, setBlockedHandles] = useState<string[]>([])
   const [mutedHandles, setMutedHandles] = useState<string[]>([])
@@ -304,6 +306,26 @@ function CAMPUSApp() {
       excerpt: post.body.slice(0, 160),
     })
   }
+  // Open (or reuse) a 1:1 chat with a post's author, then land in Chats.
+  const messageAuthor = async (post: CampusPost) => {
+    if (!requireAuth('message the author')) return
+    if (!user) return
+    if (!post.handle || post.anonymous || !post.authorId) {
+      flash('Confessions are anonymous, so the author has no chat to open.')
+      return
+    }
+    if (post.authorId === user.id) {
+      flash('That is your own post — your chats are with classmates.')
+      return
+    }
+    try {
+      const conversationId = await db.openDm(post.authorId)
+      setOpenChatId(conversationId)
+      navigate('Chats')
+    } catch (error) {
+      flash(db.friendlyMessage(error))
+    }
+  }
   const setRelation = async (table: 'user_blocks' | 'user_mutes', post: CampusPost) => {
     const isBlock = table === 'user_blocks'
     const verb = isBlock ? 'block' : 'mute'
@@ -412,7 +434,7 @@ function CAMPUSApp() {
     }
     setActiveNav(label)
     if (label === 'Search') setSearchOpen(true)
-    if (scaffoldNav.includes(label)) flash(`${label} is coming soon.`)
+    if (scaffoldNav.includes(label) && label !== 'Chats') flash(`${label} is coming soon.`)
   }
 
   /* ---- mobile swipe navigation (touch only, viewport ≤ 650px) -------------
@@ -1071,6 +1093,7 @@ function CAMPUSApp() {
               onMute={() => void setRelation('user_mutes', post)}
               onEdit={() => startEditPost(post)}
               onDelete={() => setDeleteTarget(post)}
+              onMessage={() => void messageAuthor(post)}
             />) :
               feedSource === 'db'
                 ? <div className="empty-state"><Sparkles size={28}/><b>No posts yet</b><span>Be the first to post to your campus.</span></div>
@@ -1087,7 +1110,9 @@ function CAMPUSApp() {
                 onReport={openReport}
                 onCreateReel={() => openComposer('reel')}
               />
-            : infoNav.includes(activeNav)
+            : activeNav === 'Chats'
+              ? <Chats key={openChatId ?? 'list'} identity={identity && user ? { id: user.id, name: identity.name, username: identity.username, initials: identity.initials } : null} configured={configured} autoOpen={openChatId} onAutoOpened={() => setOpenChatId(null)} />
+              : infoNav.includes(activeNav)
               ? <InfoPage name={activeNav}/>
               : <SectionPage name={activeNav} onCreate={openComposer} onSignIn={() => setAuthMode('signup')} isMember={status === 'member'} displayName={identity.name} />}
       </main>
@@ -1282,7 +1307,7 @@ function CAMPUSApp() {
   )
 }
 
-function PostCard({post,isOwn,onLike,onSave,onComment,onShare,onReport,onRepost,onBlock,onMute,onEdit,onDelete}:{post:CampusPost;isOwn:boolean;onLike:()=>void;onSave:()=>void;onComment:()=>void;onShare:()=>void;onReport:()=>void;onRepost:()=>void;onBlock:()=>void;onMute:()=>void;onEdit:()=>void;onDelete:()=>void}) {
+function PostCard({post,isOwn,onLike,onSave,onComment,onShare,onReport,onRepost,onBlock,onMute,onEdit,onDelete,onMessage}:{post:CampusPost;isOwn:boolean;onLike:()=>void;onSave:()=>void;onComment:()=>void;onShare:()=>void;onReport:()=>void;onRepost:()=>void;onBlock:()=>void;onMute:()=>void;onEdit:()=>void;onDelete:()=>void;onMessage:()=>void}) {
   const [menuOpen,setMenuOpen] = useState(false)
   const [slide,setSlide] = useState(0)
   const slides = post.media ?? []
@@ -1318,7 +1343,7 @@ function PostCard({post,isOwn,onLike,onSave,onComment,onShare,onReport,onRepost,
   return <article className="post-card">
     <div className={`avatar post-avatar ${post.anonymous?'anonymous-avatar':''}`}>{post.anonymous?<BookOpen size={21}/>:post.initials}</div>
     <div className="post-content">
-      <div className="post-head"><div className="post-author-line"><b>{post.author}</b>{post.handle&&<span>{post.handle}</span>}<i>·</i><span>{post.time}</span>{post.editedAt&&<><i>·</i><span className="edited-marker">edited {db.relativeTime(post.editedAt)}</span></>}{post.college&&<><i>·</i><span>{post.college}</span></>}</div><button className="icon-button more-button" onClick={() => setMenuOpen(v=>!v)} aria-label="More options"><MoreHorizontal size={20}/></button>{menuOpen&&<div className="post-menu">{isOwn&&<button onClick={()=>{onEdit();setMenuOpen(false)}}><Pencil size={15}/> Edit post</button>}{isOwn&&<button className="danger" onClick={()=>{onDelete();setMenuOpen(false)}}><Trash2 size={15}/> Delete post</button>}<button onClick={()=>{onReport();setMenuOpen(false)}}><Flag size={15}/> Report post</button><button onClick={()=>{onShare();setMenuOpen(false)}}><Share2 size={15}/> Copy post text</button>{canActOnAuthor&&<button onClick={()=>{onMute();setMenuOpen(false)}}><VolumeX size={15}/> Mute {post.handle}</button>}{canActOnAuthor&&<button onClick={()=>{onBlock();setMenuOpen(false)}}><EyeOff size={15}/> Block {post.handle}</button>}</div>}</div>
+      <div className="post-head"><div className="post-author-line"><b>{post.author}</b>{post.handle&&<span>{post.handle}</span>}<i>·</i><span>{post.time}</span>{post.editedAt&&<><i>·</i><span className="edited-marker">edited {db.relativeTime(post.editedAt)}</span></>}{post.college&&<><i>·</i><span>{post.college}</span></>}</div><button className="icon-button more-button" onClick={() => setMenuOpen(v=>!v)} aria-label="More options"><MoreHorizontal size={20}/></button>{menuOpen&&<div className="post-menu">{isOwn&&<button onClick={()=>{onEdit();setMenuOpen(false)}}><Pencil size={15}/> Edit post</button>}{isOwn&&<button className="danger" onClick={()=>{onDelete();setMenuOpen(false)}}><Trash2 size={15}/> Delete post</button>}<button onClick={()=>{onReport();setMenuOpen(false)}}><Flag size={15}/> Report post</button><button onClick={()=>{onShare();setMenuOpen(false)}}><Share2 size={15}/> Copy post text</button>{canActOnAuthor&&<button onClick={()=>{onMute();setMenuOpen(false)}}><VolumeX size={15}/> Mute {post.handle}</button>}{canActOnAuthor&&<button onClick={()=>{onBlock();setMenuOpen(false)}}><EyeOff size={15}/> Block {post.handle}</button>}{canActOnAuthor&&!isOwn&&<button onClick={()=>{onMessage();setMenuOpen(false)}}><MessageCircle size={15}/> Message {post.handle}</button>}</div>}</div>
       {(post.trending || post.anonymous || post.tag) && <div className="post-badges">{post.trending&&<span className="badge trending-badge"><Sparkles size={12}/> Trending</span>}{post.anonymous&&<span className="badge confession-badge">😳 Confession</span>}{post.tag&&<span className="badge college-badge">{post.tag}</span>}</div>}
       {slides.length === 0 && <p className="post-body">{post.body}</p>}
       {mediaBlock}

@@ -627,6 +627,204 @@ export async function fetchTrendingTags(limit = 8): Promise<[string, number][]> 
 
 export type FollowSuggestion = { username: string; name: string }
 
+/* -------------------------------------------------------------------------- */
+/* Chats (1:1 direct messages)                                                 */
+/* -------------------------------------------------------------------------- */
+
+export type ChatSummary = {
+  id: string
+  kind: 'dm' | 'group'
+  title: string | null
+  peerId: string | null
+  peerName: string
+  peerUsername: string
+  memberCount: number
+  lastBody: string | null
+  lastAt: string | null
+  unread: number
+}
+
+export type ChatMessage = {
+  id: string
+  conversationId: string
+  senderId: string | null
+  senderName: string
+  body: string
+  createdAt: string
+  editedAt: string | null
+}
+
+type ChatMessageRow = {
+  id: string
+  conversation_id: string
+  sender_id: string | null
+  sender_username: string | null
+  sender_display_name: string | null
+  body: string
+  created_at: string
+  edited_at: string | null
+}
+
+export function mapChatMessage(row: ChatMessageRow): ChatMessage {
+  const name = row.sender_display_name?.trim() || 'Student'
+  return {
+    id: row.id,
+    conversationId: row.conversation_id,
+    senderId: row.sender_id,
+    senderName: name,
+    body: row.body,
+    createdAt: row.created_at,
+    editedAt: row.edited_at,
+  }
+}
+
+function mapConversationRow(row: Record<string, unknown>): ChatSummary {
+  const kind = row.kind === 'group' ? 'group' : 'dm'
+  const username = ((row.peer_username as string) ?? '')
+  const displayName = ((row.display_name as string) ?? '').trim()
+  return {
+    id: row.conversation_id as string,
+    kind,
+    title: (row.title as string) ?? null,
+    peerId: kind === 'dm' ? ((row.peer_id as string) ?? null) : null,
+    peerName: displayName || (username ? `@${username}` : 'Classmate'),
+    peerUsername: kind === 'dm' ? username : '',
+    memberCount: Number(row.member_count ?? 0),
+    lastBody: (row.last_body as string) ?? null,
+    lastAt: (row.last_at as string) ?? null,
+    unread: Number(row.unread_count ?? 0),
+  }
+}
+
+/**
+ * Open (or reuse) the 1:1 conversation between the signed-in member and
+ * another member. Returns the conversation id; creates the pair atomically
+ * server-side via the open_dm() RPC (migration 0006).
+ */
+export async function openDm(otherUserId: string): Promise<string> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('open_dm', { p_other: otherUserId })
+  if (error) throw new Error(friendlyMessage(error))
+  if (!data) throw new Error('The chat could not be opened.')
+  return data as string
+}
+
+/**
+ * The Chats list: 1:1 conversations and group chats, newest activity first.
+ * Club conversations are never returned here (kind filter server-side).
+ */
+export async function fetchConversations(): Promise<ChatSummary[]> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('list_conversations')
+  if (error) throw new Error(friendlyMessage(error))
+  return ((data ?? []) as Record<string, unknown>[]).map(mapConversationRow)
+}
+
+/**
+ * Create a group chat: the caller becomes admin, listed classmates join as
+ * members. Returns the conversation id.
+ */
+export async function createGroup(title: string, memberIds: string[]): Promise<string> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('create_group', {
+    p_title: title,
+    p_members: memberIds,
+  })
+  if (error) throw new Error(friendlyMessage(error))
+  if (!data) throw new Error('The group could not be created.')
+  return data as string
+}
+
+/**
+ * Message history for one conversation, newest last; pass `beforeIso` to
+ * page further back in time. Errors if the caller is not a member.
+ */
+export async function fetchChatMessages(
+  conversationId: string,
+  beforeIso?: string | null,
+  limit = 40,
+): Promise<ChatMessage[]> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('list_chat_messages', {
+    p_conversation: conversationId,
+    p_before: beforeIso ?? null,
+    p_limit: limit,
+  })
+  if (error) throw new Error(friendlyMessage(error))
+  return ((data ?? []) as ChatMessageRow[])
+    .map(mapChatMessage)
+    .reverse() // chronological order in the thread
+}
+
+/** Send one message; RLS guarantees sender = caller and membership. */
+export async function sendChatMessage(conversationId: string, body: string): Promise<ChatMessage> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase
+    .from('chat_messages')
+    .insert({ conversation_id: conversationId, body })
+    .select('id, conversation_id, sender_id, body, created_at, edited_at')
+    .single()
+  if (error) throw new Error(friendlyMessage(error))
+  const row = (data ?? {}) as Record<string, unknown>
+  // sender name comes from identity at call site; db lookup not needed
+  return mapChatMessage({
+    id: row.id as string,
+    conversation_id: row.conversation_id as string,
+    sender_id: row.sender_id as string | null,
+    sender_username: null,
+    sender_display_name: null,
+    body: row.body as string,
+    created_at: row.created_at as string,
+    edited_at: (row.edited_at as string | null) ?? null,
+  })
+}
+
+/** Mark a conversation read by the caller (drives unread badges). */
+export async function markConversationRead(conversationId: string): Promise<void> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { error } = await supabase
+    .from('conversation_members')
+    .update({ last_read_at: new Date().toISOString() })
+    .eq('conversation_id', conversationId)
+  if (error) throw new Error(friendlyMessage(error))
+}
+
+/**
+ * Live message stream for one conversation via Supabase Realtime.
+ * Returns an unsubscribe function; callers dedupe by message id.
+ */
+export function subscribeChatMessages(
+  conversationId: string,
+  onInsert: (message: ChatMessage) => void,
+): () => void {
+  if (!supabase) return () => {}
+  const client = supabase
+  const channel = client
+    .channel(`chat:${conversationId}`)
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `conversation_id=eq.${conversationId}` },
+      payload => {
+        const row = payload.new as Record<string, unknown>
+        if (!row?.id) return
+        onInsert(mapChatMessage({
+          id: row.id as string,
+          conversation_id: conversationId,
+          sender_id: (row.sender_id as string | null) ?? null,
+          sender_username: null,
+          sender_display_name: null,
+          body: (row.body as string) ?? '',
+          created_at: (row.created_at as string) ?? new Date().toISOString(),
+          edited_at: (row.edited_at as string | null) ?? null,
+        }))
+      },
+    )
+    .subscribe()
+  return () => {
+    void client.removeChannel(channel)
+  }
+}
+
 /**
  * Real follow suggestions: actual member profiles, same college first.
  * Excludes the signed-in user. Private profiles are skipped — there is no
