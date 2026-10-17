@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react'
+import { useEffect, useMemo, useLayoutEffect, useRef, useState, useCallback, type ReactNode } from 'react'
 import {
   Home, Compass, Sparkles, Users, CalendarDays, Trophy, BriefcaseBusiness,
   CircleDollarSign, BookOpen, MessageCircle, Bell, Bookmark, Search, Building2,
@@ -65,6 +65,10 @@ export default function App() {
     </AuthProvider>
   )
 }
+
+/** Pages already reachable from the persistent mobile chrome (bottom nav +
+ * header icons), so they are dropped from the mobile drawer to avoid duplicates. */
+const navOnMainUi = ['Home', 'Discover', 'Chats', 'Notifications', 'Search']
 
 function CAMPUSApp() {
   const auth = useAuth()
@@ -357,6 +361,11 @@ function CAMPUSApp() {
     }
   }
 
+  /** Each page remembers its scroll depth: on mobile the browser toolbars
+   * expand/collapse when the page scroll jumps, which makes the fixed bottom
+   * nav visibly slide. Restoring the previous depth keeps switching calm. */
+  const pageScrollMemory = useRef<Record<string, number>>({})
+
   const navigate = (label: string) => {
     setMobileMenu(false)
     if (restrictedNav.includes(label) && status !== 'member') {
@@ -368,6 +377,11 @@ function CAMPUSApp() {
         label,
       )
       return
+    }
+    if (label !== activeNav) {
+      const isMobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 650px)').matches
+      const scroller = isMobile ? mainRef.current : null
+      pageScrollMemory.current[activeNav] = scroller ? scroller.scrollTop : window.scrollY
     }
     setActiveNav(label)
     if (label === 'Search') setSearchOpen(true)
@@ -385,6 +399,17 @@ function CAMPUSApp() {
   const mainRef = useRef<HTMLElement | null>(null)
   const sidebarRef = useRef<HTMLElement | null>(null)
   const [slideDir, setSlideDir] = useState<'none' | 'from-right' | 'from-left'>('none')
+
+  // restore each page's scroll depth synchronously before paint (mobile only —
+  // the pages now scroll inside .main-column, so the window never scrolls and
+  // the browser toolbar — and with it the fixed bottom nav — can never move)
+  useLayoutEffect(() => {
+    if (!window.matchMedia('(max-width: 650px)').matches) return
+    const scroller = mainRef.current
+    if (!scroller) return
+    const saved = pageScrollMemory.current[activeNav]
+    scroller.scrollTop = typeof saved === 'number' ? saved : 0
+  }, [activeNav])
   const slideTimer = useRef<number | null>(null)
   const swipe = useRef({
     startX: 0, startY: 0, lastX: 0, lastT: 0, prevX: 0, prevT: 0,
@@ -405,6 +430,25 @@ function CAMPUSApp() {
     if (main) { main.classList.remove('swiping'); main.style.transform = '' }
     const sidebar = sidebarRef.current
     if (sidebar) { sidebar.classList.remove('swiping'); sidebar.style.transform = ''; sidebar.style.transition = '' }
+  }
+
+  /** Atomic reset used at the start of every touch: kills any in-flight slide
+   * animation, pending drag timers and leftover transforms so rapid or
+   * overlapping gestures can never compound into a broken UI state. */
+  const pendingDragTimers = useRef<number[]>([])
+  const queueDragCleanup = (fn: () => void, ms: number) => {
+    const id = window.setTimeout(() => {
+      pendingDragTimers.current = pendingDragTimers.current.filter(t => t !== id)
+      fn()
+    }, ms)
+    pendingDragTimers.current.push(id)
+  }
+  const resetDragAndAnimations = () => {
+    if (slideTimer.current) { window.clearTimeout(slideTimer.current); slideTimer.current = null }
+    for (const id of pendingDragTimers.current) window.clearTimeout(id)
+    pendingDragTimers.current = []
+    setSlideDir('none')
+    clearDragStyles()
   }
 
   const neighborPage = (dx: number): string | null => {
@@ -439,6 +483,8 @@ function CAMPUSApp() {
         swipe.current.active = false
         return
       }
+      // every new touch starts from a guaranteed-clean visual state
+      resetDragAndAnimations()
       const touch = event.touches[0]
       swipe.current = {
         startX: touch.clientX, startY: touch.clientY,
@@ -457,8 +503,12 @@ function CAMPUSApp() {
 
       if (!state.mode) {
         if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-          // The left edge belongs to the nav drawer; everywhere else is paging
-          state.mode = dx > 0 && state.startX < 44 ? 'sidebar' : 'page'
+          // rightward pulls belong to the nav drawer on Home; every other
+          // page flip is handled as paging (so back-swipes work from the edge)
+          state.mode = dx > 0 && activeNavRef.current === 'Home' ? 'sidebar' : 'page'
+        } else if (dx > 14 && dx > Math.abs(dy) && activeNavRef.current === 'Home') {
+          // eased pull so the drawer opens even from a sloppier horizontal drag
+          state.mode = 'sidebar'
         } else if (Math.abs(dy) > 14) {
           state.active = false // vertical scroll — never hijack
           return
@@ -473,6 +523,11 @@ function CAMPUSApp() {
       state.prevX = touch.clientX; state.prevT = now
       state.dx = dx
       state.lastX = touch.clientX; state.lastT = now
+
+      // once the gesture is ours, the page must not scroll natively — this
+      // keeps Chrome's toolbar (and the fixed bottom nav anchored to it)
+      // perfectly still during the drag
+      event.preventDefault()
 
       const width = main.clientWidth
       if (state.mode === 'page') {
@@ -499,33 +554,30 @@ function CAMPUSApp() {
       if (state.mode === 'page') {
         const commit = Math.abs(state.dx) > width * 0.24 || Math.abs(state.vel) > 0.55
         const target = commit ? neighborPage(state.dx) : null
-        if (target && state.dx < 0) {
-          // current page slides off to the left, then the next page slides in
-          main.style.transform = `translateX(${-width}px)`
-          window.setTimeout(() => {
-            clearDragStyles()
-            navigateRef.current(target)
-            beginSlide('from-right')
-          }, 170)
-        } else if (target && state.dx > 0) {
-          main.style.transform = `translateX(${width}px)`
-          window.setTimeout(() => {
-            clearDragStyles()
-            navigateRef.current(target)
-            beginSlide('from-left')
-          }, 170)
+        if (target) {
+          // synchronous commit: clear drag state and navigate in one go.
+          // No pending timers — fast repeated swipes can never double-fire,
+          // teleport the page off-screen or corrupt the layout under the
+          // fixed bottom nav.
+          clearDragStyles()
+          navigateRef.current(target)
+          beginSlide(state.dx < 0 ? 'from-right' : 'from-left')
         } else {
           clearDragStyles() // spring back
         }
       } else {
         const sidebar = sidebarRef.current
         const open = state.dx > width * 0.28 || state.vel > 0.55
-        if (open) {
+        if (open && sidebar) {
+          // keep the dragged position, hand control back to the CSS
+          // transition so the drawer glides the last bit instead of snapping
+          sidebar.classList.remove('swiping')
+          sidebar.style.transition = 'transform 0.3s cubic-bezier(0.22, 0.61, 0.36, 1)'
           setMobileMenu(true)
-          if (sidebar) {
-            sidebar.style.transform = ''
-            window.setTimeout(() => clearDragStyles(), 340)
-          }
+          queueDragCleanup(() => {
+            if (sidebarRef.current === sidebar) sidebar.style.transform = ''
+            queueDragCleanup(() => clearDragStyles(), 360)
+          }, 30)
         } else {
           clearDragStyles() // slides back under its own transition
         }
@@ -533,7 +585,8 @@ function CAMPUSApp() {
     }
 
     main.addEventListener('touchstart', onSwipeStart, { passive: true })
-    main.addEventListener('touchmove', onSwipeMove, { passive: true })
+    // non-passive so a decided horizontal gesture can freeze native scrolling
+    main.addEventListener('touchmove', onSwipeMove, { passive: false })
     main.addEventListener('touchend', finishOrCancel, { passive: true })
     main.addEventListener('touchcancel', finishOrCancel, { passive: true })
     cleanupRef.current = () => {
@@ -542,6 +595,8 @@ function CAMPUSApp() {
       main.removeEventListener('touchend', finishOrCancel)
       main.removeEventListener('touchcancel', finishOrCancel)
       if (slideTimer.current) window.clearTimeout(slideTimer.current)
+      for (const id of pendingDragTimers.current) window.clearTimeout(id)
+      pendingDragTimers.current = []
     }
   }, [])
 
@@ -858,7 +913,10 @@ function CAMPUSApp() {
   return (
     <div className="app-shell">
       <header className="mobile-header">
-        <button className="brand-mini" onClick={() => navigate('Home')}><span className="brand-mark">C</span><b>CAMPUS</b></button>
+        <div className="mobile-header-left">
+          <button className="icon-button" aria-label="Menu" onClick={() => setMobileMenu(true)}><Menu size={21}/></button>
+          <button className="brand-mini" onClick={() => navigate('Home')}><span className="brand-mark">C</span><b>CAMPUS</b></button>
+        </div>
         <div className="mobile-header-actions">
           <button className="icon-button" aria-label="Search" onClick={() => setSearchOpen(v => { if (v) setSearchQuery(''); return !v })}><Search size={21}/></button>
           <button className="icon-button" aria-label="Notifications" onClick={() => navigate('Notifications')}><Bell size={21}/></button>
@@ -875,7 +933,7 @@ function CAMPUSApp() {
         </div>
         <nav className="primary-nav">
           {navItems.map(({label, icon: Icon}) => (
-            <button key={label} className={`nav-item ${activeNav === label ? 'active' : ''} ${label === 'My College' ? 'nav-labelled' : ''}`} onClick={() => navigate(label)} title={label}>
+            <button key={label} className={`nav-item ${activeNav === label ? 'active' : ''} ${label === 'My College' ? 'nav-labelled' : ''} ${navOnMainUi.includes(label) ? 'nav-on-main-ui' : ''}`} onClick={() => navigate(label)} title={label}>
               <Icon size={21} strokeWidth={activeNav === label ? 2.4 : 2}/><span>{label}</span>
             </button>
           ))}

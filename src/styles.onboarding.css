@@ -1382,6 +1382,53 @@
 /* ---- Mobile swipe navigation + sliding nav drawer (≤650px) ------------------- */
 
 @media (max-width: 650px) {
+  .mobile-header-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* Root scroll lock: pages scroll inside .main-column and the window itself
+     never scrolls. Chrome's auto-hiding toolbar drives the layout viewport
+     height — a fixed bottom nav follows it, which read as the footer sliding
+     in/out of the bottom edge. With nothing scrollable at the root the
+     toolbar (and the footer) stay perfectly still no matter how fast pages
+     are switched. */
+  .app-shell {
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    box-sizing: border-box;
+    padding-top: 50px;
+    padding-bottom: 59px;
+    overflow: hidden;
+  }
+
+  .main-column {
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+    scrollbar-width: none;
+  }
+
+  .main-column::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* own compositing layer — protects the blurred bar from the sibling
+     transform animations, which could otherwise drop its paint */
+  .mobile-bottom-nav {
+    transform: translateZ(0);
+  }
+
+  /* sticky bars now reference the inner container, which already starts
+     below the fixed 50px header */
+  .feed-tabs {
+    top: 0;
+  }
+
   /* the nav drawer lives off-canvas and slides in/out */
   .left-sidebar {
     display: flex;
@@ -1415,6 +1462,82 @@
     top: 8px;
     right: 8px;
     color: #5a6b83;
+  }
+
+  /* labelled drawer: full-width rows with names instead of icon-only strips */
+  .brand {
+    justify-content: flex-start;
+  }
+
+  .brand > span:last-child {
+    display: inline;
+  }
+
+  .primary-nav {
+    align-items: stretch;
+  }
+
+  .nav-item {
+    width: 100%;
+    min-height: 46px;
+    justify-content: flex-start;
+    gap: 16px;
+    padding: 0 16px;
+    border-radius: 13px;
+  }
+
+  .nav-item span {
+    display: inline !important;
+    font-size: 14.5px;
+    font-weight: 600;
+    letter-spacing: -0.1px;
+    white-space: nowrap;
+  }
+
+  .compose-sidebar {
+    width: 100%;
+    min-height: 46px;
+    margin: 15px 0;
+    padding: 0 16px;
+    justify-content: flex-start;
+    gap: 12px;
+    font-size: 14.5px;
+    font-weight: 700;
+  }
+
+  .sidebar-bottom .profile-chip,
+  .profile-chip {
+    width: 100%;
+    justify-content: flex-start;
+    padding: 8px 10px;
+  }
+
+  .profile-chip-copy {
+    display: flex !important;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .profile-chip-copy small {
+    display: block;
+  }
+
+  .sidebar-bottom .profile-chip > svg:last-child {
+    display: inline !important;
+    margin-left: auto;
+  }
+
+  /* these live on the persistent mobile chrome (bottom nav + header) —
+     don't repeat them inside the drawer */
+  .nav-item.nav-on-main-ui {
+    display: none !important;
+  }
+
+  /* create is the bottom-nav "+" button, and sign-out moves to the Profile
+     page when it's built — neither belongs in the mobile drawer */
+  .compose-sidebar,
+  .sidebar-bottom {
+    display: none !important;
   }
 
   .sidebar-scrim {
@@ -2096,11 +2219,12 @@
 }
 
 @media (max-width: 650px) {
-  .reels-stage { top: 50px; height: calc(100vh - 50px); height: calc(100dvh - 50px); }
+  /* the page scroll container already starts below the fixed header and ends
+     above the fixed nav, so the stage simply fills it */
+  .reels-stage { top: 0; height: calc(100vh - 109px); height: calc(100dvh - 109px); }
   .reel-rail { bottom: 74px; right: 8px; }
   .reel-rail-item button { width: 42px; height: 42px; }
   .reel-info { left: 12px; right: 62px; bottom: 78px; }
   .reel-caption { font-size: 12.5px; }
-  /* the nav overlays the bottom 59px — keep the progress line above it */
-  .reel-progressline { bottom: 60px; }
+  .reel-progressline { bottom: 12px; }
 }
