@@ -38,15 +38,12 @@ const navItems = [
   { label:'Bookmarks', icon:Bookmark }, { label:'Search', icon:Search }, { label:'My College', icon:Building2 },
   { label:'Safety Centre', icon:Shield },
 ]
-const trends = [
-  ['#FestSeason','12.4K posts'],['#Placements','8.1K posts'],['#Exams','6.7K posts'],
-  ['#HostelLife','5.3K posts'],['#Internships','4.9K posts'],['#CampusLife','3.2K posts'],
-]
-const suggestions = [{name:'Typical Editing',handle:'@test1',initials:'TE'},{name:'Pranav Salunkhe',handle:'@uatta',initials:'PS'}]
-
 /** Pages that only make sense for a signed-in member (visitor gate applies). */
 const restrictedNav = ['Chats', 'Notifications', 'Bookmarks']
 const allNav = [...navItems.map(item => item.label), 'Profile']
+
+/** System info pages, reachable from the footer. */
+const infoNav = ['About', 'Guidelines', 'Privacy', 'Help']
 
 /** The four primary pages reachable by horizontal swipe on mobile. */
 const swipePageOrder = ['Home', 'Discover', 'Chats', 'Profile']
@@ -209,6 +206,36 @@ function CAMPUSApp() {
   useEffect(() => {
     if (status === 'member' || status === 'visitor') void loadFeed()
   }, [status, user?.id, loadFeed])
+
+  /* ---- real right-panel data -------------------------------------------- */
+
+  const [trends, setTrends] = useState<[string, number][]>([])
+  const [trendsPending, setTrendsPending] = useState(true)
+  const [followPicks, setFollowPicks] = useState<db.FollowSuggestion[]>([])
+  const [followPicksPending, setFollowPicksPending] = useState(true)
+  const [showAllTrends, setShowAllTrends] = useState(false)
+
+  useEffect(() => {
+    if (!configured) return
+    let cancelled = false
+    setTrendsPending(true)
+    db.fetchTrendingTags(8)
+      .then(rows => { if (!cancelled) setTrends(rows) })
+      .catch(() => { /* honest empty panel — no fake trends ever rendered */ })
+      .finally(() => { if (!cancelled) setTrendsPending(false) })
+    return () => { cancelled = true }
+  }, [configured])
+
+  useEffect(() => {
+    if (!configured || status !== 'member' || !user) return
+    let cancelled = false
+    setFollowPicksPending(true)
+    db.fetchFollowSuggestions(user.id, profile?.college_id ?? null, 3)
+      .then(rows => { if (!cancelled) setFollowPicks(rows) })
+      .catch(() => { /* honest empty panel */ })
+      .finally(() => { if (!cancelled) setFollowPicksPending(false) })
+    return () => { cancelled = true }
+  }, [configured, status, user?.id, profile?.college_id])
 
   const visiblePosts = useMemo(() => {
     let result = [...posts]
@@ -938,6 +965,11 @@ function CAMPUSApp() {
             </button>
           ))}
         </nav>
+        <div className="drawer-footer">
+          {infoNav.map(label => (
+            <button key={label} onClick={() => navigate(label)}>{label}</button>
+          ))}
+        </div>
         <button className="compose-sidebar" onClick={() => openComposer()}><Plus size={20}/> Create post</button>
         <div className="sidebar-bottom">
           {status === 'member' && user
@@ -1055,14 +1087,75 @@ function CAMPUSApp() {
                 onReport={openReport}
                 onCreateReel={() => openComposer('reel')}
               />
-            : <SectionPage name={activeNav} onCreate={openComposer} onSignIn={() => setAuthMode('signup')} isMember={status === 'member'} displayName={identity.name} />}
+            : infoNav.includes(activeNav)
+              ? <InfoPage name={activeNav}/>
+              : <SectionPage name={activeNav} onCreate={openComposer} onSignIn={() => setAuthMode('signup')} isMember={status === 'member'} displayName={identity.name} />}
       </main>
 
       <aside className="right-sidebar">
-        <section className="right-panel trends-panel"><h2><TrendingUp size={17}/> Trending on Campus</h2>{trends.map(([tag,count])=><button className="trend-row" key={tag} onClick={() => {setActiveNav('Home');setSearchOpen(true);setSearchQuery(tag.replace('#',''))}}><b>{tag}</b><span>{count}</span></button>)}<button className="see-more" onClick={() => {setActiveNav('Home');setFeedTab('Trending')}}>Show more trends <ArrowLeft size={14}/></button></section>
-        <section className="right-panel follow-panel"><h2>Who to follow</h2>{suggestions.map(person=><div className="suggestion" key={person.handle}><span className="avatar">{person.initials}</span><span className="suggestion-copy"><b>{person.name}</b><small>{person.handle}</small></span><button className={`follow-button ${following.includes(person.handle)?'is-following':''}`} aria-label={following.includes(person.handle)?'Following':'Follow'} onClick={() => toggleFollow(person.handle)}>{following.includes(person.handle)?<Check size={15}/>: 'Follow'}</button></div>)}</section>
+        <section className="right-panel trends-panel">
+          <h2><TrendingUp size={17}/> Trending on Campus</h2>
+          {trends.length === 0 ? (
+            <p className="panel-hint">
+              {trendsPending
+                ? 'Reading the latest posts…'
+                : 'No trends yet — hashtags used in real posts will chart here.'}
+            </p>
+          ) : (
+            <>
+              {trends.slice(0, showAllTrends ? trends.length : 5).map(([tag, count]) => (
+                <button className="trend-row" key={tag} onClick={() => { setActiveNav('Home'); setSearchOpen(true); setSearchQuery(tag) }}>
+                  <b>#{tag}</b>
+                  <span>{count >= 1000 ? `${(count / 1000).toFixed(1)}K posts` : count === 1 ? '1 post' : `${count} posts`}</span>
+                </button>
+              ))}
+              <button className="see-more" onClick={() => setShowAllTrends(value => !value)}>
+                {showAllTrends ? 'Show fewer trends' : 'Show more trends'} <ArrowLeft size={14}/>
+              </button>
+            </>
+          )}
+        </section>
+
+        <section className="right-panel follow-panel">
+          <h2>Who to follow</h2>
+          {status !== 'member' ? (
+            <p className="panel-hint">Join CAMPUS to get follow suggestions from your campus.</p>
+          ) : followPicks.length === 0 ? (
+            <p className="panel-hint">
+              {followPicksPending
+                ? 'Looking for classmates…'
+                : 'No suggestions yet — they appear here as more classmates join.'}
+            </p>
+          ) : (
+            followPicks.map(person => {
+              const initials = db.initialsFor(person.name, person.username)
+              return (
+                <div className="suggestion" key={person.username}>
+                  <span className="avatar">{initials}</span>
+                  <span className="suggestion-copy"><b>{person.name}</b><small>@{person.username}</small></span>
+                  <button
+                    className={`follow-button ${following.includes(person.username) ? 'is-following' : ''}`}
+                    aria-label={following.includes(person.username) ? 'Following' : 'Follow'}
+                    onClick={() => toggleFollow(person.username)}
+                  >
+                    {following.includes(person.username) ? <Check size={15}/> : 'Follow'}
+                  </button>
+                </div>
+              )
+            })
+          )}
+        </section>
+
         <button className="advertise-panel" onClick={() => flash('Campus advertising tools can be added as an admin feature.')}><span><Megaphone size={17}/> Advertise on CAMPUS</span><small>Reach students at one college. Flat monthly pricing.</small></button>
-        <footer className="right-footer">About · Guidelines · Privacy · Help<br/>CAMPUS · Built for students, by students. © 2026</footer>
+
+        <footer className="right-footer">
+          <div className="footer-links">
+            {infoNav.map(label => (
+              <button key={label} onClick={() => navigate(label)}>{label}</button>
+            ))}
+          </div>
+          <small>CAMPUS · Built for students, by students. © 2026</small>
+        </footer>
       </aside>
 
       <nav className="mobile-bottom-nav">
@@ -1233,6 +1326,160 @@ function PostCard({post,isOwn,onLike,onSave,onComment,onShare,onReport,onRepost,
       {slides.length > 0 && <p className="post-body post-caption">{post.body}</p>}
     </div>
   </article>
+}
+
+/* ---- System info pages (About · Guidelines · Privacy · Help) --------------- */
+
+const INFO_PAGES: Record<string, {
+  icon: typeof Compass
+  title: string
+  intro: string
+  blocks: Array<{ heading: string; paragraphs?: string[]; bullets?: string[] }>
+}> = {
+  'About': {
+    icon: GraduationCap,
+    title: 'What CAMPUS is',
+    intro: 'CAMPUS is a campus-first social app for college students in India — built to feel like your campus, not the whole internet.',
+    blocks: [
+      { heading: 'The idea', paragraphs: [
+        'Most social apps put you in front of the entire world. CAMPUS starts with the people who actually walk the same corridors: your collegemates first, the wider campus community second.',
+        'You explore before you join — the feed, Discover reels and the real campus data are open to visitors, so you know exactly what you are signing up for.',
+      ]},
+      { heading: 'What works today', bullets: [
+        'A real campus feed — text posts, image carousels, short reels (up to 30 seconds)',
+        'Replies: comment threads on every kind of post, on the Home feed and on Discover',
+        'Anonymous confessions — posted under no name, visible to your campus',
+        'Edit and delete your own posts (anonymous confessions stay as posted, by design)',
+        'Report and block tools for anything that breaks the rules',
+      ]},
+      { heading: 'What is on the way', bullets: [
+        'Full profile pages with avatars, bios and follow connections',
+        'Polls, events, clubs and community spaces backed by real data',
+        'Direct chats and notifications',
+        'Search and trending beyond the basics',
+      ]},
+      { heading: 'How it is built', paragraphs: [
+        'CAMPUS runs on your real account and real data — every post, reel and reply goes into a live database, and every number on the screen is the real number. Where something is not connected yet, the app says so instead of faking it.',
+      ]},
+    ],
+  },
+  'Guidelines': {
+    icon: Shield,
+    title: 'Campus guidelines',
+    intro: 'CAMPUS should feel like the good parts of your campus. These rules apply everywhere in the app — posts, reels, confessions and comments.',
+    blocks: [
+      { heading: 'Be decent', bullets: [
+        'No harassment, threats, hate speech or targeted abuse of any person or group.',
+        'Do not abuse the confession feature: no naming or clearly identifying classmates, no spreading rumours about real people, no threats — anonymous is a shield for honesty, not a weapon.',
+        'No impersonation: do not post pretending to be another student, professor or organisation.',
+      ]},
+      { heading: 'Keep it campus-real', bullets: [
+        'Post things your campus community can actually use — notes, events, questions, wins, opportunities, honest moments.',
+        'No spam. No repeated self-promotion, chain posts or engagement-bait.',
+        'No selling dangerous or illegal items in the marketplace — the marketplace is for student-to-student exchange of ordinary goods.',
+      ]},
+      { heading: 'Media rules', bullets: [
+        'No nudity, sexual content, gore, violence or illegal activity in posts, images or reels.',
+        'Do not upload media you do not have the right to share (including other people’s private photos).',
+        'Reels are limited to 30 seconds; the uploader will ask you to trim longer clips.',
+      ]},
+      { heading: 'How enforcement works', bullets: [
+        'Use Report on any post or comment — reports go straight to the moderation queue.',
+        'You can Block or Mute any account from the ⋯ menu on their posts; blocked accounts can no longer interact with you.',
+        'Clear violations lead to content removal and account suspension. Serious cases (threats, illegal content) can escalate beyond the app.',
+        'Moderation tooling is young and improving — if a report seems unanswered, report again; every report is stored and reviewed.',
+      ]},
+      { heading: 'Who this protects', paragraphs: [
+        'These rules exist to protect students first. When in doubt: if you would not say it with your name to someone’s face in the corridor, do not post it from behind a screen either.',
+      ]},
+    ],
+  },
+  'Privacy': {
+    icon: EyeOff,
+    title: 'Privacy on CAMPUS',
+    intro: ' Plain-language version: we store the minimum needed to run your campus account, we never sell it, and confessions stay anonymous in every place a human looks.',
+    blocks: [
+      { heading: 'What we store', bullets: [
+        'Your sign-in email — used for account access and essential emails only.',
+        'Your profile: the name, username, bio, course, year, college and avatar you choose to enter.',
+        'Your content: posts, reels, comments, likes, bookmarks and blocks.',
+        'Reports you file, and the basic technical data needed to keep the service running safely.',
+      ]},
+      { heading: 'How confessions work under the hood', bullets: [
+        'Every confession does have an internal author id — that is what lets us enforce rules if a confession breaks them.',
+        'That author id is never shown on screen: to every viewer the post carries no name, no username and no avatar.',
+        'You cannot edit or delete a confession once posted, and confession authors never appear in “who to follow”.',
+      ]},
+      { heading: 'What we do not do', bullets: [
+        'We do not sell your data, run third-party ad trackers or build advertising profiles from your activity.',
+        'We do not expose your email to other users — profiles show your chosen name and username only.',
+        'We do not publish your likes or private lists; they are yours.',
+      ]},
+      { heading: 'Your controls', bullets: [
+        'Delete any of your own posts, images or reels at any time — deletion removes the media file too.',
+        'Set your profile private, block or mute anyone, and withdraw from interactions you do not want.',
+        'Account deletion and full data-copy requests are handled through the account team — request it from your college admin or the in-app report flow, and it will be completed.',
+      ]},
+      { heading: 'The honest caveat', paragraphs: [
+        'Anything you post publicly can be screenshotted by others. Anonymity and deletion are strong here, but the internet is forever — post like the whole campus can read it, because it can.',
+      ]},
+    ],
+  },
+  'Help': {
+    icon: CircleHelp,
+    title: 'Help & answers',
+    intro: ' Quick answers for the features that are live today. Anything not listed here is still being built.',
+    blocks: [
+      { heading: 'Posting', bullets: [
+        'Tap the + button (bottom bar) or “Create post” (sidebar) to post text, an image carousel, a reel or a confession.',
+        'Reels must be 30 seconds or shorter — if your clip is longer, the built-in trimmer opens first; pick a window and continue.',
+        'Large videos are compressed on your phone before upload, so long clips may take a moment.',
+      ]},
+      { heading: 'Editing and deleting', bullets: [
+        'Use the ⋯ menu on your own post to edit or delete it; edited posts carry a small “edited” badge.',
+        'Only you can edit or delete your posts. Anonymous confessions cannot be edited or deleted after posting — that keeps the anonymous trail short and safe for everyone.',
+      ]},
+      { heading: 'Comments and reactions', bullets: [
+        'Every post type supports comments — open the comment sheet from the comment button on any post, including reels in Discover.',
+        'You can edit and delete your own comments; deletions ask for confirmation.',
+        'Double-tap a reel to like it; likes persist across sessions.',
+      ]},
+      { heading: 'Safety', bullets: [
+        '⋯ menu on any post: report the post, or block/mute its author. Blocks apply immediately.',
+        'Reports are reviewed in the moderation queue; add context in the report form to help reviewers.',
+      ]},
+      { heading: 'Account problems', bullets: [
+        'Sign-in uses email + password. Check the confirmation-password match and your email verification when signing up.',
+        'Locked out? Profiles and onboarding information are never lost — use the sign-in screen again or a fresh device; your feed and drafts are stored server-side.',
+        'If the app shows a database error banner, it is honest — wait a moment and retry; your draft text is kept while the composer stays open.',
+      ]},
+    ],
+  },
+}
+
+function InfoPage({ name }: { name: string }) {
+  const page = INFO_PAGES[name] ?? INFO_PAGES.About
+  const Icon = page.icon
+  return (
+    <section className="section-page info-page">
+      <div className="section-hero-icon"><Icon size={27}/></div>
+      <span className="eyebrow">CAMPUS / {name.toUpperCase()}</span>
+      <h2>{page.title}</h2>
+      <p className="info-intro">{page.intro}</p>
+      {page.blocks.map(block => (
+        <div className="info-block" key={block.heading}>
+          <h3>{block.heading}</h3>
+          {block.paragraphs?.map((text, i) => <p key={i}>{text}</p>)}
+          {block.bullets && (
+            <ul className="info-list">
+              {block.bullets.map((item, i) => <li key={i}>{item}</li>)}
+            </ul>
+          )}
+        </div>
+      ))}
+      <div className="coming-note"><Shield size={16}/><span>These pages describe how CAMPUS works today. As features go live, the matching rules are documented here.</span></div>
+    </section>
+  )
 }
 
 function SectionPage({name,onCreate,onSignIn,isMember,displayName}:{name:string;onCreate:(kind?:PostKind)=>void;onSignIn:()=>void;isMember:boolean;displayName:string}) {

@@ -600,6 +600,79 @@ export async function fetchFeed(limit = 50): Promise<CampusPost[]> {
 }
 
 /**
+ * Real trending tags: rank #hashtags harvested from the bodies of the most
+ * recent public posts (all kinds — captions count). Returns [tag, count]
+ * pairs without the leading '#', most used first.
+ */
+export async function fetchTrendingTags(limit = 8): Promise<[string, number][]> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase
+    .from('posts')
+    .select('body')
+    .order('created_at', { ascending: false })
+    .limit(200)
+  if (error) throw new Error(friendlyMessage(error))
+  const counts = new Map<string, number>()
+  for (const row of (data ?? []) as { body: string | null }[]) {
+    const matches = row.body?.match(/#([\p{L}\p{N}_]{2,30})/gu) ?? []
+    for (const raw of matches) {
+      const tag = raw.slice(1).toLowerCase()
+      counts.set(tag, (counts.get(tag) ?? 0) + 1)
+    }
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, limit)
+}
+
+export type FollowSuggestion = { username: string; name: string }
+
+/**
+ * Real follow suggestions: actual member profiles, same college first.
+ * Excludes the signed-in user. Private profiles are skipped — there is no
+ * follow-request flow yet, so suggesting a locked account would mislead.
+ */
+export async function fetchFollowSuggestions(
+  excludeUserId: string,
+  collegeId?: string | null,
+  limit = 3,
+): Promise<FollowSuggestion[]> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const client = supabase
+  type Row = { username: string | null; display_name: string | null }
+  const load = async (sameCollege: boolean): Promise<Row[]> => {
+    let query = client
+      .from('profiles')
+      .select('username, display_name')
+      .eq('is_private', false)
+      .not('username', 'is', null)
+      .neq('id', excludeUserId)
+      .limit(24)
+    if (sameCollege && collegeId) query = query.eq('college_id', collegeId)
+    const { data, error } = await query
+    if (error) throw new Error(friendlyMessage(error))
+    return (data ?? []) as Row[]
+  }
+
+  // same-college classmates first, then anyone public to fill the panel
+  let rows = await load(true)
+  if (rows.length < limit) {
+    const seen = new Set(rows.map(row => row.username))
+    rows = [...rows, ...(await load(false)).filter(row => !seen.has(row.username))]
+  }
+  // shuffle so the panel varies between loads but still shows real members
+  return rows
+    .map(row => ({ row, k: Math.random() }))
+    .sort((a, b) => a.k - b.k)
+    .slice(0, limit)
+    .map(({ row }) => ({
+      username: row.username ?? '',
+      name: row.display_name?.trim() || `@${row.username ?? 'student'}`,
+    }))
+    .filter(s => s.username)
+}
+
+/**
  * Load one page of Reel posts for the Discover page via list_public_reels
  * (migration 0004). Paginated: pass offset = page * limit as the user
  * scrolls; an empty/short page means there are no more reels.
