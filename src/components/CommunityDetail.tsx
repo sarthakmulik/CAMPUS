@@ -148,7 +148,7 @@ export default function CommunityDetail({
         />
       </header>
 
-      <nav className="community-tabs detail-tabs" aria-label="Community sections">
+      <nav className="community-tabs detail-tabs" data-no-page-swipe="true" aria-label="Community sections">
         {FEED_TABS.map(item => (
           <button key={item} className={item === tab ? 'on' : ''} onClick={() => setTab(item)}>{item}</button>
         ))}

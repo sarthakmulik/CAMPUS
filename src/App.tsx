@@ -19,6 +19,8 @@ import ReelTrim from './components/ReelTrim'
 import RichText from './components/RichText'
 import PostCard from './components/PostCard'
 import Communities from './components/Communities'
+import Events from './components/Events'
+import Marketplace from './components/Marketplace'
 import * as cm from './lib/communities'
 import ReelPlayer from './components/ReelPlayer'
 import ReelsFeed from './components/ReelsFeed'
@@ -54,7 +56,32 @@ const infoNav = ['About', 'Guidelines', 'Privacy', 'Help']
 
 /** The four primary pages reachable by horizontal swipe on mobile. */
 const swipePageOrder = ['Home', 'Discover', 'Chats', 'Profile']
-const scaffoldNav = allNav.filter(label => !['Home', 'Discover', 'Search', 'Safety Centre', 'Communities'].includes(label))
+const scaffoldNav = allNav.filter(label => !['Home', 'Discover', 'Search', 'Safety Centre', 'Communities', 'Events', 'Marketplace'].includes(label))
+
+/* Regions where a horizontal touch gesture belongs to a local component and
+ * must never page-flip the shell. Two kinds live here:
+ *   1. always-owned regions (inputs, overlays, sheets…) that must never be
+ *      seen by the global pager, and
+ *   2. genuine horizontal scroll/tab containers, registered by adding
+ *      data-no-page-swipe="true" in the JSX (community tabs, category rows,
+ *      the events featured carousel, feed carousels…).
+ * The exclusion is resolved ONCE at touchstart from `closest()` — i.e. from
+ * the DOM node under the finger when the gesture BEGINS — so pulling the
+ * finger out of (or into) a marked region mid-swipe never changes the
+ * decision, and a scrollable region at its end boundary keeps the gesture
+ * local instead of handing it to the pager. `scrollWidth` checks are not
+ * required: registration is explicit and low-frequency (tabs may swap
+ * panels without physically scrolling). Nested marked containers resolve
+ * to the nearest ancestor, which is always the right owner. */
+const swipeOwnedSelector =
+  'input, textarea, select, .overlay, .bottom-sheet, .post-menu, .reel-more-pop, ' +
+  '.carousel-track, .carousel-dots, .picker-thumb, .mobile-bottom-nav, ' +
+  '[data-no-page-swipe]'
+
+const localSwipeOwner = (target: EventTarget | null): Element | null => {
+  const element = target as Element | null
+  return element?.closest?.(swipeOwnedSelector) ?? null
+}
 
 /**
  * CAMPUS root. Routing between the four account states lives here:
@@ -75,6 +102,8 @@ export default function App() {
 let handledDeepLinkId: string | null = null
 /** module guard: a community #c/<slug> link is resolved once per session */
 let handledCommunitySlug: string | null = null
+let handledEventSlug: string | null = null
+let handledListingSlug: string | null = null
 
 /** Pages already reachable from the persistent mobile chrome (bottom nav +
  * header icons), so they are dropped from the mobile drawer to avoid duplicates. */
@@ -122,6 +151,9 @@ function CAMPUSApp() {
   const [mobileMenu, setMobileMenu] = useState(false)
   const [openChatId, setOpenChatId] = useState<string | null>(null)
   const [openCommunityId, setOpenCommunityId] = useState<string | null>(null)
+  const [openEventSlug, setOpenEventSlug] = useState<string | null>(null)
+  const [openListingSlug, setOpenListingSlug] = useState<string | null>(null)
+  const [chatDraft, setChatDraft] = useState<string | null>(null)
   const [clubs, setClubs] = useState<db.Club[]>([])
   const [viewingProfileId, setViewingProfileId] = useState<string | null>(null)
   const [following, setFollowing] = useState<string[]>([])
@@ -386,20 +418,50 @@ function CAMPUSApp() {
       }
       // community share links: #c/<slug>
       const communityMatch = /#c\/([a-z0-9-]+)$/i.exec(window.location.hash)
-      if (!communityMatch) return
-      const slug = communityMatch[1].toLowerCase()
-      if (handledCommunitySlug === slug) return
-      handledCommunitySlug = slug
-      markWelcomeSeen()
-      setExplored(true)
-      cm.communityIdFromSlug(slug)
-        .then(id => {
-          if (!id) { flash('That community link is not available — it may be a hidden community or was archived.'); return }
-          setActiveNav('Communities')
-          setOpenCommunityId(id)
-          window.history.replaceState(null, '', window.location.pathname + window.location.search)
-        })
-        .catch(error => flash(db.friendlyMessage(error)))
+      if (communityMatch) {
+        const slug = communityMatch[1].toLowerCase()
+        if (handledCommunitySlug !== slug) {
+          handledCommunitySlug = slug
+          markWelcomeSeen()
+          setExplored(true)
+          cm.communityIdFromSlug(slug)
+            .then(id => {
+              if (!id) { flash('That community link is not available — it may be a hidden community or was archived.'); return }
+              setActiveNav('Communities')
+              setOpenCommunityId(id)
+              window.history.replaceState(null, '', window.location.pathname + window.location.search)
+            })
+            .catch(error => flash(db.friendlyMessage(error)))
+        }
+        return
+      }
+      // event share links: #e/<slug> — the detail page resolves visibility
+      // itself and shows an honest "not available" for hidden/draft events
+      const eventMatch = /#e\/([a-z0-9-]+)$/i.exec(window.location.hash)
+      if (eventMatch) {
+        const eventSlug = eventMatch[1].toLowerCase()
+        if (handledEventSlug === eventSlug) return
+        handledEventSlug = eventSlug
+        markWelcomeSeen()
+        setExplored(true)
+        setActiveNav('Events')
+        setOpenEventSlug(eventSlug)
+        window.history.replaceState(null, '', window.location.pathname + window.location.search)
+        return
+      }
+      // listing share links: #m/<slug> — the detail page resolves visibility
+      // itself and shows an honest "not available" for hidden/sold/removed listings
+      const listingMatch = /#m\/([a-z0-9-]+)$/i.exec(window.location.hash)
+      if (listingMatch) {
+        const listingSlug = listingMatch[1].toLowerCase()
+        if (handledListingSlug === listingSlug) return
+        handledListingSlug = listingSlug
+        markWelcomeSeen()
+        setExplored(true)
+        setActiveNav('Marketplace')
+        setOpenListingSlug(listingSlug)
+        window.history.replaceState(null, '', window.location.pathname + window.location.search)
+      }
     }
     handleDeepLink()
     window.addEventListener('hashchange', handleDeepLink)
@@ -429,6 +491,25 @@ function CAMPUSApp() {
     try {
       const conversationId = await db.openDm(post.authorId)
       setOpenChatId(conversationId)
+      navigate('Chats')
+    } catch (error) {
+      flash(db.friendlyMessage(error))
+    }
+  }
+
+  // Contact a marketplace seller: open (or reuse) the existing 1:1 chat and
+  // prefill a contextual message — it is only sent when the buyer hits send.
+  const messageListing = async (sellerId: string, listingTitle: string) => {
+    if (!requireAuth('contact the seller')) return
+    if (!user) return
+    if (sellerId === user.id) {
+      flash('That is your own listing — your chats are with classmates.')
+      return
+    }
+    try {
+      const conversationId = await db.openDm(sellerId)
+      setOpenChatId(conversationId)
+      setChatDraft(`Hi, I'm interested in your listing: ${listingTitle}. Is it still available?`)
       navigate('Chats')
     } catch (error) {
       flash(db.friendlyMessage(error))
@@ -583,6 +664,8 @@ function CAMPUSApp() {
       pageScrollMemory.current[activeNav] = scroller ? scroller.scrollTop : window.scrollY
     }
     if (label !== 'Communities') setOpenCommunityId(null)
+    if (label !== 'Events') setOpenEventSlug(null)
+    if (label !== 'Marketplace') setOpenListingSlug(null)
     setActiveNav(label)
     // any navigation leaves the search overlay behind (it re-opens on demand)
     if (label !== 'Search') { setSearchOpen(false); setSearchSeed('') }
@@ -682,7 +765,11 @@ function CAMPUSApp() {
     const onSwipeStart = (event: TouchEvent) => {
       if (!isMobile() || mobileMenuRef.current || event.touches.length > 1) return
       const target = event.target as Element
-      if (target.closest?.('input, textarea, select, .overlay, .bottom-sheet, .post-menu, .reel-more-pop, .carousel-track, .carousel-dots, .picker-thumb, .mobile-bottom-nav')) {
+      // This gesture may already belong to something local (an input, an
+      // overlay, or a horizontally scrollable/tab region). Resolve the owner
+      // from the touch origin and step aside for the whole gesture — the
+      // decision is never revisited on move/end.
+      if (localSwipeOwner(target)) {
         swipe.current.active = false
         return
       }
@@ -1203,7 +1290,7 @@ function CAMPUSApp() {
                     <div className="composer-tools">
                       <button aria-label="Add image" onClick={() => { if (openComposer('post')) window.setTimeout(() => imagesInputRef.current?.click(), 50) }}><Image size={18}/></button>
                       <button aria-label="Create poll" onClick={() => openComposer('poll')}><ChartNoAxesColumn size={18}/></button>
-                      <button aria-label="Create event" onClick={() => { navigate('Events'); flash('Event creation can be connected in the next backend pass.') }}><CalendarDays size={18}/></button>
+                      <button aria-label="Create event" onClick={() => navigate('Events')}><CalendarDays size={18}/></button>
                     </div>
                     <div className="inline-composer-buttons">
                       <button className="inline-cancel" onClick={() => { setInlineOpen(false); setInlineDraft('') }}>Cancel</button>
@@ -1217,7 +1304,7 @@ function CAMPUSApp() {
                   <div className="composer-tools">
                     <button aria-label="Add image" onClick={() => { if (openComposer('post')) window.setTimeout(() => imagesInputRef.current?.click(), 50) }}><Image size={18}/></button>
                     <button aria-label="Create poll" onClick={() => openComposer('poll')}><ChartNoAxesColumn size={18}/></button>
-                    <button aria-label="Create event" onClick={() => { navigate('Events'); flash('Event creation can be connected in the next backend pass.') }}><CalendarDays size={18}/></button>
+                    <button aria-label="Create event" onClick={() => navigate('Events')}><CalendarDays size={18}/></button>
                     <button className="post-button" onClick={startInlineComposer}>Post</button>
                   </div>
                 </>
@@ -1270,7 +1357,7 @@ function CAMPUSApp() {
                 onAutoOpened={() => setReelAutoOpen(null)}
               />
             : activeNav === 'Chats'
-              ? <Chats key={openChatId ?? 'list'} identity={identity && user ? { id: user.id, name: identity.name, username: identity.username, initials: identity.initials } : null} configured={configured} autoOpen={openChatId} onAutoOpened={() => setOpenChatId(null)} />
+              ? <Chats key={openChatId ?? 'list'} identity={identity && user ? { id: user.id, name: identity.name, username: identity.username, initials: identity.initials } : null} configured={configured} autoOpen={openChatId} onAutoOpened={() => setOpenChatId(null)} initialDraft={chatDraft} onDraftConsumed={() => setChatDraft(null)} />
               : activeNav === 'Profile'
               ? <Profile
                   key="profile"
@@ -1299,6 +1386,31 @@ function CAMPUSApp() {
                     onOpenMention={openMentionProfile}
                     openCommunityId={openCommunityId}
                     setOpenCommunityId={setOpenCommunityId}
+                  />
+              : activeNav === 'Events'
+                ? <Events
+                    identity={identity && user ? { id: user.id, name: identity.name, username: identity.username, initials: identity.initials } : null}
+                    configured={configured}
+                    colleges={colleges}
+                    myCollegeId={profile?.college_id ?? null}
+                    requireAuth={requireAuth}
+                    notify={flash}
+                    openEventSlug={openEventSlug}
+                    setOpenEventSlug={setOpenEventSlug}
+                    onOpenCommunity={clubId => { setActiveNav('Communities'); setOpenCommunityId(clubId) }}
+                  />
+                : activeNav === 'Marketplace'
+                ? <Marketplace
+                    identity={identity && user ? { id: user.id, name: identity.name, username: identity.username, initials: identity.initials } : null}
+                    configured={configured}
+                    colleges={colleges}
+                    myCollegeId={profile?.college_id ?? null}
+                    requireAuth={requireAuth}
+                    notify={flash}
+                    openListingSlug={openListingSlug}
+                    setOpenListingSlug={setOpenListingSlug}
+                    onContactSeller={messageListing}
+                    onOpenProfile={openMentionProfile}
                   />
                 : infoNav.includes(activeNav)
               ? <InfoPage name={activeNav}/>

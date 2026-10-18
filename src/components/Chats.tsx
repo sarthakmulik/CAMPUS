@@ -12,6 +12,10 @@ type Props = {
   /** When set, the page boots straight into that conversation (opened from a post's ⋯ menu). */
   autoOpen?: string | null
   onAutoOpened?: () => void
+  /** A message prefill for the opened conversation (e.g. Contact Seller) —
+   *  the buyer reviews it and hits send themselves; nothing is auto-sent. */
+  initialDraft?: string | null
+  onDraftConsumed?: () => void
 }
 
 /**
@@ -20,7 +24,7 @@ type Props = {
  * separate, later feature and are filtered out server-side (they never match
  * kind in ('dm','group') in the list RPC, so they never appear here).
  */
-export default function Chats({ identity, configured, autoOpen, onAutoOpened }: Props) {
+export default function Chats({ identity, configured, autoOpen, onAutoOpened, initialDraft, onDraftConsumed }: Props) {
   const [conversations, setConversations] = useState<ChatSummary[]>([])
   const [loadingList, setLoadingList] = useState(true)
   const [listError, setListError] = useState<string | null>(null)
@@ -64,6 +68,16 @@ export default function Chats({ identity, configured, autoOpen, onAutoOpened }: 
     if (!configured || !identity) return
     void loadConversations()
   }, [configured, identity?.id, loadConversations])
+
+  // Contact Seller prefills a contextual draft into the fresh conversation —
+  // it waits for the buyer to review and send it (never auto-sent).
+  useEffect(() => {
+    if (initialDraft) {
+      setDraft(initialDraft)
+      onDraftConsumed?.()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const openConversation = useCallback(async (conversationId: string) => {
     setOpenId(conversationId)

@@ -54,7 +54,7 @@ export function PostCard({
       : <img className="post-media" src={slides[0]} alt="" loading="lazy"/>
   ) : slides.length > 1 ? (
     <div className="carousel" role="group" aria-label="Image carousel">
-      <div className="carousel-track" ref={trackRef} onScroll={onTrackScroll}>
+      <div className="carousel-track" data-no-page-swipe="true" ref={trackRef} onScroll={onTrackScroll}>
         {slides.map(url => <img key={url} src={url} alt="" loading="lazy" draggable={false}/>)}
       </div>
       {slides.length > 1 && <div className="carousel-dots">{slides.map((url, index) => <button key={url} className={index === slide ? 'on' : ''} onClick={() => goSlide(index)} aria-label={`Image ${index + 1} of ${slides.length}`}/>)}</div>}

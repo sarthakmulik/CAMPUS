@@ -249,7 +249,7 @@ export default function Communities({
         </div>
       )}
 
-      <nav className="community-tabs" aria-label="Community discovery tabs">
+      <nav className="community-tabs" data-no-page-swipe="true" aria-label="Community discovery tabs">
         {COMMUNITY_TABS.map(item => (
           <button
             key={item}
@@ -261,7 +261,7 @@ export default function Communities({
         ))}
       </nav>
 
-      <div className="community-category-row">
+      <div className="community-category-row" data-no-page-swipe="true">
         {['All', ...cm.COMMUNITY_CATEGORIES].map(item => (
           <button
             key={item}
