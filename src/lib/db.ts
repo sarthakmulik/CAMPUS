@@ -575,8 +575,8 @@ export function relativeTime(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
-export function initialsFor(name: string, username: string): string {
-  const source = name.trim() || username.trim()
+export function initialsFor(name?: string | null, username?: string | null): string {
+  const source = (name ?? '').trim() || (username ?? '').trim()
   return (
     source
       .split(/\s+/)
@@ -663,7 +663,7 @@ export async function fetchTrendingTags(limit = 8): Promise<[string, number][]> 
     .slice(0, limit)
 }
 
-export type FollowSuggestion = { username: string; name: string }
+export type FollowSuggestion = { id: string; username: string; name: string }
 
 /**
  * Instagram-style For You ranking. Recency dominates: the ranking only gets
@@ -1182,11 +1182,11 @@ export async function fetchFollowSuggestions(
 ): Promise<FollowSuggestion[]> {
   if (!supabase) throw new Error('CAMPUS is not connected.')
   const client = supabase
-  type Row = { username: string | null; display_name: string | null }
+  type Row = { id: string; username: string | null; display_name: string | null }
   const load = async (sameCollege: boolean): Promise<Row[]> => {
     let query = client
       .from('profiles')
-      .select('username, display_name')
+      .select('id, username, display_name')
       .eq('is_private', false)
       .not('username', 'is', null)
       .neq('id', excludeUserId)
@@ -1209,6 +1209,7 @@ export async function fetchFollowSuggestions(
     .sort((a, b) => a.k - b.k)
     .slice(0, limit)
     .map(({ row }) => ({
+      id: row.id,
       username: row.username ?? '',
       name: row.display_name?.trim() || `@${row.username ?? 'student'}`,
     }))
@@ -1241,6 +1242,8 @@ export type CreatePostInput = {
   authorName: string
   authorUsername: string
   mediaUrls?: string[] | null
+  /** 0016: when set, the post belongs to a community (RLS checks membership) */
+  communityId?: string | null
 }
 
 /**
@@ -1260,6 +1263,7 @@ export async function createPost(input: CreatePostInput): Promise<CampusPost> {
       is_anonymous: input.isAnonymous,
       is_published: true,
       media_urls: input.mediaUrls ?? [],
+      ...(input.communityId ? { community_id: input.communityId } : {}),
     })
     .select('id, author_id, college_id, body, kind, media_urls, is_anonymous, is_published, created_at')
     .single()

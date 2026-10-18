@@ -18,6 +18,8 @@ export type CampusPost = {
   editedAt?: string | null
   authorVerified?: boolean
   trending?: boolean
+  /** moderator pin inside a community feed — ordered first, flagged, not "trending" */
+  isPinned?: boolean
   anonymous?: boolean
   liked?: boolean
   saved?: boolean

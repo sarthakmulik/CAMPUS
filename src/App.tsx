@@ -17,6 +17,9 @@ import OnboardingWizard from './components/OnboardingWizard'
 import SafetyCentre from './components/SafetyCentre'
 import ReelTrim from './components/ReelTrim'
 import RichText from './components/RichText'
+import PostCard from './components/PostCard'
+import Communities from './components/Communities'
+import * as cm from './lib/communities'
 import ReelPlayer from './components/ReelPlayer'
 import ReelsFeed from './components/ReelsFeed'
 import CommentsSheet from './components/CommentsSheet'
@@ -51,7 +54,7 @@ const infoNav = ['About', 'Guidelines', 'Privacy', 'Help']
 
 /** The four primary pages reachable by horizontal swipe on mobile. */
 const swipePageOrder = ['Home', 'Discover', 'Chats', 'Profile']
-const scaffoldNav = allNav.filter(label => !['Home', 'Discover', 'Search', 'Safety Centre'].includes(label))
+const scaffoldNav = allNav.filter(label => !['Home', 'Discover', 'Search', 'Safety Centre', 'Communities'].includes(label))
 
 /**
  * CAMPUS root. Routing between the four account states lives here:
@@ -70,6 +73,8 @@ export default function App() {
 /** The shared deep link this session already handled (survives StrictMode's
  *  dev remount so the same id is never fetched twice). */
 let handledDeepLinkId: string | null = null
+/** module guard: a community #c/<slug> link is resolved once per session */
+let handledCommunitySlug: string | null = null
 
 /** Pages already reachable from the persistent mobile chrome (bottom nav +
  * header icons), so they are dropped from the mobile drawer to avoid duplicates. */
@@ -116,6 +121,7 @@ function CAMPUSApp() {
   const [searchSeed, setSearchSeed] = useState('')
   const [mobileMenu, setMobileMenu] = useState(false)
   const [openChatId, setOpenChatId] = useState<string | null>(null)
+  const [openCommunityId, setOpenCommunityId] = useState<string | null>(null)
   const [clubs, setClubs] = useState<db.Club[]>([])
   const [viewingProfileId, setViewingProfileId] = useState<string | null>(null)
   const [following, setFollowing] = useState<string[]>([])
@@ -355,24 +361,42 @@ function CAMPUSApp() {
     if (!configured) return
     const handleDeepLink = () => {
       const match = /#p\/([0-9a-f-]{8}-[0-9a-f-]{4}-[0-9a-f-]{4}-[0-9a-f-]{4}-[0-9a-f-]{12})$/i.exec(window.location.hash)
-      if (!match) return
-      const id = match[1]
-      if (handledDeepLinkId === id) return
-      handledDeepLinkId = id
-      // a shared link is a destination: first-time visitors land on the content,
-      // not on the marketing page (exploring is free and read-only anyway)
+      if (match) {
+        const id = match[1]
+        if (handledDeepLinkId === id) return
+        handledDeepLinkId = id
+        // a shared link is a destination: first-time visitors land on the content,
+        // not on the marketing page (exploring is free and read-only anyway)
+        markWelcomeSeen()
+        setExplored(true)
+        db.fetchPostById(id)
+          .then(post => {
+            if (!post) { flash('That post is not available — it may have been deleted or is a confession.'); return }
+            if (post.kind === 'reel') {
+              setActiveNav('Discover')
+              setReelAutoOpen(id)
+            } else {
+              setPosts(current => current.some(p => p.id === id) ? current : [post, ...current])
+              setActiveNav('Home')
+            }
+            window.history.replaceState(null, '', window.location.pathname + window.location.search)
+          })
+          .catch(error => flash(db.friendlyMessage(error)))
+        return
+      }
+      // community share links: #c/<slug>
+      const communityMatch = /#c\/([a-z0-9-]+)$/i.exec(window.location.hash)
+      if (!communityMatch) return
+      const slug = communityMatch[1].toLowerCase()
+      if (handledCommunitySlug === slug) return
+      handledCommunitySlug = slug
       markWelcomeSeen()
       setExplored(true)
-      db.fetchPostById(id)
-        .then(post => {
-          if (!post) { flash('That post is not available — it may have been deleted or is a confession.'); return }
-          if (post.kind === 'reel') {
-            setActiveNav('Discover')
-            setReelAutoOpen(id)
-          } else {
-            setPosts(current => current.some(p => p.id === id) ? current : [post, ...current])
-            setActiveNav('Home')
-          }
+      cm.communityIdFromSlug(slug)
+        .then(id => {
+          if (!id) { flash('That community link is not available — it may be a hidden community or was archived.'); return }
+          setActiveNav('Communities')
+          setOpenCommunityId(id)
           window.history.replaceState(null, '', window.location.pathname + window.location.search)
         })
         .catch(error => flash(db.friendlyMessage(error)))
@@ -558,6 +582,7 @@ function CAMPUSApp() {
       const scroller = isMobile ? mainRef.current : null
       pageScrollMemory.current[activeNav] = scroller ? scroller.scrollTop : window.scrollY
     }
+    if (label !== 'Communities') setOpenCommunityId(null)
     setActiveNav(label)
     // any navigation leaves the search overlay behind (it re-opens on demand)
     if (label !== 'Search') { setSearchOpen(false); setSearchSeed('') }
@@ -1263,7 +1288,19 @@ function CAMPUSApp() {
                   onOpenHashtag={openHashtagSearch}
                   onSignOut={signOut}
                 />
-              : infoNav.includes(activeNav)
+              : activeNav === 'Communities'
+                ? <Communities
+                    identity={identity && user ? { id: user.id, name: identity.name, username: identity.username, initials: identity.initials } : null}
+                    configured={configured}
+                    colleges={colleges}
+                    myCollegeId={profile?.college_id ?? null}
+                    requireAuth={requireAuth}
+                    notify={flash}
+                    onOpenMention={openMentionProfile}
+                    openCommunityId={openCommunityId}
+                    setOpenCommunityId={setOpenCommunityId}
+                  />
+                : infoNav.includes(activeNav)
               ? <InfoPage name={activeNav}/>
               : <SectionPage name={activeNav} onCreate={openComposer} onSignIn={() => setAuthMode('signup')} isMember={status === 'member'} displayName={identity.name} />}
       </main>
@@ -1307,8 +1344,14 @@ function CAMPUSApp() {
               const initials = db.initialsFor(person.name, person.username)
               return (
                 <div className="suggestion" key={person.username}>
-                  <span className="avatar">{initials}</span>
-                  <span className="suggestion-copy"><b>{person.name}</b><small>@{person.username}</small></span>
+                  <button
+                    className="suggestion-link"
+                    onClick={() => void openMentionProfile(person.id)}
+                    aria-label={`Open ${person.name}'s profile`}
+                  >
+                    <span className="avatar">{initials}</span>
+                    <span className="suggestion-copy"><b>{person.name}</b><small>@{person.username}</small></span>
+                  </button>
                   <button
                     className={`follow-button ${following.includes(person.username) ? 'is-following' : ''}`}
                     aria-label={following.includes(person.username) ? 'Following' : 'Follow'}
@@ -1456,65 +1499,6 @@ function CAMPUSApp() {
       {modals}
     </div>
   )
-}
-
-function PostCard({post,isOwn,onLike,onSave,onComment,onShare,onReport,onRepost,onBlock,onMute,onEdit,onDelete,onMessage,onOpenMention,onOpenTag}:{post:CampusPost;isOwn:boolean;onLike:()=>void;onSave:()=>void;onComment:()=>void;onShare:()=>void;onReport:()=>void;onRepost:()=>void;onBlock:()=>void;onMute:()=>void;onEdit:()=>void;onDelete:()=>void;onMessage:()=>void;onOpenMention:(profileId:string)=>void;onOpenTag:(query:string)=>void}) {
-  const [menuOpen,setMenuOpen] = useState(false)
-  const [slide,setSlide] = useState(0)
-  const slides = post.media ?? []
-  const canActOnAuthor = Boolean(post.handle) && !post.anonymous
-  const trackRef = useRef<HTMLDivElement | null>(null)
-  const onTrackScroll = () => {
-    const track = trackRef.current
-    if (!track || slides.length < 2) return
-    const index = Math.round(track.scrollLeft / track.clientWidth)
-    setSlide(index > slides.length - 1 ? slides.length - 1 : index < 0 ? 0 : index)
-  }
-  const goSlide = (index: number) => {
-    setSlide(index)
-    const track = trackRef.current
-    if (track) track.scrollTo({ left: index * track.clientWidth, behavior: 'smooth' })
-  }
-  const mediaBlock = slides.length === 1 ? (
-    post.kind === 'reel'
-      ? <ReelPlayer src={slides[0]} />
-      : <img className="post-media" src={slides[0]} alt="" loading="lazy"/>
-  ) : slides.length > 1 ? (
-    <div className="carousel" role="group" aria-label="Image carousel">
-      <div className="carousel-track" ref={trackRef} onScroll={onTrackScroll}>
-        {slides.map(url => <img key={url} src={url} alt="" loading="lazy" draggable={false}/>)}
-      </div>
-      {slides.length > 1 && <div className="carousel-dots">{slides.map((url, index) => <button key={url} className={index === slide ? 'on' : ''} onClick={() => goSlide(index)} aria-label={`Image ${index + 1} of ${slides.length}`}/>)}</div>}
-      {slides.length > 1 && <>
-        <button className="carousel-arrow left" onClick={() => goSlide(Math.max(0, slide - 1))} aria-label="Previous image" disabled={slide === 0}>‹</button>
-        <button className="carousel-arrow right" onClick={() => goSlide(Math.min(slides.length - 1, slide + 1))} aria-label="Next image" disabled={slide === slides.length - 1}>›</button>
-      </>}
-    </div>
-  ) : null
-  return <article className="post-card">
-    <div className="post-head">
-      <button
-        className={`post-author-link${post.anonymous || !post.authorId ? ' static' : ''}`}
-        onClick={() => { if (!post.anonymous && post.authorId) onOpenMention(post.authorId) }}
-        aria-label={post.anonymous ? 'Anonymous confession' : `Open ${post.author}'s profile`}
-        tabIndex={post.anonymous || !post.authorId ? -1 : 0}
-      >
-        <span className={`avatar post-avatar ${post.anonymous?'anonymous-avatar':''}`}>{post.anonymous?<BookOpen size={21}/>:post.initials}</span>
-        <span className="post-id">
-          <span className="post-namerow"><b>{post.author}</b>{post.authorVerified&&<BadgeCheck size={15} className="verified-tick" aria-label="Verified"/>}</span>
-          <span className="post-idline">{post.handle&&<span>{post.handle}</span>}<i>·</i><span>{post.time}</span>{post.editedAt&&<><i>·</i><span className="edited-marker">edited {db.relativeTime(post.editedAt)}</span></>}{post.college&&<><i>·</i><span>{post.college}</span></>}</span>
-        </span>
-      </button>
-      <button className="icon-button more-button" onClick={() => setMenuOpen(v=>!v)} aria-label="More options"><MoreHorizontal size={20}/></button>{menuOpen&&<div className="post-menu">{isOwn&&<button onClick={()=>{onEdit();setMenuOpen(false)}}><Pencil size={15}/> Edit post</button>}{isOwn&&<button className="danger" onClick={()=>{onDelete();setMenuOpen(false)}}><Trash2 size={15}/> Delete post</button>}<button onClick={()=>{onReport();setMenuOpen(false)}}><Flag size={15}/> Report post</button><button onClick={()=>{onShare();setMenuOpen(false)}}><Share2 size={15}/> Copy post text</button>{canActOnAuthor&&<button onClick={()=>{onMute();setMenuOpen(false)}}><VolumeX size={15}/> Mute {post.handle}</button>}{canActOnAuthor&&<button onClick={()=>{onBlock();setMenuOpen(false)}}><EyeOff size={15}/> Block {post.handle}</button>}{canActOnAuthor&&!isOwn&&<button onClick={()=>{onMessage();setMenuOpen(false)}}><MessageCircle size={15}/> Message {post.handle}</button>}</div>}
-    </div>
-    <div className="post-content">
-      {(post.trending || post.anonymous || post.tag) && <div className="post-badges">{post.trending&&<span className="badge trending-badge"><Sparkles size={12}/> Trending</span>}{post.anonymous&&<span className="badge confession-badge">😳 Confession</span>}{post.tag&&<span className="badge college-badge">{post.tag}</span>}</div>}
-      {slides.length === 0 && <p className="post-body"><RichText text={post.body} onMention={onOpenMention} onHashtag={onOpenTag}/></p>}
-      {mediaBlock}
-      <div className="post-actions"><button className={post.liked?'liked':''} onClick={onLike} aria-label={`Like post (${post.likes})`}><Heart size={19} fill={post.liked?'currentColor':'none'}/><span>{post.likes}</span></button><button onClick={onComment} aria-label={`Comment (${post.comments})`}><MessageCircle size={19}/><span>{post.comments}</span></button><button className={post.reposted?'reposted':''} onClick={onRepost} aria-label={`Repost (${post.reposts})`}><Repeat2 size={19}/><span>{post.reposts}</span></button><button onClick={onShare} aria-label="Share"><Share2 size={18}/></button><span className="action-spacer"/><button className={post.saved?'saved':''} onClick={onSave} aria-label="Bookmark"><Bookmark size={19} fill={post.saved?'currentColor':'none'}/></button><button onClick={onReport} aria-label="Report"><Flag size={18}/></button></div>
-      {slides.length > 0 && <p className="post-body post-caption"><RichText text={post.body} onMention={onOpenMention} onHashtag={onOpenTag}/></p>}
-    </div>
-  </article>
 }
 
 /* ---- System info pages (About · Guidelines · Privacy · Help) --------------- */
