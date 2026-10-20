@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useBodyScrollLock } from '../lib/scrollLock'
 import { ArrowLeft, Check, Eye, EyeOff, MailCheck, X } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 
@@ -14,6 +15,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 
 /** Email + password authentication, backed by Supabase Auth. */
 export default function AuthModal({ mode, onModeChange, onClose }: Props) {
+  useBodyScrollLock()
   const { signIn, signUp, resetPassword, status, configured } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')

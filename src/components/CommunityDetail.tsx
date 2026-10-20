@@ -12,6 +12,7 @@ import { mapFeedRow } from '../lib/db'
 import type { CampusPost } from '../types'
 import PostCard from './PostCard'
 import CommentsSheet from './CommentsSheet'
+import CommunityChat from './CommunityChat'
 import ReportDialog, { type ReportTarget } from './ReportDialog'
 import RichText from './RichText'
 
@@ -39,6 +40,10 @@ export default function CommunityDetail({
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'missing' | 'error'>('loading')
   const [loadError, setLoadError] = useState<string | null>(null)
   const [tab, setTab] = useState<DetailTab>('Feed')
+  // once the Chat tab has been opened, the panel stays mounted but hidden
+  // while other tabs are up — drafts, scroll position and realtime history
+  // survive tab switches without refetching
+  const [visitedChat, setVisitedChat] = useState(false)
 
   const isModerator = useMemo(
     () => detail?.my_role !== null && detail?.my_role !== undefined &&
@@ -109,7 +114,7 @@ export default function CommunityDetail({
   if (!detail) return null
 
   return (
-    <div className="community-detail">
+    <div className={`community-detail${tab === 'Chat' ? ' chat-open' : ''}`}>
       <DetailTopBar onBack={onBack} title={detail.name} privacy={detail.privacy} />
 
       <header className="community-hero">
@@ -150,7 +155,7 @@ export default function CommunityDetail({
 
       <nav className="community-tabs detail-tabs" data-no-page-swipe="true" aria-label="Community sections">
         {FEED_TABS.map(item => (
-          <button key={item} className={item === tab ? 'on' : ''} onClick={() => setTab(item)}>{item}</button>
+          <button key={item} className={item === tab ? 'on' : ''} onClick={() => { setTab(item); if (item === 'Chat') setVisitedChat(true) }}>{item}</button>
         ))}
       </nav>
 
@@ -170,8 +175,20 @@ export default function CommunityDetail({
           onOpenMention={onOpenMention}
         />
       )}
-      {tab === 'Chat' && (
-        <CommunityChatPanel communityId={detail.id} identity={identity} isMember={isMember} archived={detail.archived} />
+      {(tab === 'Chat' || visitedChat) && (
+        <div className={`cc-holder ${tab === 'Chat' ? '' : 'hidden'}`}>
+          {detail.archived ? (
+            <div className="empty-state"><MessageCircle size={28}/><b>Chat is closed</b><span>This community is archived. History stays but nothing new can be sent.</span></div>
+          ) : (
+            <CommunityChat
+              communityId={detail.id}
+              identity={identity}
+              isModerator={isModerator}
+              notify={notify}
+              onOpenMention={onOpenMention}
+            />
+          )}
+        </div>
       )}
       {tab === 'Resources' && (
         <ResourcesPanel
@@ -689,149 +706,6 @@ function CommunityFeedPanel({ detail, identity, isModerator, notify, requireAuth
 /* Chat panel                                                                  */
 /* -------------------------------------------------------------------------- */
 
-function CommunityChatPanel({ communityId, identity, isMember, archived }: {
-  communityId: string
-  identity: Identity | null
-  isMember: boolean
-  archived: boolean
-}) {
-  const [conversationId, setConversationId] = useState<string | null>(null)
-  const [status, setStatus] = useState<'loading' | 'open' | 'blocked' | 'error'>('loading')
-  const [error, setError] = useState<string | null>(null)
-  const [messages, setMessages] = useState<db.ChatMessage[]>([])
-  const [threadLoading, setThreadLoading] = useState(false)
-  const [draft, setDraft] = useState('')
-  const [sending, setSending] = useState(false)
-  const [threadError, setThreadError] = useState<string | null>(null)
-  const bottomRef = useRef<HTMLDivElement | null>(null)
-
-  const openChat = useCallback(async () => {
-    if (!identity) { setStatus('blocked'); return }
-    setStatus('loading')
-    try {
-      const id = await cm.openCommunityChat(communityId)
-      setConversationId(id)
-      setStatus('open')
-    } catch (err) {
-      setError(friendlyMessage(err))
-      setStatus('error')
-    }
-  }, [communityId, identity])
-
-  useEffect(() => {
-    if (status === 'blocked' || status === 'open') return
-    void openChat()
-  }, [status, openChat])
-
-  useEffect(() => {
-    if (!conversationId) return
-    let cancelled = false
-    setThreadLoading(true)
-    db.fetchChatMessages(conversationId)
-      .then(rows => { if (!cancelled) setMessages(rows) })
-      .catch(err => { if (!cancelled) setThreadError(friendlyMessage(err)) })
-      .finally(() => { if (!cancelled) setThreadLoading(false) })
-    const unsubscribe = db.subscribeChatMessages(conversationId, message => {
-      setMessages(current => {
-        const existing = current.findIndex(m => m.id === message.id)
-        if (existing === -1) return [...current, message]
-        const next = [...current]
-        next[existing] = message
-        return next
-      })
-    })
-    return () => { cancelled = true; unsubscribe() }
-  }, [conversationId])
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [messages.length, threadLoading])
-
-  const send = async () => {
-    if (!identity || !conversationId) return
-    const body = draft.trim()
-    if (!body || sending) return
-    setSending(true)
-    setThreadError(null)
-    try {
-      const saved = await db.sendChatMessage(conversationId, body, identity.id)
-      setDraft('')
-      setMessages(current => current.some(m => m.id === saved.id) ? current : [...current, saved])
-    } catch (err) {
-      setThreadError(friendlyMessage(err))
-    } finally {
-      setSending(false)
-    }
-  }
-
-  if (status === 'blocked') {
-    return <div className="empty-state"><MessageCircle size={28}/><b>Members' chat</b><span>Join this community to read and send messages here.</span></div>
-  }
-  if (archived) {
-    return <div className="empty-state"><MessageCircle size={28}/><b>Chat is closed</b><span>This community is archived. History stays but nothing new can be sent.</span></div>
-  }
-  if (status === 'error') {
-    return <div className="community-error" role="alert"><p>{error}</p><button onClick={() => void openChat()}>Try again</button></div>
-  }
-
-  return (
-    <section className="community-chat">
-      <div className="chat-scroll" ref={bottomRef}>
-        {threadLoading && <div className="chats-hint"><span className="mini-spinner"/>Loading messages…</div>}
-        {threadError && <div className="chats-hint error">{threadError}</div>}
-        {!threadLoading && !threadError && messages.length === 0 && (
-          <div className="chat-day-start">
-            <span>This community shares one room — keep it kind and useful.</span>
-          </div>
-        )}
-        {messages.map(message => {
-          const mine = message.senderId === identity?.id
-          return (
-            <div key={message.id} className={`chat-bubble-row ${mine ? 'mine' : 'theirs'}`}>
-              {!mine && <span className="avatar small">{initialsFor(message.senderName, '')}</span>}
-              <div className="chat-msg-stack">
-                <small className="chat-sender">{message.senderName}</small>
-                {message.deletedAt ? (
-                  <div className="chat-bubble unsent">
-                    <p>{mine ? 'You unsent a message' : `${message.senderName} unsent a message`}</p>
-                  </div>
-                ) : (
-                  <div className="chat-bubble">
-                    <p>{message.body}</p>
-                    <small>{relativeTime(message.createdAt)}{message.editedAt ? ' · edited' : ''}</small>
-                  </div>
-                )}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-      <div className="chat-input-row">
-        <input
-          value={draft}
-          onChange={event => setDraft(event.target.value)}
-          onKeyDown={event => {
-            if (event.key === 'Enter' && !event.shiftKey) {
-              event.preventDefault()
-              void send()
-            }
-          }}
-          maxLength={2000}
-          placeholder={identity ? 'Message everyone in the community…' : 'Sign in to chat'}
-          disabled={!identity || !conversationId}
-        />
-        <button
-          className="chat-send"
-          aria-label="Send message"
-          disabled={!identity || sending || !draft.trim()}
-          onClick={() => void send()}
-        >
-          {sending ? <span className="mini-spinner"/> : <Send size={17}/>}
-        </button>
-      </div>
-    </section>
-  )
-}
 
 /* -------------------------------------------------------------------------- */
 /* Resources panel                                                             */

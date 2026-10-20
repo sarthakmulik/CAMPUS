@@ -21,6 +21,7 @@ import PostCard from './components/PostCard'
 import Communities from './components/Communities'
 import Events from './components/Events'
 import Marketplace from './components/Marketplace'
+import BootScreen from './components/BootScreen'
 import * as cm from './lib/communities'
 import ReelPlayer from './components/ReelPlayer'
 import ReelsFeed from './components/ReelsFeed'
@@ -114,6 +115,32 @@ function CAMPUSApp() {
   const { user, profile, status, configured, colleges, requireAuth, notify, gateInfo, closeGate, profileError, reloadProfile, caps, patchProfile } = auth
 
   const [activeNav, setActiveNav] = useState('Home')
+
+  /* ---- boot experience --------------------------------------------------- */
+  // The loader lives only on the real boot path (session + profile restore).
+  // When the app becomes ready, a fixed veil keeps the loader on screen for a
+  // moment while it fades out — the destination is already rendered beneath
+  // it, so no blank frame ever appears.
+  const [bootVeilOn, setBootVeilOn] = useState(false)
+  const [bootSlow, setBootSlow] = useState(false)
+  useEffect(() => {
+    if (auth.booting) return
+    setBootVeilOn(true)
+    const timer = window.setTimeout(() => setBootVeilOn(false), 600)
+    return () => window.clearTimeout(timer)
+  }, [auth.booting])
+  // Watchdog: if initialization is still pending after 14s, say so honestly
+  // instead of letting the mark breathe silently forever (errors surface
+  // through the dedicated profile-error surface).
+  useEffect(() => {
+    if (!auth.booting) return
+    const timer = window.setTimeout(() => setBootSlow(true), 14000)
+    return () => window.clearTimeout(timer)
+  }, [auth.booting])
+  const bootVeil = bootVeilOn
+    ? <div className="boot-veil" aria-hidden="true"><BootScreen quiescent /></div>
+    : null
+
   const [feedTab, setFeedTab] = useState('For You')
   const [posts, setPosts] = useState(seedPosts)
   /** 'db' = the displayed feed is the live database feed; 'local' = sample fallback */
@@ -1138,6 +1165,7 @@ function CAMPUSApp() {
 
   const modals = (
     <>
+      {bootVeil}
       {toast}
       {gateInfo && (
         <SignUpPrompt
@@ -1160,31 +1188,30 @@ function CAMPUSApp() {
 
   if (auth.booting) {
     return (
-      <div className="boot-screen">
-        <span className="brand-mark large">C</span>
-        <p>Opening your campus…</p>
+      <>
+        <BootScreen slow={bootSlow} />
         {toast}
-      </div>
+      </>
     )
   }
 
   if (profileError) {
     return (
-      <div className="boot-screen">
-        <span className="brand-mark large">C</span>
-        <h2>We could not load your profile.</h2>
-        <p className="form-error" role="alert"><AlertCircle size={15} /> {profileError}</p>
-        <div className="wizard-actions inline">
-          <button className="secondary-button" onClick={() => void auth.signOut()}>Sign out</button>
-          <button className="primary-button" onClick={() => void reloadProfile()}>Try again</button>
-        </div>
-      </div>
+      <>
+        <BootScreen
+          error={profileError}
+          onRetry={() => void reloadProfile()}
+          onSignOut={() => void auth.signOut()}
+        />
+        {toast}
+      </>
     )
   }
 
   if (status === 'onboarding') {
     return (
       <>
+        {bootVeil}
         <OnboardingWizard />
         {toast}
       </>
@@ -1357,7 +1384,7 @@ function CAMPUSApp() {
                 onAutoOpened={() => setReelAutoOpen(null)}
               />
             : activeNav === 'Chats'
-              ? <Chats key={openChatId ?? 'list'} identity={identity && user ? { id: user.id, name: identity.name, username: identity.username, initials: identity.initials } : null} configured={configured} autoOpen={openChatId} onAutoOpened={() => setOpenChatId(null)} initialDraft={chatDraft} onDraftConsumed={() => setChatDraft(null)} />
+              ? <Chats key="chats" identity={identity && user ? { id: user.id, name: identity.name, username: identity.username, initials: identity.initials } : null} configured={configured} autoOpen={openChatId} onAutoOpened={() => setOpenChatId(null)} initialDraft={chatDraft} onDraftConsumed={() => setChatDraft(null)} />
               : activeNav === 'Profile'
               ? <Profile
                   key="profile"

@@ -1,4 +1,5 @@
 import { Check, UserPlus, X } from 'lucide-react'
+import { useBodyScrollLock } from '../lib/scrollLock'
 
 type Props = {
   reason: string
@@ -14,6 +15,8 @@ type Props = {
  * read-only feed.
  */
 export default function SignUpPrompt({ reason, onClose, onJoin, onSignIn }: Props) {
+  // visitor gate dialog — lock the welcome/onboarding page behind the dim
+  useBodyScrollLock()
   return (
     <div className="overlay" onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}>
       <section className="signup-prompt" role="dialog" aria-modal="true" aria-label={`Join CAMPUS to ${reason}`}>

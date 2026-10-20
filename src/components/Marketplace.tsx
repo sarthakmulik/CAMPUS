@@ -70,7 +70,7 @@ function ListingCard({ row, onOpen, onToggleSave }: {
   onToggleSave: (id: string) => Promise<void>
 }) {
   const [saving, setSaving] = useState(false)
-  const price = mk.priceLine(row)
+  const price = mk.priceLine(row, 56)
   const scopeLabel = row.audience === 'global' ? 'All colleges' : (row.collegeName ?? 'College listing')
 
   const toggleSave = async (event: React.MouseEvent) => {
@@ -150,6 +150,13 @@ export default function Marketplace({
   const [editing, setEditing] = useState<mk.ListingDetail | null>(null)
   const [detailKey, setDetailKey] = useState(0)
   const requestId = useRef(0)
+  const rowsRef = useRef<ListingSummary[]>([])
+
+  // The list callbacks read the current rows through this mirror instead of a
+  // `rows.length` dependency — depending on the length recreated `load` after
+  // every fetch, which refetched page one each time and collapsed "Load more"
+  // back to the first page.
+  useEffect(() => { rowsRef.current = rows })
 
   // debounce search input
   useEffect(() => {
@@ -181,18 +188,20 @@ export default function Marketplace({
         sort: effectiveSort,
         status: tab === 'My Listings' ? mineStatus : 'all',
         limit: PAGE_SIZE,
-        offset: mode === 'append' ? rows.length : 0,
+        offset: mode === 'append' ? rowsRef.current.length : 0,
       }
       const result = await mk.listListings(params)
       if (id !== requestId.current) return
-      setRows(prev => (mode === 'append' ? [...prev, ...result] : result))
+      const nextRows = mode === 'append' ? [...rowsRef.current, ...result] : result
+      rowsRef.current = nextRows
+      setRows(nextRows)
     } catch (err) {
       if (id !== requestId.current) return
       setError(err instanceof Error ? err.message : 'The marketplace could not be loaded.')
     } finally {
       if (id === requestId.current) { setLoading(false); setLoadingMore(false) }
     }
-  }, [tab, debouncedQuery, category, txType, condition, minPrice, maxPrice, college, scope, effectiveSort, mineStatus, rows.length])
+  }, [tab, debouncedQuery, category, txType, condition, minPrice, maxPrice, college, scope, effectiveSort, mineStatus])
 
   useEffect(() => { void load('replace') }, [load])
 
@@ -215,6 +224,12 @@ export default function Marketplace({
 
   const openDetail = (slug: string) => setOpenListingSlug(slug)
   const backToList = () => setOpenListingSlug(null)
+
+  // opening a detail — from the grid or a #m/ deep link — must start at the
+  // top; the body scroll offset from deep in the grid used to leak into detail
+  useEffect(() => {
+    if (openListingSlug) window.scrollTo(0, 0)
+  }, [openListingSlug])
 
   const openCreate = () => {
     if (!requireAuth('list an item')) return
@@ -296,7 +311,7 @@ export default function Marketplace({
         </button>
       </div>
 
-      <nav className="mk-tabs" aria-label="Marketplace sections">
+      <nav className="mk-tabs" aria-label="Marketplace sections" data-no-page-swipe="true">
         {TABS.map(t => (
           <button
             key={t}

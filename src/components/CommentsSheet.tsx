@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useBodyScrollLock } from '../lib/scrollLock'
 import { createPortal } from 'react-dom'
 import { BadgeCheck, Check, Heart, MessageCircle, Pencil, Pin, Send, Trash2, X } from 'lucide-react'
 import {
@@ -30,6 +31,8 @@ type ThreadRow = { parent: CampusComment; replies: CampusComment[] }
 export default function CommentsSheet({
   post, userId, identity, requireAuth, theme = 'light', onClose, onCountChange,
 }: CommentsSheetProps) {
+  // bottom sheet over a dimmed overlay — keep the feed from scrolling behind it
+  useBodyScrollLock()
   const [comments, setComments] = useState<CampusComment[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)

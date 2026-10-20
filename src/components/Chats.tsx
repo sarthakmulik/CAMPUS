@@ -69,16 +69,6 @@ export default function Chats({ identity, configured, autoOpen, onAutoOpened, in
     void loadConversations()
   }, [configured, identity?.id, loadConversations])
 
-  // Contact Seller prefills a contextual draft into the fresh conversation —
-  // it waits for the buyer to review and send it (never auto-sent).
-  useEffect(() => {
-    if (initialDraft) {
-      setDraft(initialDraft)
-      onDraftConsumed?.()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   const openConversation = useCallback(async (conversationId: string) => {
     setOpenId(conversationId)
     setMobileThread(true)
@@ -126,19 +116,48 @@ export default function Chats({ identity, configured, autoOpen, onAutoOpened, in
   }, [autoOpen])
 
   /* realtime: new messages in the open thread arrive live; edits and unsends
-     replace the row in place — no refetch, no navigation */
+     replace the row in place — no refetch, no navigation. Realtime payloads
+     carry only table columns (no persona or reply-quote fields), so state
+     fields overwrite while persona/quote fields are preserved from the row
+     we already hold (same rule as the community chat panel). */
   useEffect(() => {
     if (!openId) return
+    const mergeIncoming = (existing: db.ChatMessage, incoming: db.ChatMessage): db.ChatMessage => ({
+      ...existing,
+      body: incoming.body,
+      createdAt: incoming.createdAt,
+      editedAt: incoming.editedAt,
+      deletedAt: incoming.deletedAt,
+      deletedBy: incoming.deletedBy,
+      parentMessageId: incoming.parentMessageId ?? existing.parentMessageId,
+      parentAuthorName: incoming.parentAuthorName ?? existing.parentAuthorName,
+      parentExcerpt: incoming.parentExcerpt ?? existing.parentExcerpt,
+      attachments: incoming.attachments,
+      reactions: incoming.reactions,
+      pinnedAt: incoming.pinnedAt,
+      replyCount: incoming.replyCount || existing.replyCount,
+      senderUsername: incoming.senderUsername ?? existing.senderUsername,
+      senderName: incoming.senderName && incoming.senderName !== 'Student' ? incoming.senderName : existing.senderName,
+      senderAvatarUrl: incoming.senderAvatarUrl ?? existing.senderAvatarUrl,
+    })
     const unsubscribe = db.subscribeChatMessages(openId, (message, type) => {
       if (type === 'update') {
-        setMessages(list => list.map(item => item.id === message.id ? message : item))
+        setMessages(list => list.map(item => item.id === message.id ? mergeIncoming(item, message) : item))
         // the other side edited/unsent: refresh list previews + badges quietly
         void db.fetchConversations().then(rows => setConversations(rows)).catch(() => {})
         return
       }
       if (seenIds.current.has(message.id)) return
       seenIds.current.add(message.id)
-      setMessages(list => [...list, message])
+      setMessages(list => {
+        const index = list.findIndex(item => item.id === message.id)
+        if (index !== -1) {
+          const copy = [...list]
+          copy[index] = mergeIncoming(copy[index], message)
+          return copy
+        }
+        return [...list, message]
+      })
       if (message.senderId !== identity?.id) {
         void db.markConversationRead(openId)
         void db.fetchConversations().then(rows => setConversations(rows)).catch(() => {})
@@ -239,6 +258,18 @@ export default function Chats({ identity, configured, autoOpen, onAutoOpened, in
     || openStatus === 'declined'
     || (openStatus === 'pending' && !openMine)
     || myPendingUsed
+
+  // Contact Seller prefills a contextual draft into the fresh conversation —
+  // it waits for the buyer to review and send it (never auto-sent). The draft
+  // lands only once the composer is actually usable (chat requests resolve
+  // asynchronously, so applying it on mount would lose it behind the gate).
+  useEffect(() => {
+    if (initialDraft && !sendBlocked && !draft) {
+      setDraft(initialDraft)
+      onDraftConsumed?.()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sendBlocked, initialDraft, draft])
 
   const send = useCallback(async () => {
     const body = draft.trim()

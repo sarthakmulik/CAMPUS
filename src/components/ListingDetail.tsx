@@ -89,7 +89,9 @@ export default function ListingDetail({
       await mk.setListingStatus(row.id, status)
       await load()
       onChanged()
-      notify(`Listing ${mk.STATUS_LABELS[status].toLowerCase() === 'active' ? 'reopened' : `marked ${mk.STATUS_LABELS[status].toLowerCase()}`}.`)
+      notify(row.status === 'draft' && status === 'active'
+        ? 'Listing published — it can now be discovered.'
+        : `Listing marked ${mk.STATUS_LABELS[status].toLowerCase()}${status === 'active' ? ' (reopened)' : ''}.`)
     } catch (err) {
       notify(err instanceof Error ? err.message : 'That change was refused.')
     } finally {
@@ -137,6 +139,12 @@ export default function ListingDetail({
       notify(url)
     }
   }
+
+  useEffect(() => {
+    if (!reportOpen) return
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = '' }
+  }, [reportOpen])
 
   if (loading) {
     return <main className="mk-page"><div className="mk-state"><Loader2 className="spin" size={22} /> Loading listing…</div></main>
@@ -204,7 +212,7 @@ export default function ListingDetail({
                 )}
               </div>
               {row.images.length > 1 && (
-                <div className="mk-thumbs">
+                <div className="mk-thumbs" data-no-page-swipe="true">
                   {row.images.map((src, i) => (
                     <button key={src + i} className={i === photo ? 'on' : ''} onClick={() => setPhoto(i)}>
                       <img src={src} alt="" />

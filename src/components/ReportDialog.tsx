@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useBodyScrollLock } from '../lib/scrollLock'
 import { AlertCircle, Flag, X } from 'lucide-react'
 import * as db from '../lib/db'
 
@@ -32,6 +33,8 @@ const REASONS = [
  * rate-limited submit_report() function. Failures are shown, never ignored.
  */
 export default function ReportDialog({ target, onClose, onSubmitted }: Props) {
+  // report dialog — lock the page behind the dimmed overlay
+  useBodyScrollLock()
   const [reason, setReason] = useState(REASONS[0])
   const [details, setDetails] = useState('')
   const [busy, setBusy] = useState(false)

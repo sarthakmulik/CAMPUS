@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useBodyScrollLock } from '../lib/scrollLock'
 import { X, Play, Pause, Check, Scissors } from 'lucide-react'
 import { formatClipTime, probeVideo, REEL_WINDOW_SECONDS } from '../lib/media'
 
@@ -17,6 +18,8 @@ export default function ReelTrim({
   onApply: (window: { start: number; end: number }) => void
   onCancel: () => void
 }) {
+  // trim sheet over a dimmed overlay — lock the feed behind it
+  useBodyScrollLock()
   const [duration, setDuration] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [start, setStart] = useState(0)

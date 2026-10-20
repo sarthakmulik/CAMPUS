@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useBodyScrollLock } from '../lib/scrollLock'
 import {
   CalendarDays, Check, ChevronLeft, ChevronRight, Globe2, Image as ImageIcon,
   Loader2, Lock, MapPin, Users, X, Video,
@@ -84,6 +85,9 @@ const emptyState = {
 export default function CreateEventWizard({
   editing, colleges, myCollegeId, identityId, notify, onClose, onDone,
 }: Props) {
+  // fixed dialog — lock the page behind it so backdrop drags don't scroll
+  // the events page / feed underneath (same rule as CreateListingWizard)
+  useBodyScrollLock()
   const [step, setStep] = useState(0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)

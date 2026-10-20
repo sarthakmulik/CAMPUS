@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { useBodyScrollLock } from '../lib/scrollLock'
 import {
   ArrowLeft, ArrowRight, BadgeCheck, Building2, Check, ChevronLeft, ChevronRight,
   Globe2, ImagePlus, Loader2, Package, RotateCcw, ShieldAlert, Trash2, X,
@@ -69,6 +70,10 @@ export default function CreateListingWizard({
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // the wizard is the app's longest modal — lock the page behind it so a
+  // touch drag on the dimmed backdrop can't scroll the marketplace away
+  useBodyScrollLock()
 
   const myCollege = colleges.find(c => c.id === myCollegeId)
 

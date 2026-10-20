@@ -149,19 +149,28 @@ export function formatInr(value: number | string | null): string | null {
   return inr.format(n)
 }
 
-/** Human price line for a listing card/detail — honest about type. */
-export function priceLine(row: Pick<ListingSummary, 'transactionType' | 'price' | 'budgetMax' | 'negotiable' | 'exchangeFor'>): string {
-  if (row.transactionType === 'free') return 'Free'
-  if (row.transactionType === 'exchange') {
-    return row.exchangeFor ? `Exchange — wants ${row.exchangeFor}` : 'Exchange'
-  }
-  if (row.transactionType === 'wanted') {
+/** Human price line for a listing card/detail — honest about type. An exchange
+ * "want" can run to 500 characters, so call sites may cap the line; the detail
+ * page keeps the full text, cards use a short one. */
+export function priceLine(
+  row: Pick<ListingSummary, 'transactionType' | 'price' | 'budgetMax' | 'negotiable' | 'exchangeFor'>,
+  maxLength?: number,
+): string {
+  let line: string
+  if (row.transactionType === 'free') line = 'Free'
+  else if (row.transactionType === 'exchange') {
+    line = row.exchangeFor ? `Exchange — wants ${row.exchangeFor}` : 'Exchange'
+  } else if (row.transactionType === 'wanted') {
     const budget = formatInr(row.budgetMax)
-    return budget ? `Wanted — up to ${budget}` : 'Wanted'
+    line = budget ? `Wanted — up to ${budget}` : 'Wanted'
+  } else {
+    const price = formatInr(row.price)
+    line = !price ? 'Price on request' : row.negotiable ? `${price} · negotiable` : price
   }
-  const price = formatInr(row.price)
-  if (!price) return 'Price on request'
-  return row.negotiable ? `${price} · negotiable` : price
+  if (maxLength != null && line.length > maxLength) {
+    line = `${line.slice(0, maxLength - 1).trimEnd()}…`
+  }
+  return line
 }
 
 export interface ListParams {

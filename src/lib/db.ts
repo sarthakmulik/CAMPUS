@@ -722,17 +722,31 @@ export type ChatSummary = {
   unread: number
 }
 
+export type ChatAttachment = { path: string; name: string; mime: string; size: number }
+
 export type ChatMessage = {
   id: string
   conversationId: string
   senderId: string | null
   senderName: string
+  senderUsername: string | null
+  senderAvatarUrl: string | null
   /** empty for an unsent message — render the tombstone instead */
   body: string
   createdAt: string
   editedAt: string | null
   /** set when the sender unsent the message (Instagram-style tombstone) */
   deletedAt: string | null
+  /** a moderator removal when set and different from senderId */
+  deletedBy: string | null
+  /** replies bind to their thread root (one flat level) */
+  parentMessageId: string | null
+  parentAuthorName: string | null
+  parentExcerpt: string | null
+  attachments: ChatAttachment[]
+  reactions: Record<string, string[]>
+  pinnedAt: string | null
+  replyCount: number
 }
 
 type ChatMessageRow = {
@@ -741,10 +755,19 @@ type ChatMessageRow = {
   sender_id: string | null
   sender_username: string | null
   sender_display_name: string | null
+  sender_avatar_url?: string | null
   body: string | null
   created_at: string
   edited_at: string | null
   deleted_at: string | null
+  deleted_by?: string | null
+  parent_message_id?: string | null
+  parent_author_name?: string | null
+  parent_excerpt?: string | null
+  attachments?: ChatAttachment[] | null
+  reactions?: Record<string, string[]> | null
+  pinned_at?: string | null
+  reply_count?: number | null
 }
 
 export function mapChatMessage(row: ChatMessageRow): ChatMessage {
@@ -755,10 +778,20 @@ export function mapChatMessage(row: ChatMessageRow): ChatMessage {
     conversationId: row.conversation_id,
     senderId: row.sender_id,
     senderName: name,
+    senderUsername: row.sender_username ?? null,
+    senderAvatarUrl: row.sender_avatar_url ?? null,
     body: unsent ? '' : (row.body as string),
     createdAt: row.created_at,
     editedAt: row.edited_at,
     deletedAt: row.deleted_at,
+    deletedBy: row.deleted_by ?? null,
+    parentMessageId: row.parent_message_id ?? null,
+    parentAuthorName: row.parent_author_name ?? null,
+    parentExcerpt: row.parent_excerpt ?? null,
+    attachments: unsent ? [] : (row.attachments ?? []),
+    reactions: unsent ? {} : (row.reactions ?? {}),
+    pinnedAt: row.pinned_at ?? null,
+    replyCount: Number(row.reply_count ?? 0),
   }
 }
 
@@ -949,30 +982,31 @@ export async function fetchChatMessages(
     .reverse() // chronological order in the thread
 }
 
-/** Send one message; RLS guarantees sender = caller and membership. */
-export async function sendChatMessage(conversationId: string, body: string, senderId: string): Promise<ChatMessage> {
+/**
+ * Send one message through the trusted send_chat_message RPC: validates
+ * membership, body length, burst limit (8/30s), attachment metadata, reply
+ * integrity (same conversation, not a tombstone) and runs the mention +
+ * reply notification fan-out. senderId stays in the signature for callers
+ * that already have it; the server always re-derives the sender as auth.uid().
+ */
+export async function sendChatMessage(
+  conversationId: string,
+  body: string,
+  senderId: string, // eslint-disable-line @typescript-eslint/no-unused-vars — kept for call-site compatibility
+  options: { parentId?: string | null; attachments?: ChatAttachment[] } = {},
+): Promise<ChatMessage> {
   if (!supabase) throw new Error('CAMPUS is not connected.')
-  // sender_id must be sent explicitly — the RLS policy checks it against
-  // auth.uid(), and a NULL sender would fail that check
-  const { data, error } = await supabase
-    .from('chat_messages')
-    .insert({ conversation_id: conversationId, sender_id: senderId, body })
-    .select('id, conversation_id, sender_id, body, created_at, edited_at, deleted_at')
-    .single()
-  if (error) throw new Error(friendlyMessage(error))
-  const row = (data ?? {}) as Record<string, unknown>
-  // sender name comes from identity at call site; db lookup not needed
-  return mapChatMessage({
-    id: row.id as string,
-    conversation_id: row.conversation_id as string,
-    sender_id: row.sender_id as string | null,
-    sender_username: null,
-    sender_display_name: null,
-    body: row.body as string | null,
-    created_at: row.created_at as string,
-    edited_at: (row.edited_at as string | null) ?? null,
-    deleted_at: (row.deleted_at as string | null) ?? null,
+  const { data, error } = await supabase.rpc('send_chat_message', {
+    p_conversation: conversationId,
+    p_body: body,
+    p_parent_id: options.parentId ?? null,
+    p_attachments: options.attachments?.length ? options.attachments : null,
   })
+  if (error) throw new Error(friendlyMessage(error))
+  const rows = (data ?? []) as unknown as ChatMessageRow[]
+  const row = rows[0]
+  if (!row) throw new Error('The message did not come back — reload the chat.')
+  return mapChatMessage(row)
 }
 
 /** Edit one of your own sent messages (server rule: sender only, within 24h). */
@@ -1001,11 +1035,132 @@ export async function markConversationRead(conversationId: string): Promise<void
   if (error) throw new Error(friendlyMessage(error))
 }
 
+/* ------------------------------------------------------------------ */
+/* Chat 2.0: threads, reactions, pins, search, mention targets         */
+/* ------------------------------------------------------------------ */
+
+/** One thread: the root message + every reply bound to it, oldest first. */
+export async function fetchChatThread(messageId: string): Promise<ChatMessage[]> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('list_chat_thread', { p_message: messageId })
+  if (error) throw new Error(friendlyMessage(error))
+  return ((data ?? []) as unknown as ChatMessageRow[]).map(mapChatMessage)
+}
+
+/** Search THIS conversation's history (text, author name, or #hashtag). */
+export async function searchChatMessages(
+  conversationId: string,
+  query: string,
+  hashtag: string,
+  beforeIso?: string | null,
+): Promise<ChatMessage[]> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('search_chat', {
+    p_conversation: conversationId,
+    p_query: query,
+    p_hashtag: hashtag,
+    p_before: beforeIso ?? null,
+  })
+  if (error) throw new Error(friendlyMessage(error))
+  return ((data ?? []) as unknown as ChatMessageRow[]).map(mapChatMessage)
+}
+
+/** Newest pinned messages of a conversation (drives the pinned banner). */
+export async function fetchChatPins(conversationId: string): Promise<ChatMessage[]> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('list_chat_pins', { p_conversation: conversationId })
+  if (error) throw new Error(friendlyMessage(error))
+  return ((data ?? []) as unknown as ChatMessageRow[]).map(mapChatMessage)
+}
+
+/** Toggle one emoji on one message; returns the message's new reaction map. */
+export async function toggleChatReaction(messageId: string, emoji: string): Promise<Record<string, string[]>> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('toggle_chat_reaction', { p_message: messageId, p_emoji: emoji })
+  if (error) throw new Error(friendlyMessage(error))
+  return ((data ?? {}) as Record<string, string[]>) ?? {}
+}
+
+/** Sender self-removal or community-moderator removal (same tombstone path). */
+export async function removeChatMessage(messageId: string): Promise<string | null> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('moderate_delete_chat_message', { p_message: messageId })
+  if (error) throw new Error(friendlyMessage(error))
+  return (data as string | null) ?? null
+}
+
+/** Moderators pin / unpin a message; returns the new pinned_at (or null). */
+export async function setChatMessagePin(messageId: string, pinned: boolean): Promise<string | null> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('set_chat_message_pin', { p_message: messageId, p_pinned: pinned })
+  if (error) throw new Error(friendlyMessage(error))
+  return (data as string | null) ?? null
+}
+
+export type MentionTarget = { id: string; username: string; displayName: string; avatarUrl: string | null }
+
+/** Members of THIS conversation for @-autocomplete (never beyond it). */
+export async function fetchMentionTargets(conversationId: string, query: string): Promise<MentionTarget[]> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('list_chat_mention_targets', {
+    p_conversation: conversationId,
+    p_query: query,
+  })
+  if (error) throw new Error(friendlyMessage(error))
+  return ((data ?? []) as Array<Record<string, unknown>>).map(row => ({
+    id: row.id as string,
+    username: (row.username as string) ?? '',
+    displayName: ((row.display_name as string) ?? '').trim() || (row.username as string) || 'Student',
+    avatarUrl: (row.avatar_url as string | null) ?? null,
+  }))
+}
+
+const CHAT_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024
+const CHAT_ATTACHMENT_MIMES = new Set([
+  'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf',
+  'text/plain', 'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+])
+
+/** Upload one chat attachment to the PRIVATE chat-media bucket, inside this
+ *  conversation's own folder. Throws with honest reasons before any upload. */
+export async function uploadChatAttachment(conversationId: string, file: File): Promise<ChatAttachment> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  if (!CHAT_ATTACHMENT_MIMES.has(file.type)) throw new Error('That file type is not supported.')
+  if (file.size <= 0) throw new Error('That file is empty.')
+  if (file.size > CHAT_ATTACHMENT_MAX_BYTES) throw new Error('Attachments can be at most 25 MB.')
+  // keep the extension, sanitize the rest of the name into the stored path
+  // (the human-visible name travels inside the message)
+  const dot = file.name.lastIndexOf('.')
+  const ext = dot > 0 ? file.name.slice(dot).toLowerCase().slice(0, 12) : ''
+  const random = crypto.getRandomValues(new Uint32Array(1))[0].toString(36)
+  const path = `${conversationId}/${Date.now()}-${random}${ext}`
+  const { error } = await supabase.storage.from('chat-media').upload(path, file, { cacheControl: '3600' })
+  if (error) throw new Error(friendlyMessage(error))
+  return { path, name: file.name.slice(0, 180), mime: file.type, size: file.size }
+}
+
+/** Short-lived signed URLs for private chat attachments (1 hour). */
+export async function chatAttachmentUrls(paths: string[]): Promise<Record<string, string>> {
+  if (!supabase || paths.length === 0) return {}
+  const entries = await Promise.all(paths.map(async path => {
+    const { data, error } = await supabase!.storage.from('chat-media').createSignedUrl(path, 3600)
+    return [path, error ? null : (data?.signedUrl ?? null)] as const
+  }))
+  const out: Record<string, string> = {}
+  for (const [path, url] of entries) if (url) out[path] = url
+  return out
+}
+
 /**
  * Live message stream for one conversation via Supabase Realtime: INSERT for
- * new messages AND UPDATE for edits / unsends, so an open thread stays
- * up-to-the-second without any refetch. Returns an unsubscribe function;
- * callers dedupe inserts by message id and replace rows on update.
+ * new messages AND UPDATE for edits / unsends / reactions / pins, so an open
+ * thread stays up-to-the-second without any refetch. Returns an unsubscribe
+ * function; callers dedupe inserts by message id and replace rows on update.
  */
 export function subscribeChatMessages(
   conversationId: string,
@@ -1013,19 +1168,69 @@ export function subscribeChatMessages(
 ): () => void {
   if (!supabase) return () => {}
   const client = supabase
+  /* Realtime postgres_changes payloads on chat_messages carry table
+     columns only — sender persona (username / display name / avatar) and
+     the derived reply-quote fields never travel on the wire. Quoted
+     reply fields are preserved client-side by the panel's merge; the
+     persona is hydrated here once per sender (small, cached): the bare
+     row is delivered FIRST so the bubble appears instantly, then the
+     name lands a moment later. */
+  const personaCache = new Map<string, { username: string; name: string; avatar: string | null }>()
+  // profiles that returned nothing this session are not re-queried
+  const personaMisses = new Set<string>()
+  const applyPersona = (bare: ChatMessage, persona: { username: string; name: string; avatar: string | null }) => {
+    onChange({
+      ...bare,
+      senderUsername: persona.username || null,
+      senderName: persona.name,
+      senderAvatarUrl: persona.avatar,
+    }, 'update')
+  }
+  const hydratePersona = (bare: ChatMessage, senderId: string | null | undefined) => {
+    if (!senderId || !bare.id || personaMisses.has(senderId)) return
+    const cached = personaCache.get(senderId)
+    if (cached) { applyPersona(bare, cached); return }
+    void (async () => {
+      const { data, error } = await client
+        .from('profiles')
+        .select('username, display_name, avatar_url')
+        .eq('id', senderId)
+        .single()
+      if (error || !data) { personaMisses.add(senderId); return }
+      const entry = {
+        username: (data.username as string) ?? '',
+        name: ((data.display_name as string) || (data.username as string) || 'Student').trim(),
+        avatar: (data.avatar_url as string) ?? null,
+      }
+      personaCache.set(senderId, entry)
+      applyPersona(bare, entry)
+    })()
+  }
   const handle = (row: Record<string, unknown>, type: 'insert' | 'update') => {
     if (!row?.id) return
-    onChange(mapChatMessage({
+    const bare = mapChatMessage({
       id: row.id as string,
       conversation_id: (row.conversation_id as string) ?? conversationId,
       sender_id: (row.sender_id as string | null) ?? null,
       sender_username: null,
       sender_display_name: null,
+      sender_avatar_url: null,
       body: (row.body as string | null) ?? '',
       created_at: (row.created_at as string) ?? new Date().toISOString(),
       edited_at: (row.edited_at as string | null) ?? null,
       deleted_at: (row.deleted_at as string | null) ?? null,
-    }), type)
+      deleted_by: (row.deleted_by as string | null) ?? null,
+      parent_message_id: (row.parent_message_id as string | null) ?? null,
+      parent_author_name: null,
+      parent_excerpt: null,
+      attachments: (row.attachments as ChatAttachment[] | null) ?? [],
+      reactions: (row.reactions as Record<string, string[]> | null) ?? {},
+      pinned_at: (row.pinned_at as string | null) ?? null,
+      reply_count: null,
+    })
+    onChange(bare, type)
+    // the bare row shows instantly; the persona lands a moment later
+    hydratePersona(bare, (row.sender_id as string) ?? null)
   }
   const channel = client
     .channel(`chat:${conversationId}`)
