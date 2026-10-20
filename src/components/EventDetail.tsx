@@ -9,6 +9,7 @@ import * as db from '../lib/db'
 import { friendlyMessage } from '../lib/db'
 import { registrationState } from './Events'
 import CreateEventWizard from './CreateEventWizard'
+import ShareContentSheet, { type ShareTarget } from './chat/ShareContentSheet'
 
 type Identity = { id: string; name: string; username: string; initials: string }
 
@@ -136,15 +137,25 @@ export default function EventDetail({
     }
   }
 
-  const share = async () => {
-    const link = `${window.location.origin}${window.location.pathname}#e/${detail?.slug ?? slug}`
-    try {
-      if (navigator.share) await navigator.share({ url: link, title: detail?.title ?? 'CAMPUS event' })
-      else if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(link)
-      notify('Event link ready to share.')
-    } catch {
-      notify(link)
+  const [eventShareTarget, setEventShareTarget] = useState<ShareTarget | null>(null)
+  const share = () => {
+    if (!detail || detail.cancelled_at || !detail.published) {
+      // an unpublished/cancelled event has no shareable card — link only
+      void (async () => {
+        const link = `${window.location.origin}${window.location.pathname}#e/${detail?.slug ?? slug}`
+        const failure = await db.copyToClipboard(link)
+        notify(failure ?? 'Event link ready to share.')
+      })()
+      return
     }
+    setEventShareTarget({
+      kind: 'event',
+      id: detail.id,
+      title: detail.title,
+      subtitle: detail.venue ?? `${new Date(detail.starts_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`,
+      image: detail.cover_url ?? null,
+      slug: detail.slug,
+    })
   }
 
   const reportPanel = async (reason: string) => {
@@ -565,6 +576,14 @@ export default function EventDetail({
             notify('Event updated — attendees got one notice.')
             void reload()
           }}
+        />
+      )}
+      {eventShareTarget && (
+        <ShareContentSheet
+          target={eventShareTarget}
+          onClose={() => setEventShareTarget(null)}
+          onFlash={notify}
+          onSent={count => notify(count === 1 ? 'Sent to 1 chat.' : `Sent to ${count} chats.`)}
         />
       )}
     </div>

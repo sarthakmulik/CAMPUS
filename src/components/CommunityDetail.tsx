@@ -14,6 +14,7 @@ import PostCard from './PostCard'
 import CommentsSheet from './CommentsSheet'
 import CommunityChat from './CommunityChat'
 import ReportDialog, { type ReportTarget } from './ReportDialog'
+import ShareContentSheet, { type ShareTarget } from './chat/ShareContentSheet'
 import RichText from './RichText'
 
 type Identity = { id: string; name: string; username: string; initials: string }
@@ -590,10 +591,15 @@ function CommunityFeedPanel({ detail, identity, isModerator, notify, requireAuth
     }
   }
 
-  const sharePost = async (post: CampusPost) => {
-    const url = db.postLink(post.id)
-    const failure = await db.copyToClipboard(url)
-    notify(failure ?? 'Link copied — anyone with access can open this post.')
+  const [postShareTarget, setPostShareTarget] = useState<ShareTarget | null>(null)
+  const sharePost = (post: CampusPost) => {
+    setPostShareTarget({
+      kind: 'post',
+      id: post.id,
+      title: post.body.trim().slice(0, 110) || 'Post',
+      subtitle: post.anonymous ? 'Anonymous post' : `by ${post.author}`,
+      image: post.media?.[0] ?? null,
+    })
   }
 
   const savedHint = (post: CampusPost) => patchPost(post.id, { saved: !post.saved })
@@ -664,7 +670,7 @@ function CommunityFeedPanel({ detail, identity, isModerator, notify, requireAuth
               onLike={() => void like(post)}
               onSave={() => savedHint(post)}
               onComment={() => { if (requireAuth('join the conversation', 'Communities')) setCommentTarget(post) }}
-              onShare={() => void sharePost(post)}
+              onShare={() => sharePost(post)}
               onReport={() => setReportTarget({ label: 'this post', postId: post.id, excerpt: post.body.slice(0, 200) })}
               onRepost={() => notify('Reposts do not work inside communities yet — share the post instead.')}
               onBlock={() => notify('Use the Members tab to manage community moderators.')}
@@ -696,6 +702,14 @@ function CommunityFeedPanel({ detail, identity, isModerator, notify, requireAuth
           target={reportTarget}
           onClose={() => setReportTarget(null)}
           onSubmitted={message => { setReportTarget(null); notify(message) }}
+        />
+      )}
+      {postShareTarget && (
+        <ShareContentSheet
+          target={postShareTarget}
+          onClose={() => setPostShareTarget(null)}
+          onFlash={notify}
+          onSent={count => notify(count === 1 ? 'Sent to 1 chat.' : `Sent to ${count} chats.`)}
         />
       )}
     </section>

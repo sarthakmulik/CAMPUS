@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import * as mk from '../lib/marketplace'
 import * as db from '../lib/db'
+import ShareContentSheet, { type ShareTarget } from './chat/ShareContentSheet'
 
 type Identity = { id: string; name: string; username: string; initials: string }
 
@@ -130,14 +131,27 @@ export default function ListingDetail({
     }
   }
 
-  const share = async () => {
-    const url = `${window.location.origin}${window.location.pathname}#m/${slug}`
-    try {
-      await navigator.clipboard.writeText(url)
-      notify('Link copied — share it with a classmate.')
-    } catch {
-      notify(url)
+  /** share: open the CAMPUS share sheet (send into chats; the link stays
+   *  copyable inside the sheet) with the honest legacy hand-off as fallback */
+  const [shareTarget, setShareTarget] = useState<ShareTarget | null>(null)
+  const share = () => {
+    if (!row || row.status !== 'active') {
+      // a draft/removed listing has no shareable card — copy the link only
+      void (async () => {
+        const url = `${window.location.origin}${window.location.pathname}#m/${slug}`
+        const failure = await db.copyToClipboard(url)
+        notify(failure ?? 'Link copied — share it with a classmate.')
+      })()
+      return
     }
+    setShareTarget({
+      kind: 'listing',
+      id: row.id,
+      title: row.title,
+      subtitle: mk.priceLine(row, 60),
+      image: row.images?.[0] ?? null,
+      slug: row.slug,
+    })
   }
 
   useEffect(() => {
@@ -416,6 +430,14 @@ export default function ListingDetail({
             </footer>
           </div>
         </div>
+      )}
+      {shareTarget && (
+        <ShareContentSheet
+          target={shareTarget}
+          onClose={() => setShareTarget(null)}
+          onFlash={notify}
+          onSent={count => notify(count === 1 ? 'Sent to 1 chat.' : `Sent to ${count} chats.`)}
+        />
       )}
     </main>
   )

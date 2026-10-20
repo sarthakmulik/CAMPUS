@@ -9,6 +9,7 @@ import {
 } from '../lib/db'
 import type { CampusPost } from '../types'
 import CommentsSheet from './CommentsSheet'
+import type { ShareTarget } from './chat/ShareContentSheet'
 
 type ReelsFeedProps = {
   userId: string | null
@@ -19,6 +20,8 @@ type ReelsFeedProps = {
   onCreateReel: () => void
   /** tap the author's avatar or name → open their profile (anonymous reels keep the author hidden) */
   onOpenAuthor: (profileId: string) => void
+  /** share the reel INTO CAMPUS chats (opens the share sheet) instead of only copying a link */
+  onShareContent?: (target: ShareTarget) => void
   /** deep-linked reel id — the stage slides to it (fetching it if needed) */
   autoOpenId?: string | null
   onAutoOpened?: () => void
@@ -33,7 +36,7 @@ const PAGE_SIZE = 8
  * caption + author overlay and a live progress line — everything reads its
  * numbers from the database (list_public_reels, migration 0004).
  */
-export default function ReelsFeed({ userId, identity, requireAuth, flash, onReport, onCreateReel, onOpenAuthor, autoOpenId, onAutoOpened }: ReelsFeedProps) {
+export default function ReelsFeed({ userId, identity, requireAuth, flash, onReport, onCreateReel, onOpenAuthor, onShareContent, autoOpenId, onAutoOpened }: ReelsFeedProps) {
   const [reels, setReels] = useState<CampusPost[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -142,6 +145,23 @@ export default function ReelsFeed({ userId, identity, requireAuth, flash, onRepo
     setReels(current => current.map(r => r.id === post.id ? { ...r, saved: !r.saved } : r))
   }
 
+  /** share: open the CAMPUS share sheet (send into chats) when wired —
+   *  otherwise the legacy native-share/clipboard hand-off */
+  const shareReel = (post: CampusPost) => {
+    if (!requireAuth('share reels')) return
+    if (onShareContent) {
+      onShareContent({
+        kind: 'reel',
+        id: post.id,
+        title: post.body.trim().slice(0, 110) || 'Reel',
+        subtitle: post.anonymous ? 'Anonymous reel' : `by ${post.author}`,
+        image: post.media?.[0] ?? null,
+      })
+      return
+    }
+    void copyCaption(post)
+  }
+
   const copyCaption = async (post: CampusPost) => {
     if (!requireAuth('share reels')) return
     const url = postLink(post.id)
@@ -193,7 +213,7 @@ export default function ReelsFeed({ userId, identity, requireAuth, flash, onRepo
               onToggleLike={() => void likeReel(post)}
               onSave={() => saveReel(post)}
               onComment={() => openReelComments(post)}
-              onShare={() => void copyCaption(post)}
+              onShare={() => shareReel(post)}
               onReport={() => onReport(post)}
               menuOpen={moreMenuFor === post.id}
               onMenu={() => setMoreMenuFor(current => current === post.id ? null : post.id)}

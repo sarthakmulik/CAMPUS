@@ -716,13 +716,27 @@ export type ChatSummary = {
   peerId: string | null
   peerName: string
   peerUsername: string
+  peerAvatar: string | null
   memberCount: number
-  lastBody: string | null
+  /** server-side preview: text, "Sent a photo", "Sent a reel"… (0023) */
+  lastPreview: string | null
+  lastSenderId: string | null
   lastAt: string | null
+  /** the other side has read MY newest message (dm) */
+  lastSeen: boolean
   unread: number
+  /** per-USER inbox preferences (0023) */
+  pinned: boolean
+  muted: boolean
+  archived: boolean
+  /** "clear chat" cutoff — messages at/before this are hidden from MY view (0024) */
+  clearedAt: string | null
 }
 
 export type ChatAttachment = { path: string; name: string; mime: string; size: number }
+
+/** The kind of CAMPUS content a message can REFERENCE (never duplicate). */
+export type ChatSharedKind = 'reel' | 'post' | 'profile' | 'listing' | 'event'
 
 export type ChatMessage = {
   id: string
@@ -747,6 +761,22 @@ export type ChatMessage = {
   reactions: Record<string, string[]>
   pinnedAt: string | null
   replyCount: number
+  /** an honest group event line ("X added Y"), not a member's own message */
+  isSystem: boolean
+  /** referenced CAMPUS content (0023) */
+  sharedKind: ChatSharedKind | null
+  sharedId: string | null
+  sharedTitle: string | null
+  sharedSubtitle: string | null
+  sharedAuthor: string | null
+  sharedImage: string | null
+  /** #m/<slug> / #e/<slug> deep links use this */
+  sharedSlug: string | null
+  /** false → the referenced content is gone/restricted for THIS reader */
+  sharedAvailable: boolean
+  /** read receipts (0023): the others' newest read + how many read this */
+  seenAt: string | null
+  seenCount: number
 }
 
 type ChatMessageRow = {
@@ -768,6 +798,17 @@ type ChatMessageRow = {
   reactions?: Record<string, string[]> | null
   pinned_at?: string | null
   reply_count?: number | null
+  is_system?: boolean | null
+  shared_kind?: string | null
+  shared_id?: string | null
+  shared_title?: string | null
+  shared_subtitle?: string | null
+  shared_author?: string | null
+  shared_image?: string | null
+  shared_slug?: string | null
+  shared_available?: boolean | null
+  seen_at?: string | null
+  seen_count?: number | null
 }
 
 export function mapChatMessage(row: ChatMessageRow): ChatMessage {
@@ -792,6 +833,17 @@ export function mapChatMessage(row: ChatMessageRow): ChatMessage {
     reactions: unsent ? {} : (row.reactions ?? {}),
     pinnedAt: row.pinned_at ?? null,
     replyCount: Number(row.reply_count ?? 0),
+    isSystem: Boolean(row.is_system),
+    sharedKind: unsent ? null : ((row.shared_kind as ChatSharedKind | null) ?? null),
+    sharedId: unsent ? null : (row.shared_id ?? null),
+    sharedTitle: row.shared_title ?? null,
+    sharedSubtitle: row.shared_subtitle ?? null,
+    sharedAuthor: row.shared_author ?? null,
+    sharedImage: row.shared_image ?? null,
+    sharedSlug: row.shared_slug ?? null,
+    sharedAvailable: row.shared_available !== false,
+    seenAt: row.seen_at ?? null,
+    seenCount: Number(row.seen_count ?? 0),
   }
 }
 
@@ -810,10 +862,17 @@ function mapConversationRow(row: Record<string, unknown>): ChatSummary {
     peerId: kind === 'dm' ? ((row.peer_id as string) ?? null) : null,
     peerName: displayName || (username ? `@${username}` : 'Classmate'),
     peerUsername: kind === 'dm' ? username : '',
+    peerAvatar: kind === 'dm' ? ((row.avatar_url as string | null) ?? null) : null,
     memberCount: Number(row.member_count ?? 0),
-    lastBody: (row.last_body as string) ?? null,
+    lastPreview: (row.last_preview as string) ?? null,
+    lastSenderId: (row.last_sender_id as string) ?? null,
     lastAt: (row.last_at as string) ?? null,
+    lastSeen: Boolean(row.last_seen),
     unread: Number(row.unread_count ?? 0),
+    pinned: Boolean(row.pinned),
+    muted: Boolean(row.muted),
+    archived: Boolean(row.archived),
+    clearedAt: ((row.cleared_at as string | null) ?? null),
   }
 }
 
@@ -993,7 +1052,12 @@ export async function sendChatMessage(
   conversationId: string,
   body: string,
   senderId: string, // eslint-disable-line @typescript-eslint/no-unused-vars — kept for call-site compatibility
-  options: { parentId?: string | null; attachments?: ChatAttachment[] } = {},
+  options: {
+    parentId?: string | null
+    attachments?: ChatAttachment[]
+    sharedKind?: ChatSharedKind | null
+    sharedId?: string | null
+  } = {},
 ): Promise<ChatMessage> {
   if (!supabase) throw new Error('CAMPUS is not connected.')
   const { data, error } = await supabase.rpc('send_chat_message', {
@@ -1001,6 +1065,8 @@ export async function sendChatMessage(
     p_body: body,
     p_parent_id: options.parentId ?? null,
     p_attachments: options.attachments?.length ? options.attachments : null,
+    p_shared_kind: options.sharedKind ?? null,
+    p_shared_id: options.sharedId ?? null,
   })
   if (error) throw new Error(friendlyMessage(error))
   const rows = (data ?? []) as unknown as ChatMessageRow[]
@@ -1023,6 +1089,17 @@ export async function unsendChatMessage(messageId: string): Promise<string | nul
   const { data, error } = await supabase.rpc('unsend_chat_message', { p_message: messageId })
   if (error) throw new Error(friendlyMessage(error))
   return (data as string | null) ?? null
+}
+
+/** Count the signed-in member's unread notifications (topbar bell badge). */
+export async function fetchUnreadNotificationCount(): Promise<number> {
+  if (!supabase) return 0
+  const { count, error } = await supabase
+    .from('notifications')
+    .select('id', { count: 'exact', head: true })
+    .is('read_at', null)
+  if (error) throw new Error(friendlyMessage(error))
+  return count ?? 0
 }
 
 /** Mark a conversation read by the caller (drives unread badges). */
@@ -1124,6 +1201,9 @@ const CHAT_ATTACHMENT_MIMES = new Set([
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'application/vnd.ms-powerpoint',
   'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  // ordinary video attachments and voice notes (0023); reels are referenced, never re-encoded
+  'video/mp4', 'video/webm', 'video/quicktime',
+  'audio/webm', 'audio/mp4', 'audio/mpeg', 'audio/ogg', 'audio/wav',
 ])
 
 /** Upload one chat attachment to the PRIVATE chat-media bucket, inside this
@@ -1227,6 +1307,19 @@ export function subscribeChatMessages(
       reactions: (row.reactions as Record<string, string[]> | null) ?? {},
       pinned_at: (row.pinned_at as string | null) ?? null,
       reply_count: null,
+      is_system: (row.is_system as boolean | null) ?? false,
+      shared_kind: (row.shared_kind as string | null) ?? null,
+      shared_id: (row.shared_id as string | null) ?? null,
+      // shared previews and receipts are resolved by the chat_all readers;
+      // bare realtime rows carry none — the panel merge keeps the held row's
+      shared_title: null,
+      shared_subtitle: null,
+      shared_author: null,
+      shared_image: null,
+      shared_slug: null,
+      shared_available: null,
+      seen_at: null,
+      seen_count: null,
     })
     onChange(bare, type)
     // the bare row shows instantly; the persona lands a moment later
@@ -1280,6 +1373,284 @@ export function subscribeChatActivity(onChange: (conversationId: string) => void
     .subscribe()
   return () => {
     void client.removeChannel(channel)
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Presence: who is online RIGHT NOW (live presence channel; nothing persisted)  */
+/* -------------------------------------------------------------------------- */
+
+export function subscribeOnlinePresence(
+  myUserId: string,
+  onChange: (onlineUserIds: string[]) => void,
+): () => void {
+  if (!supabase) return () => {}
+  const client = supabase
+  const channel = client
+    .channel('campus-online', { config: { presence: { key: myUserId } } })
+    .on('presence', { event: 'sync' }, () => {
+      const state = channel.presenceState()
+      onChange(Object.keys(state))
+    })
+    .subscribe(status => {
+      if (status === 'SUBSCRIBED') {
+        void channel.track({ seen_at: new Date().toISOString() })
+      }
+    })
+  return () => {
+    void channel.untrack()
+    void client.removeChannel(channel)
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Chats 2.0 (0023): shared content, prefs, groups, forwarding, search         */
+/* -------------------------------------------------------------------------- */
+
+/** One per-user inbox preference action; the other side is never affected. */
+export type ConversationPrefAction =
+  | 'pin' | 'unpin' | 'mute' | 'unmute'
+  | 'archive' | 'unarchive' | 'mark_unread' | 'clear'
+
+export async function setConversationPrefs(
+  conversationId: string,
+  action: ConversationPrefAction,
+): Promise<void> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { error } = await supabase.rpc('set_conversation_prefs', {
+    p_conversation: conversationId,
+    p_action: action,
+  })
+  if (error) throw new Error(friendlyMessage(error))
+}
+
+export type ConversationMember = {
+  id: string
+  username: string
+  displayName: string
+  avatarUrl: string | null
+  role: 'member' | 'admin' | 'moderator'
+  joinedAt: string
+}
+
+export async function fetchConversationMembers(conversationId: string): Promise<ConversationMember[]> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('get_conversation_members', { p_conversation: conversationId })
+  if (error) throw new Error(friendlyMessage(error))
+  return ((data ?? []) as Array<Record<string, unknown>>).map(row => ({
+    id: row.user_id as string,
+    username: (row.username as string) ?? '',
+    displayName: ((row.display_name as string) ?? '').trim() || (row.username as string) || 'Student',
+    avatarUrl: (row.avatar_url as string | null) ?? null,
+    role: (row.role as ConversationMember['role']) ?? 'member',
+    joinedAt: (row.joined_at as string) ?? '',
+  }))
+}
+
+export async function addGroupMembers(conversationId: string, userIds: string[]): Promise<number> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('add_group_members', {
+    p_conversation: conversationId,
+    p_user_ids: userIds,
+  })
+  if (error) throw new Error(friendlyMessage(error))
+  return Number(data ?? 0)
+}
+
+export async function removeGroupMember(conversationId: string, userId: string): Promise<void> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { error } = await supabase.rpc('remove_group_member', {
+    p_conversation: conversationId,
+    p_user_id: userId,
+  })
+  if (error) throw new Error(friendlyMessage(error))
+}
+
+export async function leaveGroup(conversationId: string): Promise<void> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { error } = await supabase.rpc('leave_group', { p_conversation: conversationId })
+  if (error) throw new Error(friendlyMessage(error))
+}
+
+export async function renameGroup(conversationId: string, title: string): Promise<string | null> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('rename_group', {
+    p_conversation: conversationId,
+    p_title: title,
+  })
+  if (error) throw new Error(friendlyMessage(error))
+  return (data as string | null) ?? null
+}
+
+/**
+ * Send one CAMPUS content reference into a chat: the message row carries
+ * kind + id only — the reel/post/profile/listing/event record stays the
+ * single source of truth and the preview resolves at read time.
+ */
+export async function shareContentToChat(
+  conversationId: string,
+  shared: { kind: ChatSharedKind; id: string },
+  note: string,
+): Promise<ChatMessage> {
+  return sendChatMessage(conversationId, note.trim(), '', {
+    sharedKind: shared.kind,
+    sharedId: shared.id,
+  })
+}
+
+/** One search hit across all of the caller's conversations (0023). */
+export type AllChatsSearchHit = {
+  messageId: string
+  conversationId: string
+  kind: 'dm' | 'group' | 'club'
+  conversationTitle: string
+  senderId: string | null
+  senderName: string
+  body: string
+  createdAt: string
+}
+
+export async function searchAllChats(query: string, limit = 30): Promise<AllChatsSearchHit[]> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const trimmed = query.trim()
+  if (!trimmed) return []
+  const { data, error } = await supabase.rpc('search_all_chats', { p_query: trimmed, p_limit: limit })
+  if (error) throw new Error(friendlyMessage(error))
+  return ((data ?? []) as Array<Record<string, unknown>>).map(row => ({
+    messageId: row.message_id as string,
+    conversationId: row.conversation_id as string,
+    kind: (row.kind as AllChatsSearchHit['kind']) ?? 'dm',
+    conversationTitle: ((row.conversation_title as string) ?? 'Conversation'),
+    senderId: (row.sender_id as string | null) ?? null,
+    senderName: ((row.sender_name as string) ?? 'Student'),
+    body: ((row.body as string) ?? ''),
+    createdAt: ((row.created_at as string) ?? ''),
+  }))
+}
+
+/**
+ * Forward one of my messages into another of my conversations. Media
+ * attachments are FIRST copied into the target conversation's own folder
+ * (with my own session — the receiver would otherwise need rights on the
+ * source chat), then the RPC writes the copied metadata. Returns the new
+ * message.
+ */
+export async function forwardChatMessage(
+  messageId: string,
+  targetConversationId: string,
+  attachments?: ChatAttachment[],
+): Promise<ChatMessage> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('forward_chat_message', {
+    p_message: messageId,
+    p_target: targetConversationId,
+    p_attachments: attachments?.length ? attachments : null,
+  })
+  if (error) throw new Error(friendlyMessage(error))
+  const rows = (data ?? []) as unknown as ChatMessageRow[]
+  const row = rows[0]
+  if (!row) throw new Error('The message did not come back — reload the chat.')
+  return mapChatMessage(row)
+}
+
+/** Copy ONE chat attachment into another conversation's folder, file by file. */
+async function copyChatAttachment(
+  attachment: ChatAttachment,
+  targetConversationId: string,
+): Promise<ChatAttachment> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  if (!attachment.path || !attachment.path.includes('/')) throw new Error('That file cannot be copied.')
+  const dot = attachment.name.lastIndexOf('.')
+  const ext = dot > -1 ? attachment.name.slice(dot).toLowerCase() : '.' + (attachment.path.split('.')[1] ?? 'bin').slice(0, 8)
+  const random = crypto.getRandomValues(new Uint32Array(1))[0].toString(36)
+  const newPath = `${targetConversationId}/${Date.now()}-${random}${ext}`
+  // path A: server-side copy — no double download when the bucket allows it
+  try {
+    const { error } = await supabase.storage.from('chat-media').copy(attachment.path, newPath)
+    if (!error) {
+      return { path: newPath, name: attachment.name, mime: attachment.mime, size: attachment.size }
+    }
+  } catch {
+    // fall through to the download path
+  }
+  // path B: download through a short-lived signed URL, re-upload with my
+  // own session into the target conversation's folder
+  const { data: urlData, error: urlError } = await supabase.storage
+    .from('chat-media')
+    .createSignedUrl(attachment.path, 300)
+  if (urlError || !urlData?.signedUrl) throw new Error('That file could not be copied.')
+  const response = await fetch(urlData.signedUrl)
+  if (!response.ok) throw new Error('That file could not be copied.')
+  const blob = await response.blob()
+  const { error } = await supabase.storage
+    .from('chat-media')
+    .upload(newPath, blob, { cacheControl: '3600' })
+  if (error) throw new Error(friendlyMessage(error))
+  return { path: newPath, name: attachment.name, mime: attachment.mime, size: attachment.size }
+}
+
+export async function copyChatAttachments(
+  attachments: ChatAttachment[],
+  targetConversationId: string,
+): Promise<ChatAttachment[]> {
+  const copied: ChatAttachment[] = []
+  for (const attachment of attachments.slice(0, 4)) {
+    copied.push(await copyChatAttachment(attachment, targetConversationId))
+  }
+  return copied
+}
+
+/**
+ * Typing indicators: ONE realtime BROADCAST channel per open conversation.
+ * Nothing is ever written to the database, and any interruption just lets
+ * the indicator expire (no stale "typing…" survives 3.5 seconds).
+ * Returns a `ping()` for the sender + an unsubscribe.
+ */
+export type TypingPing = { userId: string; at: number }
+
+export function subscribeTyping(
+  conversationId: string,
+  myUserId: string,
+  onTypingChange: (typingUserIds: string[]) => void,
+): { ping: () => Promise<void>; unsubscribe: () => void } {
+  if (!supabase) {
+    return { ping: async () => {}, unsubscribe: () => {} }
+  }
+  const client = supabase
+  const typing = new Map<string, number>() // userId → last ping (ms epoch)
+  const othersTyping = () => {
+    const now = Date.now()
+    for (const [userId, at] of [...typing]) {
+      if (now - at > 3500) typing.delete(userId)
+    }
+    return [...typing.keys()].filter(userId => userId !== myUserId)
+  }
+
+  const emit = () => { onTypingChange(othersTyping()) }
+
+  const channel = client.channel(`typing:${conversationId}`)
+    .on('broadcast', { event: 'typing' }, payload => {
+      const ping = (payload.payload ?? {}) as TypingPing
+      if (!ping?.userId || ping.userId === myUserId) return
+      typing.set(ping.userId, Date.now())
+      emit()
+    })
+    .subscribe()
+  const sweeper = window.setInterval(emit, 1200)
+
+  return {
+    ping: async () => {
+      // send on the SAME subscription — no per-ping channel setup
+      await channel.send({
+        type: 'broadcast',
+        event: 'typing',
+        payload: { userId: myUserId, at: Date.now() } satisfies TypingPing,
+      })
+    },
+    unsubscribe: () => {
+      window.clearInterval(sweeper)
+      void client.removeChannel(channel)
+    },
   }
 }
 

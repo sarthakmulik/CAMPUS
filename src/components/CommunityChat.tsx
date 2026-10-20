@@ -9,6 +9,7 @@ import { friendlyMessage, initialsFor, relativeTime } from '../lib/db'
 import type { ChatAttachment, ChatMessage } from '../lib/db'
 import RichText from './RichText'
 import ReportDialog, { type ReportTarget } from './ReportDialog'
+import ChatSharedCard from './chat/ChatSharedCard'
 
 type Identity = { id: string; name: string; username: string; initials: string }
 
@@ -329,6 +330,23 @@ export default function CommunityChat({ communityId, identity, isModerator, noti
     setHighlightId(id)
     window.setTimeout(() => setHighlightId(current => (current === id ? null : current)), 1600)
   }
+
+  /** shared cards navigate through the app's existing hash deep links */
+  const openSharedCard = useCallback((message: ChatMessage) => {
+    if (!message.sharedKind || !message.sharedId) return
+    if (message.sharedKind === 'profile') {
+      onOpenMention(message.sharedId)
+      return
+    }
+    const hash = message.sharedKind === 'listing' && message.sharedSlug ? `#m/${message.sharedSlug}`
+      : message.sharedKind === 'event' && message.sharedSlug ? `#e/${message.sharedSlug}`
+      : message.sharedKind === 'reel' || message.sharedKind === 'post' ? `#p/${message.sharedId}`
+      : null
+    if (hash && window.location.hash !== hash) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search)
+      window.location.hash = hash
+    }
+  }, [onOpenMention])
 
   const jumpToMessage = useCallback(async (id: string) => {
     const box = scrollRef.current
@@ -716,6 +734,9 @@ export default function CommunityChat({ communityId, identity, isModerator, noti
             </div>
           ) : (
             <div className={`chat-bubble ${mine ? 'mine' : 'theirs'}`}>
+              {message.sharedKind ? (
+                <ChatSharedCard message={message} onOpen={openSharedCard} />
+              ) : null}
               {message.parentMessageId && (
                 <button
                   type="button"

@@ -30,6 +30,7 @@ import Chats from './components/Chats'
 import SearchPanel from './components/SearchPanel'
 import Profile from './components/Profile'
 import ReportDialog, { type ReportTarget } from './components/ReportDialog'
+import ShareContentSheet, { type ShareTarget } from './components/chat/ShareContentSheet'
 import type { CampusPost, PostKind } from './types'
 import * as media from './lib/media'
 import { REEL_WINDOW_SECONDS } from './lib/media'
@@ -292,6 +293,21 @@ function CAMPUSApp() {
     if (status === 'member' || status === 'visitor') void loadFeed()
   }, [status, user?.id, loadFeed])
 
+  /* real notification badge: the bell only lights when unread rows exist */
+  const [unreadNotifs, setUnreadNotifs] = useState(0)
+  useEffect(() => {
+    if (status !== 'member' || !user?.id || !configured) { setUnreadNotifs(0); return }
+    let alive = true
+    const load = () => db.fetchUnreadNotificationCount()
+      .then(n => { if (alive) setUnreadNotifs(n) })
+      .catch(() => { /* badge stays at its last honest value */ })
+    load()
+    const timer = window.setInterval(load, 30000)
+    const onFocus = () => load()
+    window.addEventListener('focus', onFocus)
+    return () => { alive = false; window.clearInterval(timer); window.removeEventListener('focus', onFocus) }
+  }, [status, user?.id, configured])
+
   /* ---- real right-panel data -------------------------------------------- */
 
   const [trends, setTrends] = useState<[string, number][]>([])
@@ -391,22 +407,23 @@ function CAMPUSApp() {
       flash('Clipboard is not available in this browser.')
     }
   }
-  /** Share button: hands out a real CAMPUS deep link for the post/reel
-   *  (native share sheet where the browser offers it, clipboard fallback). */
-  const sharePost = async (post: CampusPost) => {
-    const url = db.postLink(post.id)
-    const preview = post.body.trim() ? `${post.author}: ${post.body.trim().slice(0, 90)}` : `A post by ${post.author} on CAMPUS`
-    const nav = navigator as Navigator & { share?: (data: { title?: string; text?: string; url?: string }) => Promise<void> }
-    if (nav.share) {
-      try {
-        await nav.share({ title: 'CAMPUS', text: preview, url })
-        return
-      } catch {
-        // user dismissed the sheet — nothing failed; fall through to copying
-      }
-    }
-    const failure = await db.copyToClipboard(url)
-    flash(failure ?? 'Link copied — paste it anywhere to share this post.')
+  /** Share button: opens the CAMPUS share sheet — the chat receives a card
+   *  referencing the ORIGINAL post (deep link still copyable inside). */
+  const sharePost = (post: CampusPost) => {
+    if (!requireAuth('share posts')) return
+    setOpenShareTarget({
+      kind: 'post',
+      id: post.id,
+      title: post.body.trim().slice(0, 110) || 'Post',
+      subtitle: post.anonymous ? 'Anonymous post' : `by ${post.author}`,
+      image: post.media?.[0] ?? null,
+    })
+  }
+  /** null = no share sheet open; set = the content card to send into chats */
+  const [openShareTarget, setOpenShareTarget] = useState<ShareTarget | null>(null)
+  const openShareSheet = (target: ShareTarget) => {
+    if (!requireAuth('share content')) return
+    setOpenShareTarget(target)
   }
   /** null = no deep-linked reel pending; id = Discover should land on it */
   const [reelAutoOpen, setReelAutoOpen] = useState<string | null>(null)
@@ -1183,6 +1200,14 @@ function CAMPUSApp() {
           onSubmitted={message => { setReportTarget(null); flash(message) }}
         />
       )}
+      {openShareTarget && (
+        <ShareContentSheet
+          target={openShareTarget}
+          onClose={() => setOpenShareTarget(null)}
+          onFlash={flash}
+          onSent={count => flash(count === 1 ? 'Sent to 1 chat.' : `Sent to ${count} chats.`)}
+        />
+      )}
     </>
   )
 
@@ -1236,7 +1261,7 @@ function CAMPUSApp() {
         </div>
         <div className="mobile-header-actions">
           <button className="icon-button" aria-label="Search" onClick={() => setSearchOpen(v => !v)}><Search size={21}/></button>
-          <button className="icon-button" aria-label="Notifications" onClick={() => navigate('Notifications')}><Bell size={21}/></button>
+          <button className="icon-button" aria-label="Notifications" onClick={() => navigate('Notifications')}><Bell size={21}/>{unreadNotifs > 0 && <i className="notification-dot"/>}</button>
         </div>
       </header>
 
@@ -1290,7 +1315,7 @@ function CAMPUSApp() {
 
         {searchOpen && <SearchPanel colleges={colleges} clubs={clubs} blockedHandles={blockedHandles} mutedHandles={mutedHandles} initialQuery={searchSeed} onClose={() => { setSearchOpen(false); setSearchSeed('') }} onOpenProfile={personId => { setViewingProfileId(personId); navigate('Profile') }} onMessagePerson={personId => void messagePerson(personId)} onNavigate={navigate} />}
         {activeNav === 'Home' ? <>
-          <div className="desktop-topbar"><div className="desktop-search-trigger" onClick={() => setSearchOpen(true)} role="button" tabIndex={0}><Search size={18}/><span>Search for people, posts, colleges, clubs...</span></div><div className="topbar-actions"><button className="icon-button" aria-label="Notifications" onClick={() => navigate('Notifications')}><Bell size={20}/><i className="notification-dot"/></button><button className="icon-button" aria-label="My profile" onClick={() => navigate('Profile')}><UserRound size={20}/></button></div></div>
+          <div className="desktop-topbar"><div className="desktop-search-trigger" onClick={() => setSearchOpen(true)} role="button" tabIndex={0}><Search size={18}/><span>Search for people, posts, colleges, clubs...</span></div><div className="topbar-actions"><button className="icon-button" aria-label="Notifications" onClick={() => navigate('Notifications')}><Bell size={20}/>{unreadNotifs > 0 && <i className="notification-dot"/>}</button><button className="icon-button" aria-label="My profile" onClick={() => navigate('Profile')}><UserRound size={20}/></button></div></div>
           <section className="campus-hero-banner"><div className="hero-copy"><span className="hero-eyebrow">YOUR PEOPLE. YOUR PLACE.</span><h2>Same Campus,<br/><em>Bigger Dreams.</em></h2><span className="hero-swish"/><p>Connect · Share · Grow</p></div><div className="hero-campus-art" aria-hidden="true"><div className="art-sun"/><div className="art-building"><span/><span/><span/><span/><b/></div><div className="art-hill"/></div><button className="college-pill" onClick={() => navigate('My College')}><span className="college-seal"><Building2 size={22}/></span><span><b>{activeCollege?.short_name ?? 'SPPU'}</b><small>{activeCollege?.name ?? 'Savitribai Phule Pune University'}</small></span><ChevronDown size={16}/></button></section>
           <div className="feed-tabs" role="tablist">
             {['For You','Following','My College','Trending','Latest'].map(tab => <button key={tab} role="tab" aria-selected={feedTab===tab} className={feedTab===tab?'selected':''} onClick={() => setFeedTab(tab)}>{tab}</button>)}
@@ -1380,11 +1405,12 @@ function CAMPUSApp() {
                 onReport={openReport}
                 onCreateReel={() => openComposer('reel')}
                 onOpenAuthor={openMentionProfile}
+                onShareContent={openShareSheet}
                 autoOpenId={reelAutoOpen}
                 onAutoOpened={() => setReelAutoOpen(null)}
               />
             : activeNav === 'Chats'
-              ? <Chats key="chats" identity={identity && user ? { id: user.id, name: identity.name, username: identity.username, initials: identity.initials } : null} configured={configured} autoOpen={openChatId} onAutoOpened={() => setOpenChatId(null)} initialDraft={chatDraft} onDraftConsumed={() => setChatDraft(null)} />
+              ? <Chats key="chats" identity={identity && user ? { id: user.id, name: identity.name, username: identity.username, initials: identity.initials } : null} configured={configured} autoOpen={openChatId} onAutoOpened={() => setOpenChatId(null)} initialDraft={chatDraft} onDraftConsumed={() => setChatDraft(null)} onOpenProfile={openMentionProfile} />
               : activeNav === 'Profile'
               ? <Profile
                   key="profile"

@@ -6,6 +6,11 @@
 -- duplicate tables, no parallel messaging system: the community channel is
 -- still conversations.kind = 'club', one conversation per community.
 --
+-- 0023 note: the send_chat_message / chat_all / list_conversations
+-- definitions in THIS file are SUPERSEDED by 0023_direct_messaging_v2.sql,
+-- which rebuilds them (chat-request enforcement, shared content, receipts,
+-- voice/video MIME types). Run 0020/0022 first, then 0023 — 0023 always wins.
+--
 -- New on chat_messages (all columns additive, existing data untouched):
 --   parent_message_id  — one-level replies; a reply always binds to its
 --                        thread's ROOT so threads stay flat and readable
