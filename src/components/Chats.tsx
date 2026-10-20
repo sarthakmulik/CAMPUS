@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   ArrowLeft, Bell, BellOff, Check, ChevronsDown, Download, FileText,
-  MessageCircle, Mic, MoreHorizontal, Paperclip, Pencil, Play, Plus, Search, Send,
+  MessageCircle, Mic, MoreHorizontal, Paperclip, Pause, Pencil, Play, Plus, Search, Send,
   Square, Trash2, Users, X,
 } from 'lucide-react'
 import * as db from '../lib/db'
@@ -10,6 +10,10 @@ import type {
   ConversationMember,
 } from '../lib/db'
 import { initialsFor, relativeTime } from '../lib/db'
+import {
+  decodeVoiceMeta, pauseOtherVoices, unlinkVoiceAudio, voiceDurationLabel,
+} from '../lib/voiceAudio'
+import { useMenuDismiss } from '../lib/menuDismiss'
 import ReportDialog from './ReportDialog'
 import ChatSharedCard from './chat/ChatSharedCard'
 
@@ -31,7 +35,16 @@ type Props = {
 
 const REACTIONS = ['👍', '❤️', '😂', '🎉', '🙏', '🔥', '👀', '💯'] as const
 
+/** honest cap for one voice note — the recorder stops itself here */
+const MAX_VOICE_SECONDS = 120
+
 type ListFilter = 'all' | 'unread' | 'groups' | 'archived'
+
+type VoicePreview = { url: string; blob: Blob; seconds: number; mime: string }
+type ConfirmKind =
+  | { kind: 'unsend'; messageId: string }
+  | { kind: 'clear' }
+  | { kind: 'leave' }
 
 /**
  * Chats — 1:1 direct messages and group chats (never club channels — they
@@ -85,6 +98,9 @@ export default function Chats({
   const [recording, setRecording] = useState(false)
   const [voiceSeconds, setVoiceSeconds] = useState(0)
   const [voiceError, setVoiceError] = useState<string | null>(null)
+  /** a finished recording waiting for the user's send / discard decision */
+  const [voicePreview, setVoicePreview] = useState<VoicePreview | null>(null)
+  const [voiceBusy, setVoiceBusy] = useState(false)
 
   /* forward dialog */
   const [forwardFor, setForwardFor] = useState<ChatMessage | null>(null)
@@ -92,6 +108,8 @@ export default function Chats({
   const [attachMenuOpen, setAttachMenuOpen] = useState(false)
   const [reportTarget, setReportTarget] = useState<{ label: string; reportedUserId: string; excerpt: string } | null>(null)
   const [listNotice, setListNotice] = useState<string | null>(null)
+  /** confirmation ask: unsend a message / clear this chat for me / leave the group */
+  const [confirmAsk, setConfirmAsk] = useState<ConfirmKind | null>(null)
 
   /* in-conversation search */
   const [searchOpen, setSearchOpen] = useState(false)
@@ -124,9 +142,18 @@ export default function Chats({
   const listBottomRef = useRef<HTMLDivElement | null>(null)
   const photoInputRef = useRef<HTMLInputElement | null>(null)
   const docInputRef = useRef<HTMLInputElement | null>(null)
+  const composerInputRef = useRef<HTMLInputElement | null>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const voiceChunksRef = useRef<Blob[]>([])
   const voiceTimerRef = useRef<number | null>(null)
+  /** the live microphone stream — stopped explicitly at every voice reset */
+  const micStreamRef = useRef<MediaStream | null>(null)
+  /** transient windows announce themselves for the scroll-dismiss listener */
+  const listMenuWrapRef = useRef<HTMLDivElement | null>(null)
+  const attachMenuRootRef = useRef<HTMLDivElement | null>(null)
+  const voiceSecondsRef = useRef(0)
+  const voicePreviewRef = useRef<VoicePreview | null>(null)
+  const voiceBusyRef = useRef(false)
   const lastPingRef = useRef(0)
   const typingCtlRef = useRef<{ ping: () => Promise<void>; unsubscribe: () => void } | null>(null)
 
@@ -174,7 +201,10 @@ export default function Chats({
     setEditing(null)
     setReplyTo(null)
     setAttachMenuOpen(false)
+    setConfirmAsk(null)
     seenIds.current = new Set()
+    // leaving the thread must not leave a live mic or orphaned previews behind
+    if (conversationId !== openId) voiceTeardownRef.current()
     if (scrollRef.current) scrollRef.current.scrollTop = 0
     try {
       const summary0 = conversations.find(c => c.id === conversationId) ?? null
@@ -205,7 +235,7 @@ export default function Chats({
     } finally {
       setLoadingThread(false)
     }
-  }, [conversations])
+  }, [conversations, openId])
 
   // a chat opened from a post's ⋯ menu lands here with the conversation id
   useEffect(() => {
@@ -519,72 +549,208 @@ export default function Chats({
     void kind
   }, [openId, pendingAttachments.length])
 
-  /* voice recording: real MediaRecorder, honest support states */
+  /* --------------------------------------------------------------- */
+  /* voice note lifecycle: mic → recording → preview → upload/send     */
+  /* every path (cancel, discard, switch, unmount) releases the mic    */
+  /* --------------------------------------------------------------- */
+
+  const stopMicStream = useCallback(() => {
+    micStreamRef.current?.getTracks().forEach(track => track.stop())
+    micStreamRef.current = null
+  }, [])
+
+  const clearVoiceTimer = useCallback(() => {
+    if (voiceTimerRef.current) { window.clearInterval(voiceTimerRef.current); voiceTimerRef.current = null }
+  }, [])
+
+  /** tear down a recording without keeping anything (discard / cancel) */
+  const discardRecording = useCallback(() => {
+    const recorder = recorderRef.current
+    recorderRef.current = null
+    voiceChunksRef.current = []
+    clearVoiceTimer()
+    stopMicStream()
+    if (recorder && recorder.state !== 'inactive') { recorder.onstop = null; recorder.stop() }
+    setRecording(false)
+    setVoiceSeconds(0)
+    voiceSecondsRef.current = 0
+  }, [clearVoiceTimer, stopMicStream])
+
+  /** drop the preview player (blob URL revoked) */
+  const discardPreview = useCallback(() => {
+    setVoicePreview(current => {
+      if (current) URL.revokeObjectURL(current.url)
+      return null
+    })
+    voicePreviewRef.current = null
+  }, [])
+
   const startRecording = useCallback(async () => {
     setVoiceError(null)
+    if (recording || voicePreview || voiceBusy || !identity) return
     if (!(navigator.mediaDevices && window.MediaRecorder)) {
       setVoiceError('This browser cannot record audio — try Chrome, Edge or Firefox.')
       return
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : ''
-      const recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream)
+      micStreamRef.current = stream
+      // pick the first codec this browser actually supports (Safari ships mp4/aac,
+      // Chrome + Firefox ship webm/opus); never assume one works everywhere
+      const Ctor = window.MediaRecorder
+      const mime = Ctor.isTypeSupported
+        ? (['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus'] as const).find(guess => Ctor.isTypeSupported(guess))
+        : undefined
+      const recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined)
       voiceChunksRef.current = []
       recorder.ondataavailable = event => {
         if (event.data && event.data.size > 0) voiceChunksRef.current.push(event.data)
       }
-      recorder.onstop = () => {
-        stream.getTracks().forEach(track => track.stop())
-      }
       recorderRef.current = recorder
       recorder.start(250)
+      if (recorder.state === 'inactive') {
+        throw new Error('The recorder refused to start — try again.')
+      }
       setRecording(true)
+      voiceSecondsRef.current = 0
       setVoiceSeconds(0)
-      if (voiceTimerRef.current) window.clearInterval(voiceTimerRef.current!)
-      voiceTimerRef.current = window.setInterval(() => setVoiceSeconds(s => s + 1), 1000)
-    } catch {
-      setVoiceError('Microphone permission is needed for voice messages.')
-    }
-  }, [])
-
-  const cancelRecording = useCallback(() => {
-    const recorder = recorderRef.current
-    if (recorder && recorder.state !== 'inactive') { recorder.onstop = null; recorder.stop() }
-    recorderRef.current = null
-    voiceChunksRef.current = []
-    setRecording(false)
-    setVoiceSeconds(0)
-    if (voiceTimerRef.current) { window.clearInterval(voiceTimerRef.current); voiceTimerRef.current = null }
-  }, [])
-
-  const sendRecording = useCallback(async () => {
-    const recorder = recorderRef.current
-    if (!recorder || !openId) { cancelRecording(); return }
-    if (recorder.state !== 'inactive') recorder.stop()
-    recorderRef.current = null
-    const type = recorder.mimeType ?? 'audio/webm'
-    const blob = new Blob(voiceChunksRef.current, { type })
-    voiceChunksRef.current = []
-    if (voiceTimerRef.current) { window.clearInterval(voiceTimerRef.current); voiceTimerRef.current = null }
-    setRecording(false)
-    setVoiceSeconds(0)
-    if (blob.size < 64) { setVoiceError('The recording was empty — try again.'); return }
-    if (voiceSeconds < 1) { setVoiceError('Hold the mic for at least a second.'); return }
-    const ext = type.includes('mp4') ? '.m4a' : '.webm'
-    const file = new File([blob], `voice-${Date.now()}${ext}`, { type: type.split(';')[0] })
-    setUploadingName('voice note')
-    try {
-      const attachment = await db.uploadChatAttachment(openId, file)
-      setPendingAttachments(list => [...list, attachment])
+      clearVoiceTimer()
+      voiceTimerRef.current = window.setInterval(() => {
+        voiceSecondsRef.current += 1
+        setVoiceSeconds(voiceSecondsRef.current)
+      }, 1000)
     } catch (error) {
-      setThreadError(db.friendlyMessage(error))
-    } finally {
-      setUploadingName(null)
+      stopMicStream()
+      const code = (error as DOMException)?.name
+      setVoiceError(
+        code === 'NotFoundError'
+          ? 'No microphone was found — plug one in to record.'
+          : 'Microphone permission is needed for voice messages.',
+      )
     }
-  }, [cancelRecording, openId, voiceSeconds])
+  }, [identity, recording, voicePreview, voiceBusy, clearVoiceTimer, stopMicStream])
+
+  /** stop recording → preview state (blob kept locally until send/discard) */
+  const stopRecording = useCallback(() => {
+    const recorder = recorderRef.current
+    if (!recorder || recorder.state === 'inactive') { discardRecording(); return }
+    const seconds = voiceSecondsRef.current
+    recorder.onstop = () => {
+      recorder.onstop = null
+      const type = recorder.mimeType ?? 'audio/webm'
+      const blob = new Blob(voiceChunksRef.current, { type })
+      voiceChunksRef.current = []
+      recorderRef.current = null
+      clearVoiceTimer()
+      stopMicStream()
+      setRecording(false)
+      setVoiceSeconds(0)
+      voiceSecondsRef.current = 0
+      if (blob.size < 1024) {
+        setVoiceError('That recording came out empty — hold the mic and speak for a moment.')
+        return
+      }
+      const preview = { url: URL.createObjectURL(blob), blob, seconds, mime: type.split(';')[0] }
+      voicePreviewRef.current = preview
+      setVoicePreview(preview)
+    }
+    recorder.stop()
+  }, [clearVoiceTimer, discardRecording, stopMicStream])
+
+  /** recording hits the honest cap — stop into preview, never truncate silently */
+  useEffect(() => {
+    if (recording && voiceSeconds >= MAX_VOICE_SECONDS) stopRecording()
+  }, [recording, voiceSeconds, stopRecording])
+
+  const sendVoicePreview = useCallback(async () => {
+    const open = openId
+    const preview = voicePreviewRef.current
+    const identity0 = identity
+    if (!open || !preview || voiceBusyRef.current || sendingRef.current || !identity0) return
+    if (openStatus === 'unknown' || openStatus === 'declined' || (openStatus === 'pending' && !openMine)) return
+    if (preview.seconds < 1 || preview.blob.size < 1024) {
+      setVoiceError('That clip is less than a second — record a longer one.')
+      return
+    }
+    voiceBusyRef.current = true
+    setVoiceBusy(true)
+    setVoiceError(null)
+    try {
+      const base = preview.mime.includes('mp4') ? 'm4a' : preview.mime.includes('ogg') ? 'ogg' : 'webm'
+      const file = new File(
+        [preview.blob],
+        `voice-note-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.${base}`,
+        { type: preview.mime },
+      )
+      const attachment = await db.uploadChatAttachment(open, file)
+      const sent = await db.sendChatMessage(open, '', identity0.id, { attachments: [attachment] })
+      if (!seenIds.current.has(sent.id)) {
+        seenIds.current.add(sent.id)
+        setMessages(list => [...list, { ...sent, senderName: identity0?.name ?? 'You' }])
+      }
+      setConversations(list => list.map(c => c.id === open
+        ? { ...c, lastPreview: `Sent a ${preview.mime.startsWith('audio/mp4') ? 'voice message' : 'voice note'}`, lastSenderId: identity0.id, lastAt: sent.createdAt, lastSeen: false }
+        : c))
+      discardPreview()
+    } catch (error) {
+      // the clip stays in preview so the send button is an honest retry
+      setVoiceError(db.friendlyMessage(error))
+    } finally {
+      voiceBusyRef.current = false
+      setVoiceBusy(false)
+    }
+  }, [openId, identity, openStatus, openMine, discardPreview])
+
+  /* switch conversations / unmount: release the microphone and drop previews */
+  const voiceTeardownRef = useRef<() => void>(() => {})
+  voiceTeardownRef.current = () => {
+    discardRecording()
+    discardPreview()
+    setVoiceBusy(false)
+    voiceBusyRef.current = false
+  }
+  useEffect(() => () => voiceTeardownRef.current(), [openId])
+
+  /* one click-away rule for the attach menu and list-row menus (BubbleRow runs
+     its own per-row instance); outside + Escape both close */
+  useMenuDismiss(
+    Boolean(attachMenuOpen || listMenuId),
+    () => { setAttachMenuOpen(false); setListMenuId(null) },
+    () => [attachMenuRootRef.current, listMenuWrapRef.current],
+  )
+
+  /* any scrolling anywhere dismisses transient menus — a fixed menu whose
+     anchor scrolled away must never stay behind */
+  useEffect(() => {
+    if (!attachMenuOpen && !listMenuId && !actionsFor && !pickerFor) return
+    const closeTransient = () => {
+      setAttachMenuOpen(false)
+      setListMenuId(null)
+      setActionsFor(null)
+      setPickerFor(null)
+    }
+    document.addEventListener('scroll', closeTransient, { capture: true, passive: true })
+    window.addEventListener('resize', closeTransient)
+    return () => {
+      document.removeEventListener('scroll', closeTransient, { capture: true } as EventListenerOptions)
+      window.removeEventListener('resize', closeTransient)
+    }
+  }, [attachMenuOpen, listMenuId, actionsFor, pickerFor])
+
+  /* Escape closes the topmost modal overlay (transient menus have their own) */
+  useEffect(() => {
+    if (!confirmAsk && !reportTarget && !forwardFor && !detailsOpen) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.stopPropagation()
+      if (confirmAsk) setConfirmAsk(null)
+      else if (reportTarget) setReportTarget(null)
+      else if (forwardFor) setForwardFor(null)
+      else if (detailsOpen) setDetailsOpen(false)
+    }
+    document.addEventListener('keydown', onKey, true)
+    return () => document.removeEventListener('keydown', onKey, true)
+  }, [confirmAsk, reportTarget, forwardFor, detailsOpen])
 
   /* content sharing happens FROM the content (Reels, feed, detail pages)
      through the app-level share sheet — the composer never browses content */
@@ -995,7 +1161,10 @@ export default function Chats({
                 <MoreHorizontal size={14}/>
               </button>
               {listMenuId === conversation.id && (
-                <div className="chat-msg-menu dm-list-menu" onMouseLeave={() => setListMenuId(null)}>
+                <div
+                  className="chat-msg-menu dm-list-menu"
+                  ref={(el) => { listMenuWrapRef.current = (el?.parentElement as HTMLDivElement | null) ?? null }}
+                >
                   <button onClick={() => { setListMenuId(null); void applyPrefs(conversation.id, conversation.pinned ? 'unpin' : 'pin') }}>
                     <ChevronsDown size={13}/> {conversation.pinned ? 'Unpin' : 'Pin to top'}
                   </button>
@@ -1008,7 +1177,7 @@ export default function Chats({
                   <button onClick={() => { setListMenuId(null); void applyPrefs(conversation.id, 'mark_unread') }}>
                     <MessageCircle size={13}/> Mark as unread
                   </button>
-                  <button className="danger" onClick={() => { setListMenuId(null); void applyPrefs(conversation.id, 'clear') }}>
+                  <button className="danger" onClick={() => { setListMenuId(null); setConfirmAsk({ kind: 'clear' }) }}>
                     <Trash2 size={13}/> Clear for me
                   </button>
                 </div>
@@ -1028,7 +1197,7 @@ export default function Chats({
         ) : (
           <>
             <div className="chat-thread-head">
-              <button className="icon-button chat-back" aria-label="Back to chats" onClick={() => { setOpenId(null); setMobileThread(false) }}><ArrowLeft size={19}/></button>
+              <button className="icon-button chat-back" aria-label="Back to chats" onClick={() => { voiceTeardownRef.current(); setOpenId(null); setMobileThread(false) }}><ArrowLeft size={19}/></button>
               {openSummary?.peerAvatar
                 ? <img className="avatar small" src={openSummary.peerAvatar} alt=""/>
                 : <span className="avatar small">{initialsFor(peerName, active?.peerUsername ?? '')}</span>}
@@ -1118,7 +1287,7 @@ export default function Chats({
                     onReact={react}
                     onForward={m => setForwardFor(m)}
                     onEdit={(m) => { setEditing({ id: m.id, original: m.body }); setDraft(m.body); setActionsFor(null) }}
-                    onUnsend={(id) => { setActionsFor(null); setEditing(null); setDraft(''); void unsendMessage(id) }}
+                    onUnsend={(id) => { setActionsFor(null); setConfirmAsk({ kind: 'unsend', messageId: id }) }}
                     onReport={(m) => {
                       setActionsFor(null)
                       setReportTarget({
@@ -1193,39 +1362,52 @@ export default function Chats({
               )}
 
               <div className="chat-toolbar-row">
-                <div className="chat-attach-menu-root">
+                <div className="chat-attach-menu-root" ref={attachMenuRootRef}>
                   <button
                     className="icon-button chat-tool"
                     aria-label="Attach"
+                    aria-expanded={attachMenuOpen}
                     onClick={() => setAttachMenuOpen(v => !v)}
                   ><Paperclip size={17}/></button>
                   {attachMenuOpen && (
-                    <div className="chat-msg-menu dm-attach-menu" onMouseLeave={() => setAttachMenuOpen(false)}>
+                    <div className="chat-msg-menu dm-attach-menu">
                       <button onClick={() => { setAttachMenuOpen(false); photoInputRef.current?.click() }}>
                         <Plus size={13}/> Photo / video
                       </button>
                       <button onClick={() => { setAttachMenuOpen(false); docInputRef.current?.click() }}>
                         <FileText size={13}/> Document
                       </button>
-                      <button onClick={() => { setAttachMenuOpen(false); void startRecording(); }}>
-                        <Mic size={13}/> Voice message
-                      </button>
                     </div>
                   )}
                 </div>
 
                 {recording ? (
-                  <>
-                    <button className="chat-send voice" aria-label="Cancel recording" onClick={() => cancelRecording()}><Square size={14}/></button>
-                    <input
-                      value={`Recording voice note… ${voiceSeconds}s`}
-                      readOnly
-                      className="chat-voice-display"
-                      aria-label="Recording"
-                    />
-                  </>
+                  <div className="chat-voice-rec" role="status" aria-live="polite">
+                    <i className="chat-rec-dot" aria-hidden="true"/>
+                    <span className="chat-rec-timer">{(Math.floor(voiceSeconds / 60))}:{String(voiceSeconds % 60).padStart(2, '0')}</span>
+                    {voiceSeconds >= MAX_VOICE_SECONDS && <small>2 min limit reached</small>}
+                    <span className="flex-spacer"/>
+                    <button
+                      className="icon-button chat-tool danger"
+                      aria-label="Discard recording"
+                      onClick={discardRecording}
+                    ><Trash2 size={15}/></button>
+                    <button
+                      className="chat-send voice"
+                      aria-label="Stop and preview"
+                      onClick={stopRecording}
+                    ><Square size={15}/></button>
+                  </div>
+                ) : voicePreview ? (
+                  <VoicePreviewPanel
+                    preview={voicePreview}
+                    busy={voiceBusy}
+                    onSend={() => void sendVoicePreview()}
+                    onDiscard={discardPreview}
+                  />
                 ) : (
                   <input
+                    ref={composerInputRef}
                     value={draft}
                     onChange={event => { setDraft(event.target.value); pingTyping() }}
                     onKeyDown={event => {
@@ -1243,18 +1425,30 @@ export default function Chats({
                     disabled={sendBlocked && !editing}
                   />
                 )}
-                <button
-                  className="chat-send"
-                  aria-label={editing ? 'Save edited message' : sending ? 'Sending' : recording ? 'Send voice note' : 'Send message'}
-                  disabled={
-                    sending
-                    || sendBlocked && !editing
-                    || recording ? false : (!draft.trim() && pendingAttachments.length === 0)
-                  }
-                  onClick={() => { if (recording) void sendRecording(); else void send() }}
-                >
-                  {sending ? <span className="mini-spinner"/> : <Send size={17}/>}
-                </button>
+                {!recording && !voicePreview && (
+                  draft.trim() || editing || pendingAttachments.length > 0 || voicePreview ? (
+                    <button
+                      className="chat-send"
+                      aria-label={editing ? 'Save edited message' : sending || voiceBusy ? 'Sending' : 'Send message'}
+                      disabled={
+                        sending
+                        || voiceBusy
+                        || sendBlocked && !editing
+                        || (!draft.trim() && pendingAttachments.length === 0)
+                      }
+                      onClick={() => void send()}
+                    >
+                      {sending || voiceBusy ? <span className="mini-spinner"/> : <Send size={17}/>}
+                    </button>
+                  ) : (
+                    <button
+                      className="chat-send voice mic"
+                      aria-label="Record a voice message"
+                      disabled={sendBlocked || uploadingName !== null}
+                      onClick={() => void startRecording()}
+                    ><Mic size={17}/></button>
+                  )
+                )}
               </div>
               {(voiceError || uploadingName) && (
                 <div className="chats-hint error" role="status">
@@ -1351,7 +1545,7 @@ export default function Chats({
                   ))}
                 </div>
                 <div className="wizard-actions inline">
-                  <button className="secondary-button" onClick={() => void leaveOpenGroup()}>Leave group</button>
+                  <button className="secondary-button danger" onClick={() => setConfirmAsk({ kind: 'leave' })}>Leave group</button>
                 </div>
               </>
             ) : (
@@ -1376,7 +1570,7 @@ export default function Chats({
                     {active?.archived ? 'Unarchive' : 'Archive'}
                   </button>
                   <button className="secondary-button" onClick={() => void applyPrefs(openId, 'mark_unread')}>Mark as unread</button>
-                  <button className="secondary-button danger" onClick={() => void applyPrefs(openId, 'clear').then(() => { setDetailsOpen(false); setOpenId(null); setMobileThread(false) })}>
+                  <button className="secondary-button danger" onClick={() => setConfirmAsk({ kind: 'clear' })}>
                     <Trash2 size={14}/> Clear chat for me
                   </button>
                 </div>
@@ -1403,6 +1597,33 @@ export default function Chats({
           target={{ label: reportTarget.label, reportedUserId: reportTarget.reportedUserId, excerpt: reportTarget.excerpt }}
           onClose={() => setReportTarget(null)}
           onSubmitted={message => { setReportTarget(null); setThreadError(null); setListNotice(message) }}
+        />
+      )}
+
+      {/* destructive actions always confirm — never a stray background tap */}
+      {confirmAsk && (
+        <ConfirmDialog
+          ask={confirmAsk}
+          peerName={peerName}
+          onClose={() => setConfirmAsk(null)}
+          onConfirm={async () => {
+            const ask = confirmAsk
+            setConfirmAsk(null)
+            if (ask.kind === 'unsend') {
+              setActionsFor(null)
+              setPickerFor(null)
+              await unsendMessage(ask.messageId)
+            } else if (ask.kind === 'clear') {
+              if (!openId) return
+              setDetailsOpen(false)
+              await applyPrefs(openId, 'clear')
+              voiceTeardownRef.current()
+              setOpenId(null)
+              setMobileThread(false)
+            } else {
+              await leaveOpenGroup()
+            }
+          }}
         />
       )}
     </section>
@@ -1489,6 +1710,35 @@ function BubbleRow({
     }
   }, [highlightId, message.id])
 
+  /* outside taps + Escape close this row's menu — the ONLY reliable dismissal
+     on touch (hover-leave never fires) and the honest one on desktop too */
+  const [menuAnchor, setMenuAnchor] = useState<{ left: number; top: number } | null>(null)
+  const menuElRef = useRef<HTMLDivElement | null>(null)
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const rowMenuOpen = actionsFor === message.id || pickerFor === message.id
+  useMenuDismiss(rowMenuOpen, onMenuClose, () => [rowRef.current])
+
+  /* viewport-anchored popup: pinned to the ⋯ trigger, flipped when the row sits
+     near the bottom edge and clamped so it can never leave the viewport */
+  useLayoutEffect(() => {
+    if (!rowMenuOpen) { setMenuAnchor(null); return }
+    const triggerRect = triggerRef.current?.getBoundingClientRect() ?? rowRef.current?.getBoundingClientRect()
+    if (!triggerRect) return
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const guessedWidth = pickerFor === message.id ? 300 : 156
+    let left = Math.min(Math.max(triggerRect.left - 4, 8), vw - guessedWidth - 8)
+    let top = triggerRect.bottom + 4
+    /* refine with the real rendered menu before the browser paints */
+    const measured = menuElRef.current?.getBoundingClientRect()
+    if (measured && measured.height > 0) {
+      if (top + measured.height > vh - 8) top = Math.max(8, triggerRect.top - measured.height - 4)
+      if (left + measured.width > vw - 8) left = Math.max(8, vw - 8 - measured.width)
+    }
+    const next = { left: Math.round(left), top: Math.round(top) }
+    setMenuAnchor(current => (current && current.left === next.left && current.top === next.top ? current : next))
+  }, [rowMenuOpen, pickerFor, message.id, mine])
+
   const startLongPress = (event: React.TouchEvent) => {
     if (system) return
     longPress.current = { timer: null, moved: false, x: event.touches[0]?.clientX ?? 0, y: event.touches[0]?.clientY ?? 0 }
@@ -1542,8 +1792,10 @@ function BubbleRow({
 
       {mine && hasMenu && (
         <button
+          ref={triggerRef}
           className="chat-msg-actions"
           aria-label="Message options"
+          aria-expanded={actionsFor === message.id}
           onClick={() => onOpenContextMenu(message.id)}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
@@ -1551,7 +1803,11 @@ function BubbleRow({
       )}
 
       {hasMenu && actionsFor === message.id && (
-        <div className={`chat-msg-menu ${mine ? '' : 'theirs'}`} onMouseLeave={onMenuClose}>
+        <div
+          ref={menuElRef}
+          className={`chat-msg-menu anchored ${mine ? '' : 'theirs'}`}
+          style={menuAnchor ? { left: menuAnchor.left, top: menuAnchor.top } : undefined}
+        >
           <button onClick={() => { onMenuClose(); onReply(message) }}><MessageCircle size={13}/> Reply</button>
           <button onClick={() => { onMenuClose(); onTogglePicker(message.id) }}><span>🙂</span> React</button>
           {canForward && <button onClick={() => { onMenuClose(); onForward(message) }}><Send size={13}/> Forward</button>}
@@ -1564,7 +1820,11 @@ function BubbleRow({
       )}
 
       {hasMenu && pickerFor === message.id && (
-        <div className={`chat-msg-menu dm-reaction-picker ${mine ? '' : 'theirs'}`} onMouseLeave={onMenuClose}>
+        <div
+          ref={menuElRef}
+          className={`chat-msg-menu dm-reaction-picker anchored ${mine ? '' : 'theirs'}`}
+          style={menuAnchor ? { left: menuAnchor.left, top: menuAnchor.top } : undefined}
+        >
           {REACTIONS.map(emoji => (
             <button key={emoji} type="button" role="menuitem" onClick={() => { onMenuClose(); void onReact(message, emoji) }}>{emoji}</button>
           ))}
@@ -1626,12 +1886,77 @@ function BubbleRow({
           </div>
         )}
       </div>
+
+      {/* peers' messages get the menu too — previously only reachable by
+          long-press with no trigger at all on desktop */}
+      {!mine && hasMenu && (
+        <button
+          ref={triggerRef}
+          className="chat-msg-actions"
+          aria-label="Message options"
+          aria-expanded={actionsFor === message.id}
+          onClick={() => onOpenContextMenu(message.id)}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
+        </button>
+      )}
     </div>
   )
 }
 
 function FlagGlyph() {
   return <span aria-hidden="true">⚑</span>
+}
+
+/** confirmation for destructive actions: unsend / clear chat for me / leave */
+function ConfirmDialog({
+  ask,
+  peerName,
+  onClose,
+  onConfirm,
+}: {
+  ask: ConfirmKind
+  peerName: string
+  onClose: () => void
+  onConfirm: () => Promise<void>
+}) {
+  const [busy, setBusy] = useState(false)
+  const copy = ask.kind === 'unsend'
+    ? {
+        title: 'Unsend this message?',
+        body: 'Everyone here will see “Message unsent” in its place. Reactions, replies and quotes stay put.',
+        confirm: 'Unsend',
+      }
+    : ask.kind === 'clear'
+      ? {
+          title: 'Clear this chat for me?',
+          body: 'Your copy of the history disappears from this chat. Nobody else is affected, and this cannot be undone.',
+          confirm: 'Clear',
+        }
+      : {
+          title: `Leave ${peerName || 'this chat'}?`,
+          body: 'You stop receiving messages from this conversation. This cannot be undone.',
+          confirm: 'Leave',
+        }
+  return (
+    <div
+      className="overlay"
+      onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}
+    >
+      <section className="dm-details-modal confirm-modal" role="alertdialog" aria-modal="true" aria-label={copy.title}>
+        <h2>{copy.title}</h2>
+        <p className="confirm-body">{copy.body}</p>
+        <div className="confirm-actions">
+          <button className="secondary-button" onClick={onClose} disabled={busy}>Keep</button>
+          <button
+            className="secondary-button danger"
+            disabled={busy}
+            onClick={() => { setBusy(true); void onConfirm().catch(() => setBusy(false)) }}
+          >{busy ? <span className="mini-spinner"/> : copy.confirm}</button>
+        </div>
+      </section>
+    </div>
+  )
 }
 
 /** images: signed URL once per row, click opens the full-size view */
@@ -1659,17 +1984,136 @@ function ChatImageCell({ attachment }: { attachment: ChatAttachment }) {
   )
 }
 
-/** a voice note bubble: real audio element, progress + duration, honest failures */
-function VoiceBubble({ attachment }: { attachment: ChatAttachment }) {
+/** preview of a finished recording, living in the composer: play/pause,
+ *  seekable waveform, real duration even without a header, Send uploads +
+ *  sends in one step, Discard releases everything */
+function VoicePreviewPanel({
+  preview,
+  busy,
+  onSend,
+  onDiscard,
+}: {
+  preview: VoicePreview
+  busy: boolean
+  onSend: () => void
+  onDiscard: () => void
+}) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
-  const [src, setSrc] = useState<string | null>(null)
-  const [failed, setFailed] = useState(false)
   const [playing, setPlaying] = useState(false)
-  const [progress, setProgress] = useState(0)
-  const [duration, setDuration] = useState<number | null>(null)
+  const [fraction, setFraction] = useState(0)
+  const [duration, setDuration] = useState<number>(preview.seconds)
+  const [wave, setWave] = useState<number[] | null>(null)
 
   useEffect(() => {
     let alive = true
+    decodeVoiceMeta(preview.blob).then(meta => {
+      if (!alive || !meta) return
+      setDuration(meta.duration)
+      setWave(meta.wave)
+    })
+    return () => {
+      alive = false
+      const audio = audioRef.current
+      if (audio) {
+        audio.pause()
+        audio.src = ''
+        unlinkVoiceAudio(audio)
+      }
+    }
+  }, [preview])
+
+  const seek = (fraction0: number) => {
+    const audio = audioRef.current
+    if (!audio) return
+    audio.currentTime = Math.min(0.99 * duration, Math.max(0, fraction0) * duration)
+    setFraction(fraction0)
+  }
+
+  return (
+    <div className="chat-voice-preview" aria-label="Voice note preview">
+      <button
+        className="chat-voice-btn"
+        aria-label={playing ? 'Pause preview' : 'Play preview'}
+        disabled={busy}
+        onClick={() => {
+          const audio = audioRef.current
+          if (!audio) return
+          if (playing) audio.pause()
+          else {
+            pauseOtherVoices(audio)
+            void audio.play()
+          }
+        }}
+      >
+        {playing ? <Square size={15}/> : <Play size={15}/>}
+      </button>
+      <button
+        className="chat-voice-bar"
+        aria-label="Seek inside the recording"
+        onClick={event => {
+          const rect = event.currentTarget.getBoundingClientRect()
+          seek(Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)))
+        }}
+      >
+        {wave
+          ? wave.map((peak, index) => (
+            <i key={index} className={index / wave.length <= fraction ? 'on' : ''} style={{ height: `${18 + peak * 82}%` }}/>
+          ))
+          : <span className="chat-voice-track"><i style={{ width: `${Math.round(fraction * 100)}%` }}/></span>}
+      </button>
+      <small>{voiceDurationLabel(duration)}</small>
+      <span className="flex-spacer"/>
+      <button
+        className="icon-button chat-tool danger"
+        aria-label="Discard voice note"
+        disabled={busy}
+        onClick={onDiscard}
+      ><Trash2 size={15}/></button>
+      <button
+        className="chat-send"
+        aria-label={busy ? 'Sending voice note' : 'Send voice note'}
+        disabled={busy}
+        onClick={onSend}
+      >{busy ? <span className="mini-spinner"/> : <Send size={16}/>}</button>
+      <audio
+        ref={audioRef}
+        src={preview.url}
+        onPlay={event => {
+          const audio = event.currentTarget
+          pauseOtherVoices(audio)
+          setPlaying(true)
+          if (Number.isFinite(audio.duration) && audio.duration > 0) setDuration(audio.duration)
+        }}
+        onPause={() => setPlaying(false)}
+        onEnded={() => { setPlaying(false); setFraction(0) }}
+        onTimeUpdate={event => {
+          const audio = event.currentTarget
+          if (audio.duration && Number.isFinite(audio.duration)) {
+            setFraction(audio.currentTime / audio.duration)
+            setDuration(audio.duration)
+          }
+        }}
+      />
+    </div>
+  )
+}
+
+/** a voice bubble: play/pause, seekable progress, honest duration even for
+ *  MediaRecorder webm files (their duration header is missing), retry on
+ *  failure, and it never plays over another voice note */
+function VoiceBubble({ attachment }: { attachment: ChatAttachment }) {
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const [attempt, setAttempt] = useState(0)
+  const [src, setSrc] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+  const [playing, setPlaying] = useState(false)
+  const [fraction, setFraction] = useState(0)
+  const [duration, setDuration] = useState<number | null>(null)
+  const [wave, setWave] = useState<number[] | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    setSrc(null)
     db.chatAttachmentUrls([attachment.path]).then(map => {
       if (!alive) return
       const url = map[attachment.path]
@@ -1677,10 +2121,47 @@ function VoiceBubble({ attachment }: { attachment: ChatAttachment }) {
       else setFailed(true)
     })
     return () => { alive = false }
-  }, [attachment.path])
+  }, [attachment.path, attempt])
 
-  if (failed) return <div className="chat-voice failed">Voice note unavailable.</div>
+  /* leaving the thread (or unmounting any bubble) releases the player */
+  useEffect(() => () => {
+    const audio = audioRef.current
+    if (audio) {
+      audio.pause()
+      audio.src = ''
+    }
+    if (audio) unlinkVoiceAudio(audio)
+  }, [])
+
+  /* webm recordings carry no duration header — decode the stored bytes once */
+  const ensureDuration = useCallback(async () => {
+    const audio = audioRef.current
+    if (duration != null || !src || !audio) return
+    const meta = await decodeVoiceMeta(src)
+    if (!meta) return
+    setDuration(meta.duration)
+    setWave(meta.wave)
+  }, [duration, src])
+
+  if (failed) {
+    return (
+      <div className="chat-voice failed">
+        Voice note unavailable.
+        <button className="link-button" onClick={() => { setFailed(false); setAttempt(n => n + 1) }}>Retry</button>
+      </div>
+    )
+  }
   if (!src) return <div className="chat-voice"><span className="mini-spinner"/></div>
+
+  const seek = (fraction0: number) => {
+    const audio = audioRef.current
+    if (!audio) return
+    const total = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : duration
+    if (total && Number.isFinite(total)) {
+      audio.currentTime = Math.min(0.98 * total, Math.max(0, fraction0) * total)
+      setFraction(fraction0)
+    }
+  }
 
   return (
     <div className="chat-voice">
@@ -1690,30 +2171,54 @@ function VoiceBubble({ attachment }: { attachment: ChatAttachment }) {
         onClick={() => {
           const audio = audioRef.current
           if (!audio) return
-          if (playing) { audio.pause() } else { void audio.play() }
+          if (playing) audio.pause()
+          else {
+            pauseOtherVoices(audio)
+            void audio.play()
+          }
         }}
       >
         {playing ? <Square size={15}/> : <Play size={15}/>}
       </button>
-      <div className="chat-voice-bar" aria-hidden="true"><i style={{ width: `${progress}%` }}/></div>
-      <small>{duration != null ? (duration < 10 ? `${duration.toFixed(1)}s` : `${Math.round(duration)}s`) : ''}</small>
+      <button
+        className="chat-voice-bar"
+        aria-label="Seek inside the voice message"
+        onClick={event => {
+          const rect = event.currentTarget.getBoundingClientRect()
+          seek(Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)))
+        }}
+      >
+        {wave
+          ? wave.map((peak, index) => (
+            <i key={index} className={index / wave.length <= fraction ? 'on' : ''} style={{ height: `${18 + peak * 82}%` }}/>
+          ))
+          : <span className="chat-voice-track"><i style={{ width: `${Math.round(fraction * 100)}%` }}/></span>}
+      </button>
+      <small>{voiceDurationLabel(duration ?? undefined)}</small>
       <audio
         ref={audioRef}
         src={src}
         preload="metadata"
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
-        onEnded={() => { setPlaying(false); setProgress(0) }}
-        onLoadedMetadata={event => {
-          const value = (event.target as HTMLAudioElement).duration
-          setDuration(Number.isFinite(value) ? value : null)
+        onPlay={event => {
+          const audio = event.currentTarget
+          pauseOtherVoices(audio)
+          setPlaying(true)
+          void ensureDuration()
         }}
+        onPause={() => setPlaying(false)}
+        onEnded={() => { setPlaying(false); setFraction(0) }}
         onTimeUpdate={event => {
-          const audio = event.target as HTMLAudioElement
+          const audio = event.currentTarget
           if (audio.duration && Number.isFinite(audio.duration)) {
-            setProgress(Math.round((audio.currentTime / audio.duration) * 100))
+            setFraction(audio.currentTime / audio.duration)
           }
         }}
+        onLoadedMetadata={event => {
+          const value = event.currentTarget.duration
+          if (Number.isFinite(value) && value > 0) setDuration(value)
+          else void ensureDuration()
+        }}
+        onError={() => setFailed(true)}
       />
     </div>
   )

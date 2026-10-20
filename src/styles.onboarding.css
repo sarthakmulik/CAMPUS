@@ -3974,6 +3974,16 @@
 .chat-bubble-row:hover .chat-msg-actions { visibility: visible; }
 @media (hover: none) { .chat-msg-actions { visibility: visible; opacity: .75; } }
 .chat-msg-actions:hover { background: #ece9f5; color: #4f5d75; }
+/* JS-anchored message menus: fixed to the viewport at open time — below the
+   ⋯ trigger by default, flipped above when the row sits near the bottom edge
+   and clamped so the popup can never leave the screen */
+.chat-msg-menu.anchored {
+  position: fixed;
+  top: auto; bottom: auto; right: auto;
+  margin-top: 0;
+  z-index: 60;
+  max-width: calc(100vw - 16px);
+}
 .chat-msg-menu {
   position: absolute;
   top: 100%;
@@ -5155,23 +5165,41 @@
 .chat-att-video { display: block; border-radius: 10px; max-width: 240px; max-height: 300px; background: #14182a; }
 .chat-att-video.loading, .chat-att-video.missing { display: flex; align-items: center; justify-content: center; min-width: 120px; min-height: 90px; color: #8a94a6; font-size: 11px; }
 
-/* voice notes */
+/* voice notes — the bar is a real seek control now: waveform bars when the
+   clip was decoded, a simple progress track as the honest fallback */
 .chat-voice {
   display: flex; align-items: center; gap: 7px; min-width: 150px;
   padding: 4px 6px;
 }
-.chat-voice.failed { font-size: 11px; color: #b3265a; }
+.chat-voice.failed { font-size: 11px; color: #b3265a; display: flex; align-items: center; gap: 8px; }
 .chat-voice-btn {
   width: 30px; height: 30px; flex: none; border: 0; border-radius: 50%;
   background: rgba(255, 255, 255, 0.22); color: #fff;
   display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
 }
 .chat-bubble.theirs .chat-voice-btn { background: #e5e0f7; color: #5a3fe0; }
-.chat-voice-bar { flex: 1; height: 5px; border-radius: 4px; background: rgba(255, 255, 255, 0.28); overflow: hidden; min-width: 70px; }
-.chat-bubble.theirs .chat-voice-bar { background: #e7e4f2; }
-.chat-voice-bar i { display: block; height: 100%; width: 0; background: #fff; border-radius: 4px; transition: width 0.2s ease; }
-.chat-bubble.theirs .chat-voice-bar i { background: #7a6ad8; }
-.chat-voice small { flex: none; font-size: 9px; opacity: 0.85; }
+.chat-voice-bar {
+  flex: 1; min-width: 70px; height: 26px; display: flex; align-items: center; gap: 2px;
+  border: 0; background: transparent; padding: 0; cursor: pointer;
+}
+/* progress-track fallback (metadata undecodable) */
+.chat-voice-track {
+  display: block; position: relative; width: 100%; height: 5px;
+  border-radius: 4px; background: rgba(255, 255, 255, 0.28); overflow: hidden;
+}
+.chat-voice-track i { display: block; height: 100%; width: 0; background: #fff; border-radius: 4px; transition: width 0.2s ease; }
+/* waveform bars */
+.chat-voice-bar > i {
+  flex: none; width: 3px; border-radius: 2px;
+  background: rgba(255, 255, 255, 0.4); transition: background 0.15s ease;
+}
+.chat-voice-bar > i.on { background: #fff; }
+/* light surfaces: the preview panel and the peers' bubbles */
+.chat-voice-preview .chat-voice-track, .chat-bubble.theirs .chat-voice-track { background: #e7e4f2; }
+.chat-voice-preview .chat-voice-track i, .chat-bubble.theirs .chat-voice-track i { background: #7a6ad8; }
+.chat-voice-preview .chat-voice-bar > i, .chat-bubble.theirs .chat-voice-bar > i { background: #ddd8f0; }
+.chat-voice-preview .chat-voice-bar > i.on, .chat-bubble.theirs .chat-voice-bar > i.on { background: #7a6ad8; }
+.chat-voice small { flex: none; font-size: 9px; opacity: 0.85; font-variant-numeric: tabular-nums; }
 
 /* documents */
 .chat-att-file {
@@ -5236,7 +5264,6 @@
 .dm-reaction-picker button {
   flex: 1; justify-content: center; font-size: 17px; padding: 5px 2px; border-radius: 9px;
 }
-.dm-reaction-picker.theirs { left: 0 !important; }
 
 /* ---- composer: attach menu, chips, reply context, voice -------------------- */
 
@@ -5268,6 +5295,54 @@
 .chat-attach-menu-root { position: relative; flex: none; }
 .dm-attach-menu { bottom: calc(100% + 6px); top: auto; left: 0; min-width: 168px; }
 
+/* mic + stop variants of the send button */
+.chat-send.mic { background: #ece9f8; color: #5a3fe0; box-shadow: none; }
+.chat-send.mic:hover { background: #e2ddf7; }
+.chat-send.stop { background: #e0356b; box-shadow: 0 4px 12px #e0356b40; }
+.icon-button.chat-tool.danger { background: #f7e8ee; color: #b3265a; }
+.icon-button.chat-tool.danger:hover { background: #f3d8e1; }
+.flex-spacer { flex: 1; }
+
+/* live recording strip: unmistakable pulse + elapsed, stop → preview */
+.chat-voice-rec {
+  flex: 1; min-width: 0; height: 42px; display: flex; align-items: center; gap: 9px;
+  border: 1px solid #f3d8e1; border-radius: 21px; background: #fdf5f8; padding: 0 6px 0 14px;
+}
+.chat-rec-dot {
+  width: 10px; height: 10px; border-radius: 50%; background: #e0356b; flex: none;
+  animation: chat-rec-pulse 1.2s ease-in-out infinite;
+}
+@keyframes chat-rec-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(224, 53, 107, 0.25); }
+  50% { opacity: 0.55; box-shadow: 0 0 0 5px rgba(224, 53, 107, 0); }
+}
+.chat-rec-timer { font-size: 12px; font-weight: 800; color: #b3265a; flex: none; font-variant-numeric: tabular-nums; }
+.chat-voice-rec small { font-size: 10px; color: #b3265a; font-weight: 700; flex: none; }
+.chat-voice-rec .chat-send { width: 34px; height: 34px; }
+
+/* finished recording waiting in the composer — play it, keep it, send it */
+.chat-voice-preview {
+  flex: 1; min-width: 0; height: 42px; display: flex; align-items: center; gap: 7px;
+  border: 1px solid #e4e2ef; border-radius: 21px; background: #f7f6fc; padding: 0 6px;
+}
+.chat-voice-preview .chat-voice-btn {
+  width: 30px; height: 30px; border: 0; border-radius: 50%;
+  background: #e5e0f7; color: #5a3fe0; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+}
+.chat-voice-preview small { flex: none; font-size: 10px; color: #55637c; font-variant-numeric: tabular-nums; }
+.chat-voice-preview .chat-send { width: 34px; height: 34px; }
+
+/* destructive confirmations share one small dialog */
+.confirm-modal { width: min(340px, 92vw); gap: 8px; }
+.confirm-body { margin: 0; font-size: 12.5px; color: #55637c; line-height: 1.5; }
+.confirm-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+.confirm-actions .secondary-button { min-width: 84px; justify-content: center; }
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-rec-dot { animation: none; }
+}
+
 .chat-compose-context {
   display: flex; align-items: center; gap: 10px;
   padding: 8px 14px 0;
@@ -5296,10 +5371,6 @@
 .chat-attach-chip small { font-size: 10.5px; color: #55637c; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-attach-chip button { border: 0; background: none; color: #9aa2b8; display: inline-flex; cursor: pointer; padding: 1px; }
 .chat-attach-chip button:hover { color: #b3265a; }
-.chat-voice-display {
-  flex: 1; min-width: 0; height: 42px; border: 1px dashed #d5cdf2; border-radius: 21px;
-  background: #f6f4fb; color: #5a3fe0; font-size: 12px; font-weight: 700; padding: 0 16px;
-}
 
 /* ---- pickers / details / share sheets (modal overlays) -------------------- */
 

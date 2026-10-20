@@ -3,6 +3,7 @@ import { Check, Link2, Loader2, Search, X } from 'lucide-react'
 import type { ChatSummary } from '../../lib/db'
 import * as db from '../../lib/db'
 import { useBodyScrollLock } from '../../lib/scrollLock'
+import { useEscapeKey } from '../../lib/menuDismiss'
 
 export type ShareTarget = {
   kind: db.ChatSharedKind
@@ -49,6 +50,7 @@ export default function ShareContentSheet({
   onSent?: (conversations: number) => void
 }) {
   useBodyScrollLock()
+  useEscapeKey(true, onClose)
   const [conversations, setConversations] = useState<ChatSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [listError, setListError] = useState<string | null>(null)

@@ -10,6 +10,7 @@ import type { ChatAttachment, ChatMessage } from '../lib/db'
 import RichText from './RichText'
 import ReportDialog, { type ReportTarget } from './ReportDialog'
 import ChatSharedCard from './chat/ChatSharedCard'
+import { useMenuDismiss } from '../lib/menuDismiss'
 
 type Identity = { id: string; name: string; username: string; initials: string }
 
@@ -617,21 +618,18 @@ export default function CommunityChat({ communityId, identity, isModerator, noti
   /* one click-away rule for the message menus and pickers            */
   /* ---------------------------------------------------------------- */
 
-  useEffect(() => {
-    if (!menuFor && !pickerFor && !mentionQuery) return
-    const close = (event: MouseEvent) => {
-      const target = event.target as HTMLElement | null
-      if (target?.closest('.chat-menu, .cc-reaction-picker, .cc-mentions, .chat-input-row')) return
-      setMenuFor(null)
-      setPickerFor(null)
-      if (target?.closest('.chat-bubble-row')) {
+  useMenuDismiss(
+    Boolean(menuFor || pickerFor || mentionQuery),
+    () => { setMenuFor(null); setPickerFor(null) },
+    () => [],
+    {
+      inside: target => Boolean(target.closest('.chat-msg-menu, .cc-reaction-picker, .cc-mentions, .chat-input-row, .cc-actions')),
+      onDismissed: target => {
         // clicking elsewhere in the thread list also clears the pending mention
-        setMentionQuery(null)
-      }
-    }
-    document.addEventListener('mousedown', close)
-    return () => document.removeEventListener('mousedown', close)
-  }, [menuFor, pickerFor, mentionQuery])
+        if (mentionQuery && target.closest('.chat-bubble-row')) setMentionQuery(null)
+      },
+    },
+  )
 
   /* ---------------------------------------------------------------- */
   /* signed URLs for private attachments (1 hour, cached per session)  */
