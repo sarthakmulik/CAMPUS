@@ -1,0 +1,81 @@
+<!doctype html>
+<!-- CAMPUS mobile-emulation harness: hosts the app in a 390x780 iframe so
+     the ≤650px media queries (and every down-path the responsive shell owns)
+     run against a real mobile-sized viewport. Same origin, no partitions.
+
+     DEV PROBE: append ?p=<css-selector>|<css-selector>… to the harness URL and
+     every matching element inside the app frame is measured once in the 500ms
+     after load, then re-measured every time the probe list refreshes. Results
+     are JSON in <pre id="probe"> (rects are relative to the 390×780 viewport).
+     Built for the automated test session: it measures in-page so no JS
+     debugger bridge is needed. -->
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>CAMPUS mobile harness</title>
+  <style>
+    html, body { margin: 0; padding: 0; background: #20242e; }
+    .stage { display: flex; gap: 12px; padding: 12px; }
+    .frame-box { position: relative; width: 390px; height: 780px; border: 2px solid #444; overflow: hidden; }
+    iframe { width: 390px; height: 780px; border: 0; display: block; }
+    .caption { color: #ccc; font: 12px system-ui; padding: 4px 12px; }
+    #probe { display: none; background: #111; color: #8f8; font: 11px monospace; padding: 8px 12px; white-space: pre; max-height: 160px; overflow: auto; }
+    body.probing #probe { display: block; }
+  </style>
+</head>
+<body>
+  <div class="caption">CAMPUS mobile harness — iframe = 390 × 780 viewport (device-free emulation). Reload the outer page to reset the inner session.</div>
+  <div class="stage"><div class="frame-box"><iframe id="app" src="/" title="CAMPUS app at 390×780"></iframe></div></div>
+  <script>
+    // ?src=/#c/<slug> boots the app straight into a deep link inside the frame
+    (function () {
+      var src = new URLSearchParams(location.search).get('src');
+      if (src) document.getElementById('app').src = src;
+    })();
+  </script>
+  <pre id="probe"></pre>
+  <script>
+    (function () {
+      var list = new URLSearchParams(location.search).get('p');
+      if (!list) return;
+      document.body.classList.add('probing');
+      var selectors = list.split('|').map(function (s) { return s.trim(); }).filter(Boolean);
+      var frame = document.getElementById('app');
+      function measure() {
+        var doc = frame.contentDocument;
+        if (!doc || !doc.body) return;
+        var pre = document.getElementById('probe');
+        pre.textContent = '';
+        var rows = [];
+        rows.push('at=' + new Date().toISOString().slice(11, 19) + ' vw=' + frame.clientWidth + ' vh=' + frame.clientHeight);
+        for (var i = 0; i < selectors.length; i++) {
+          var sel = selectors[i];
+          var els = doc.querySelectorAll(sel);
+          var parts = ['n=' + els.length];
+          for (var j = 0; j < Math.min(els.length, 6); j++) {
+            var r = els[j].getBoundingClientRect();
+            parts.push('#' + j + '=' + (Math.round(r.x * 10) / 10) + ',' + (Math.round(r.y * 10) / 10) + ',' + (Math.round(r.width * 10) / 10) + 'x' + (Math.round(r.height * 10) / 10) + ' ' + charOf(els[j]));
+          }
+          rows.push(sel + ' ' + parts.join(' '));
+        }
+        // a11y snapshots clip long text nodes: emit each row as its own element
+        pre.innerHTML = '';
+        for (var k = 0; k < rows.length; k++) {
+          var d = document.createElement('div');
+          d.textContent = rows[k];
+          pre.appendChild(d);
+        }
+      }
+      function charOf(el) {
+        // one characterisation of layout intent: is it visible + key computed bits
+        try {
+          var cs = frame.contentWindow.getComputedStyle(el);
+          return '[' + cs.display + ' pos' + cs.position + ' ov' + (cs.overflowY === 'auto' || cs.overflowY === 'scroll' ? 's' : 'v') + (el.offsetParent ? '' : ' nop') + ']';
+        } catch (e) { return '[]'; }
+      }
+      var tick = setInterval(measure, 500);
+      window.addEventListener('beforeunload', function () { clearInterval(tick); });
+    })();
+  </script>
+</body>
+</html>

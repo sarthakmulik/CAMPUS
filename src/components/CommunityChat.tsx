@@ -672,6 +672,9 @@ export default function CommunityChat({ communityId, identity, isModerator, noti
     const index = rows.findIndex(m => m.id === message.id)
     if (index <= 0) return false
     const previous = rows[index - 1]
+    // consecutive unsent/retracted rows from the same sender read as one
+    // system wall of "unsent" notes instead of N prominent bubbles
+    if (previous.deletedAt && message.deletedAt && previous.senderId === message.senderId) return true
     return (
       previous.senderId === message.senderId &&
       !previous.deletedAt && !message.deletedAt &&
@@ -902,7 +905,8 @@ export default function CommunityChat({ communityId, identity, isModerator, noti
   return (
     <section className="community-chat cc-root" aria-label="Community chat">
       <header className="cc-head">
-        <button className="cc-head-btn" aria-expanded={searchOpen}
+        <button className="cc-head-btn" aria-label="Search this community chat"
+          aria-expanded={searchOpen}
           onClick={() => { setSearchOpen(v => !v); setMenuFor(null); setPickerFor(null) }}>
           <Search size={15}/> <span>Search</span>
         </button>
@@ -969,9 +973,11 @@ export default function CommunityChat({ communityId, identity, isModerator, noti
           )}
 
           {!loadingThread && !threadError && messages.length === 0 && (
-            <div className="chat-day-start">
+            <div className="cc-empty">
+              <MessageSquare size={22}/>
+              <b>No messages yet</b>
               <span>This community shares one room — keep it kind and useful.
-                Try @mentions, #hashtags, reactions, replies and attachments.</span>
+                Start with @mentions, #hashtags, reactions, replies and attachments.</span>
             </div>
           )}
 

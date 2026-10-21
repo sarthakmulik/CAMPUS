@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { popSubviewEntry } from '../lib/navHistory'
 import {
   Bookmark, BookmarkCheck, Building2, ChevronRight, Clock, Loader2,
   Package, Plus, RotateCcw, Search, SlidersHorizontal, X,
@@ -223,7 +224,10 @@ export default function Marketplace({
   }, [notify])
 
   const openDetail = (slug: string) => setOpenListingSlug(slug)
-  const backToList = () => setOpenListingSlug(null)
+  const backToList = () => {
+    // pop the listing detail's own history entry (device Back parity)
+    if (!popSubviewEntry()) setOpenListingSlug(null)
+  }
 
   // opening a detail — from the grid or a #m/ deep link — must start at the
   // top; the body scroll offset from deep in the grid used to leak into detail

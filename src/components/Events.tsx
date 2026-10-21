@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { popSubviewEntry } from '../lib/navHistory'
 import {
   CalendarDays, ChevronLeft, ChevronRight, Clock3, Globe2, List as ListIcon,
-  Loader2, MapPin, RefreshCw, Search, Sparkles, Ticket, Users, Video, X, Building2,
+  Loader2, MapPin, RefreshCw, Search, SlidersHorizontal, Sparkles, Ticket, Users, Video, X, Building2,
   Bookmark, BookmarkCheck, Plus, VideoIcon,
 } from 'lucide-react'
 import * as ev from '../lib/events'
@@ -101,7 +102,18 @@ export default function Events({
   const [selectedDay, setSelectedDay] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<ev.EventSummary | null>(null)
+  const [sheetOpen, setSheetOpen] = useState(false)
   const debounceRef = useRef<number | null>(null)
+
+  /** how many non-default discovery dimensions are set (category, format,
+      scope — scope only counts on Discover where it actually applies) */
+  const activeFilters = useMemo(() => {
+    let count = 0
+    if (category !== 'All') count += 1
+    if (format !== 'any') count += 1
+    if (tab === 'Discover' && scope !== 'any') count += 1
+    return count
+  }, [category, format, scope, tab])
 
   useEffect(() => {
     if (debounceRef.current) window.clearTimeout(debounceRef.current)
@@ -269,7 +281,11 @@ export default function Events({
         myCollegeId={myCollegeId}
         requireAuth={requireAuth}
         notify={notify}
-        onBack={() => { setOpenEventSlug(null); refresh() }}
+        onBack={() => {
+          // pop the detail's history entry, then refresh the list beneath
+          if (!popSubviewEntry()) setOpenEventSlug(null)
+          refresh()
+        }}
         onOpenOtherEvent={nextSlug => setOpenEventSlug(nextSlug)}
         onOpenCommunity={onOpenCommunity}
       />
@@ -310,23 +326,21 @@ export default function Events({
   return (
     <div className="events-page">
       <header className="events-head">
-        <div>
-          <h1 className="page-title">Events</h1>
-          <p className="page-subtitle">Discover what’s happening across campus — fests, hackathons, workshops and more.</p>
-          {identity && (
-            <p className="events-context muted-inline">
-              <Building2 size={13}/> {colleges.find(c => c.id === myCollegeId)?.short_name ?? 'No college set'}
-            </p>
-          )}
-        </div>
-        <button className="primary-button" onClick={() => {
+        <h1 className="page-title">Events</h1>
+        <button className="primary-button events-create" onClick={() => {
           if (!requireAuth('Sign in to create an event.', 'Events')) return
           setEditTarget(null)
           setCreateOpen(true)
         }}>
-          <Plus size={18}/> Create event
+          <Plus size={17}/> Create event
         </button>
       </header>
+      <p className="page-subtitle events-subtitle">Discover what’s happening across campus — fests, hackathons, workshops and more.</p>
+      {identity && (
+        <p className="events-context muted-inline">
+          <Building2 size={13}/> {colleges.find(c => c.id === myCollegeId)?.short_name ?? 'No college set'}
+        </p>
+      )}
 
       <div className="community-searchbar">
         <Search size={18}/>
@@ -351,6 +365,22 @@ export default function Events({
           <button className={view === 'list' ? 'on' : ''} onClick={() => setView('list')} aria-label="List view"><ListIcon size={15}/></button>
           <button className={view === 'calendar' ? 'on' : ''} onClick={() => setView('calendar')} aria-label="Calendar view"><CalendarDays size={15}/></button>
         </div>
+      </div>
+
+      {/* mobile-only summary row: one Filters action with an active count; the
+          discovery tabs above stay immediately accessible (never hidden behind
+          the filters sheet) */}
+      <div className="events-filter-bar" data-no-page-swipe="true">
+        <button
+          type="button"
+          className={`events-filter-toggle${activeFilters > 0 ? ' has' : ''}`}
+          aria-haspopup="dialog"
+          aria-expanded={sheetOpen}
+          onClick={() => setSheetOpen(true)}
+        >
+          <SlidersHorizontal size={14}/> Filters
+          {activeFilters > 0 && <i>{activeFilters}</i>}
+        </button>
       </div>
 
       <div className="community-category-row" data-no-page-swipe="true">
@@ -496,6 +526,146 @@ export default function Events({
           }}
         />
       )}
+
+      {sheetOpen && (
+        <EventFilterSheet
+          tab={tab}
+          category={category}
+          format={format}
+          scope={scope}
+          sort={sort}
+          setCategory={item => { setCategory(item); setPage(0) }}
+          setFormat={setFormat}
+          setScope={setScope}
+          setSort={setSort}
+          onReset={() => {
+            setCategory('All')
+            setFormat('any')
+            setScope('any')
+            setSort('recommended')
+            setPage(0)
+          }}
+          onClose={() => setSheetOpen(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Mobile filter bottom sheet                                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Houses the existing discovery dimensions (category, format, scope, sort) in
+ * one mobile surface. The inline rows these mirror keep their exact meaning —
+ * the sheet only changes where the controls live. Room, format and sort apply
+ * on every tab; scope is a Discover dimension, so it reads disabled elsewhere.
+ */
+function EventFilterSheet({
+  tab, category, format, scope, sort,
+  setCategory, setFormat, setScope, setSort, onReset, onClose,
+}: {
+  tab: EventTab
+  category: string
+  format: 'any' | ev.EventFormat
+  scope: 'any' | 'global' | 'college' | 'community'
+  sort: ev.EventSort
+  setCategory: (item: string) => void
+  setFormat: (value: 'any' | ev.EventFormat) => void
+  setScope: (value: 'any' | 'global' | 'college' | 'community') => void
+  setSort: (value: ev.EventSort) => void
+  onReset: () => void
+  onClose: () => void
+}) {
+  const closeRef = useRef<HTMLButtonElement | null>(null)
+  const sheetRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    closeRef.current?.focus()
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.stopPropagation(); onClose() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  // keep the sheet area out of the page-swipe gesture like other overlays
+  useEffect(() => {
+    const sheet = sheetRef.current
+    if (!sheet) return
+    sheet.setAttribute('data-no-page-swipe', 'true')
+  }, [])
+
+  const onDiscover = tab === 'Discover'
+  const onPast = tab === 'Past'
+
+  return (
+    <div className="overlay events-sheet-overlay"
+      onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}>
+      <section ref={sheetRef} className="events-filter-sheet" role="dialog" aria-modal="true" aria-label="Event filters">
+        <header className="events-sheet-head">
+          <b>Filters</b>
+          <span className="events-sheet-tab">{tab}</span>
+          <button ref={closeRef} className="events-sheet-close" aria-label="Close filters" onClick={onClose}>
+            <X size={18}/>
+          </button>
+        </header>
+
+        <div className="events-sheet-body">
+          <p className="events-sheet-label" id="filters-category">Category</p>
+          <div className="events-sheet-chips" role="group" aria-labelledby="filters-category">
+            {['All', ...ev.EVENT_CATEGORIES].map(item => (
+              <button key={item} type="button"
+                className={`community-chip${item === category ? ' on' : ''}`}
+                aria-pressed={item === category}
+                onClick={() => setCategory(item)}>
+                {item}
+              </button>
+            ))}
+          </div>
+
+          <div className="events-sheet-selects">
+            <label>
+              <span>Format</span>
+              <select value={format} onChange={event => setFormat(event.target.value as 'any' | ev.EventFormat)}>
+                <option value="any">Any</option>
+                <option value="offline">In person</option>
+                <option value="online">Online</option>
+                <option value="hybrid">Hybrid</option>
+              </select>
+            </label>
+            {!onPast && (
+              <label>
+                <span>Sort</span>
+                <select value={sort} onChange={event => setSort(event.target.value as ev.EventSort)}>
+                  <option value="recommended">Recommended</option>
+                  <option value="soonest">Soonest</option>
+                  <option value="new">Recently added</option>
+                </select>
+              </label>
+            )}
+            <label className={onDiscover ? '' : 'disabled'}>
+              <span>Scope</span>
+              <select value={scope} disabled={!onDiscover}
+                onChange={event => setScope(event.target.value as 'any' | 'global' | 'college' | 'community')}>
+                <option value="any">Any</option>
+                <option value="global">Global</option>
+                <option value="college">College</option>
+                <option value="community">Community</option>
+              </select>
+            </label>
+          </div>
+          {!onDiscover && (
+            <p className="events-sheet-note">Scope applies on the Discover tab.</p>
+          )}
+        </div>
+
+        <footer className="events-sheet-actions">
+          <button type="button" className="ghost-button" onClick={onReset}>Reset</button>
+          <button type="button" className="primary-button" onClick={onClose}>Done</button>
+        </footer>
+      </section>
     </div>
   )
 }

@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import * as db from '../lib/db'
 import * as cm from '../lib/communities'
+import { popSubviewEntry } from '../lib/navHistory'
 import CommunityDetail from './CommunityDetail'
 import { initialsFor, friendlyMessage } from '../lib/db'
 
@@ -20,6 +21,9 @@ type Props = {
   onOpenMention: (profileId: string) => void
   openCommunityId: string | null
   setOpenCommunityId: (id: string | null) => void
+  /** tab history plumbing for device Back (see navHistory policy) */
+  onCommunityTabChange?: (tab: string) => void
+  restoreCommunityTab?: string | null
 }
 
 const COMMUNITY_TABS = ['Discover', 'My Communities', 'Global', 'My College', 'Popular', 'New'] as const
@@ -48,7 +52,7 @@ function memberSinceLabel(iso: string): string {
 
 export default function Communities({
   identity, configured, colleges, myCollegeId, requireAuth, notify,
-  onOpenMention, openCommunityId, setOpenCommunityId,
+  onOpenMention, openCommunityId, setOpenCommunityId, onCommunityTabChange, restoreCommunityTab,
 }: Props) {
   const [tab, setTab] = useState<CommunityTab>('Discover')
   const [query, setQuery] = useState('')
@@ -183,7 +187,13 @@ export default function Communities({
         requireAuth={requireAuth}
         notify={notify}
         onOpenMention={onOpenMention}
-        onBack={() => { setOpenCommunityId(null); refresh() }}
+        onTabChange={tab => onCommunityTabChange?.(tab)}
+        restoreTab={restoreCommunityTab}
+        onBack={() => {
+          // pop the detail's own history entry, then refresh the list beneath
+          if (!popSubviewEntry()) setOpenCommunityId(null)
+          refresh()
+        }}
       />
     )
   }

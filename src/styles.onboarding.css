@@ -1796,6 +1796,42 @@
     transform: translateZ(0);
   }
 
+  /* ---- immersive direct conversation ------------------------------------- */
+  /* The thread screen unmounts the global bottom nav; the viewport it frees
+     must flow into the message timeline, and the composer picks up the
+     device safe-area inset the nav used to occupy. */
+  .app-shell.nav-hidden { padding-bottom: 0; }
+  .app-shell.nav-hidden .chat-compose {
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+
+  /* ---- compact community chrome ------------------------------------------ */
+  /* the compact topbar and the tab row stick inside the page scroller; the
+     content starts immediately beneath them, nothing covers the first item */
+  .detail-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    background: #fffdfbf0;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    margin: 0 0 6px;
+    padding: 9px 0 5px;
+  }
+  .community-detail > .community-tabs.detail-tabs {
+    position: sticky;
+    top: 47px;
+    z-index: 29;
+    background: #fffdfbf0;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    margin: 0 0 10px;
+    padding: 3px 0 0;
+    border-bottom: 1px solid #eef0f7;
+  }
+  /* sticky pair never overlaps the first item: no extra top padding */
+  .community-detail { padding-top: 8px; }
+
   /* sticky bars now reference the inner container, which already starts
      below the fixed 50px header */
   .feed-tabs {
@@ -4019,13 +4055,18 @@
 .chat-msg-menu button.danger { color: #c33a5e; }
 .chat-msg-menu button.danger:hover { background: #fdf1f4; }
 
+/* Unsent / moderator-removed rows read as one quiet system note, not a
+   message-sized card — the retraction event is kept in history, but it no
+   longer shouts from the wall the way a full bubble did. */
 .chat-bubble.unsent {
   background: transparent !important;
-  border: 1px dashed #d8d3e6;
+  border: 0;
+  box-shadow: none;
+  padding: 1px 3px;
   color: #8a93ab;
   font-style: italic;
 }
-.chat-bubble.unsent p { color: #8a93ab; font-size: 11.5px; }
+.chat-bubble.unsent p { color: #8a93ab; font-size: 11px; padding: 0; }
 .chat-bubble.unsent small { display: none; }
 
 .chat-editing-hint {
@@ -4173,23 +4214,28 @@
 
 /* ---- Detail page -------------------------------------------------------- */
 .community-detail { max-width: 860px; margin: 0 auto; padding: 14px 18px 90px; }
-.detail-topbar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
-.detail-topbar-title { display: flex; align-items: baseline; gap: 8px; }
-.detail-topbar-title b { font-size: 16px; }
-.detail-topbar-title span { display: inline-flex; align-items: center; gap: 3px; font-size: 11.5px; color: #7a87a3; text-transform: capitalize; }
+.detail-topbar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; min-height: 34px; }
+.detail-topbar-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.detail-topbar-title b { font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detail-topbar-title span { display: inline-flex; align-items: center; gap: 3px; font-size: 11.5px; color: #7a87a3; text-transform: capitalize; flex: none; }
 .detail-loading-panel { display: flex; align-items: center; justify-content: center; gap: 9px; padding: 46px 0; color: #5a6b83; font-size: 13.5px; }
 .detail-loading-panel.small { padding: 20px 0; font-size: 12.5px; }
 
+/* Layout A — the full overview belongs to the About tab only. Slightly
+   restrained cover + identity row, membership actions right beneath. */
+.community-hero.about-hero { background: #fff; border: 1px solid #eef0f7; border-radius: 18px; overflow: hidden; padding: 0 0 6px; box-shadow: 0 4px 16px #23284d06; }
 .community-hero-cover { height: 130px; border-radius: 18px; overflow: hidden; background: #eef0f7; transition: height .2s cubic-bezier(.22,.61,.36,1); }
+.community-hero.about-hero .community-hero-cover { border-radius: 0; height: 118px; }
 .community-hero-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .community-hero-cover-fallback { display: block; width: 100%; height: 100%; background: linear-gradient(135deg, #8c5bff55, #4f46e533); }
 .community-hero-bar { display: flex; align-items: center; gap: 14px; margin-top: -30px; padding: 0 16px; position: relative; }
 .community-hero-avatar { width: 64px; height: 64px; font-size: 21px; border-radius: 20px; border: 3px solid #fff; box-shadow: 0 3px 10px #1f29372a; }
+.community-hero-id { min-width: 0; }
 .community-hero-id h1 { margin: 8px 0 2px; font-size: 20px; letter-spacing: -0.5px; display: flex; align-items: center; gap: 9px; }
 .community-archived-chip { background: #f1f2f8; color: #5a6b83; border-radius: 999px; padding: 3px 10px; font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; }
 .community-hero-sub { margin: 0; display: flex; align-items: center; gap: 7px; color: #5a6b83; font-size: 12.5px; flex-wrap: wrap; }
 .community-hero-sub i { font-style: normal; color: #c3cada; }
-.community-hero-count { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; background: #fff; border: 1px solid #e8eaf1; border-radius: 999px; padding: 6px 12px; font-size: 12.5px; font-weight: 700; color: #34445c; }
+.community-hero-count { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; background: #fff; border: 1px solid #e8eaf1; border-radius: 999px; padding: 6px 12px; font-size: 12.5px; font-weight: 700; color: #34445c; flex: none; }
 .community-hero-desc { margin: 10px 16px 0; font-size: 13px; color: #4c5a75; line-height: 1.55; }
 .community-archived-banner { margin: 12px 0; border: 1px solid #f0e2b6; background: #fdf8ec; color: #7a5b13; border-radius: 13px; padding: 10px 14px; font-size: 12.5px; line-height: 1.5; }
 
@@ -4201,8 +4247,19 @@
 .ghost-action.danger:hover { border-color: #f0b6bd; color: #b42333; background: #fff7f8; }
 .share-strip { display: flex; gap: 6px; }
 .share-strip button { border: 1px solid #dde3ee; background: #fff; border-radius: 10px; padding: 6px 11px; font-size: 12.5px; font-weight: 600; color: #34445c; display: inline-flex; align-items: center; gap: 5px; }
-.community-tabs.detail-tabs { margin: 18px 0 14px; border-bottom: 1px solid #eef0f7; border-radius: 0; padding-bottom: 0; }
-.community-tabs.detail-tabs button { border-radius: 10px 10px 0 0; padding: 9px 13px; }
+.community-tabs.detail-tabs { margin: 12px 0 14px; border-bottom: 1px solid #eef0f7; border-radius: 0; padding-bottom: 0; }
+.community-tabs.detail-tabs button { border-radius: 10px 10px 0 0; padding: 10px 13px; font-weight: 600; }
+.community-tabs.detail-tabs button.on { background: #6654f5; color: #fff; font-weight: 700; box-shadow: 0 3px 10px #6654f52e; }
+.community-detail > .community-tabs.detail-tabs {
+  /* one tight row under the compact header; horizontal scroll instead of wrap */
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+.community-detail > .community-tabs.detail-tabs button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  min-height: 36px;
+}
 
 /* ---- Feed panel --------------------------------------------------------- */
 .community-feed { display: flex; flex-direction: column; gap: 13px; }
@@ -4317,14 +4374,14 @@
   .community-grid { grid-template-columns: 1fr; }
   .event-grid { grid-template-columns: 1fr; }
   .member-since { display: none; }
-  /* Mobile Chat tab = a bounded chat screen. The detail root becomes a
+  /* Mobile Chat tab = a full-bleed chat screen. The detail root becomes a
      height-100% flex column (same sizing mechanic as the DM chats page), so
      the composer mathematically sits ABOVE the fixed bottom nav — independent
      of header height, scroll position or keyboard (shell is 100dvh, so the
-     flex remainder shrinks with the keyboard). The hero slims (short cover,
-     description hidden) to give the thread room, while the topbar, hero bar,
-     action chips and the tabs stay put — switching tabs keeps the same page
-     frame, so it never feels like a drastic context change. */
+     flex remainder shrinks with the keyboard). The desktop card skin (border,
+     radius, fixed height) is dropped: the conversation reads edge-to-edge
+     like the DM thread screen, and its own inner scroller keeps the tab
+     chrome (topbar + tabs) stationary. */
   .chat-open.community-detail {
     height: 100%;
     display: flex;
@@ -4332,18 +4389,30 @@
     min-height: 0;
     padding-bottom: 8px;   /* base has 90px for scroll pages — the chat fills the space itself */
   }
-  .chat-open .community-hero { flex: none; padding-bottom: 4px; }
-  .chat-open .community-hero-cover { height: 76px; }
-  .chat-open .community-hero-desc { display: none; }
-  .community-detail.chat-open .community-tabs.detail-tabs { flex: none; margin: 12px 0 10px; }
+  .chat-open .cc-holder {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
   .chat-open .community-chat {
     position: static;
     flex: 1;
     min-height: 0;
     height: auto;
+    width: 100%;
+    /* full-bleed: cancel the page's side padding and drop the desktop
+       panel skin so the timeline owns the whole width */
+    margin-left: -13px;
+    margin-right: -13px;
+    border: 0;
+    border-radius: 0;
+    min-width: 0;
   }
   .chat-open .community-chat .chat-scroll { padding: 12px 12px 10px; }
   .chat-open .community-chat .chat-input-row { padding: 9px 12px 10px; }
+  .chat-open .cc-head { padding: 5px 11px; }
+  .chat-open .cc-head-btn { padding: 5px 10px; }
 }
 
 .spin { animation: community-spin 0.9s linear infinite; }
@@ -4355,7 +4424,9 @@
    ===================================================================== */
 
 .events-page { max-width: 1000px; margin: 0 auto; padding: 18px 22px 90px; }
-.events-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.events-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.events-head .page-title { font-size: 24px; letter-spacing: -0.6px; margin: 2px 0; }
+.events-subtitle { margin: 0; color: #5a6b83; font-size: 13px; max-width: 520px; }
 .events-head .primary-button { white-space: nowrap; }
 .events-context { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #5a6b83; margin-top: 2px; }
 
@@ -4363,7 +4434,81 @@
 .events-viewrow .event-tabs { flex: 1; }
 .events-viewtoggle { display: inline-flex; gap: 3px; border: 1px solid #e2e6ef; background: #fff; border-radius: 11px; padding: 3px; flex-shrink: 0; }
 .events-viewtoggle button { border: 0; background: transparent; border-radius: 8px; padding: 6px 8px; color: #5a6b83; display: inline-flex; }
-.events-viewtoggle button.on { background: #111827; color: #fff; }
+.events-viewtoggle button.on { background: #6654f5; color: #fff; }
+
+/* active discovery selection reads in CAMPUS indigo (not generic ink) */
+.community-tabs.event-tabs button.on { background: #6654f5; color: #fff; font-weight: 700; box-shadow: 0 3px 10px #6654f52e; }
+.community-category-row .community-chip.on, .events-sheet-chips .community-chip.on {
+  background: #6654f5; border-color: #6654f5; color: #fff;
+}
+
+/* mobile-only filter summary row; the inline rows carry the same controls on
+   desktop/tablet so the page ships one behaviour twice-sized, never two */
+.events-filter-bar { display: none; }
+.events-filter-toggle {
+  display: inline-flex; align-items: center; gap: 7px;
+  border: 1px solid #e2e6ef; background: #fff; color: #34445c;
+  border-radius: 999px; padding: 8px 13px; font-size: 12.5px; font-weight: 700;
+  min-height: 36px;
+}
+.events-filter-toggle svg { color: #6654f5; }
+.events-filter-toggle.has { border-color: #c9c1f8; background: #f7f6ff; color: #4c40c4; }
+.events-filter-toggle i {
+  font-style: normal; background: #6654f5; color: #fff; border-radius: 999px;
+  min-width: 18px; height: 18px; line-height: 18px; text-align: center;
+  font-size: 10.5px; font-weight: 800; padding: 0 5px;
+}
+
+/* the filters bottom sheet mirrors the inline rows one-for-one; changes apply
+   live exactly as they do on desktop */
+.overlay.events-sheet-overlay { z-index: 58; }
+.events-filter-sheet {
+  width: min(100%, 520px); max-height: 86vh; max-height: 86dvh;
+  background: #fffdfb; border-radius: 24px 24px 0 0; overflow: hidden;
+  display: flex; flex-direction: column;
+  box-shadow: 0 -10px 40px #0f172a15;
+  animation: sheet-in .24s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+@keyframes sheet-in { from { transform: translateY(18px); opacity: 0.4; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .events-filter-sheet { animation: none; } }
+.events-sheet-head {
+  flex: none; display: flex; align-items: center; gap: 9px; padding: 13px 14px 10px;
+  border-bottom: 1px solid #f0eceb;
+}
+.events-sheet-head b { font-size: 15.5px; letter-spacing: -0.3px; color: #111827; }
+.events-sheet-tab {
+  font-size: 11px; font-weight: 700; color: #5244d6; background: #f1eefe;
+  border-radius: 999px; padding: 3px 10px;
+}
+.events-sheet-close {
+  margin-left: auto; width: 34px; height: 34px; border: 0; border-radius: 50%;
+  background: #f4f2f9; color: #4f5d75; display: inline-flex; align-items: center; justify-content: center;
+}
+.events-sheet-close:hover { background: #ece9f5; }
+.events-sheet-body { overflow-y: auto; padding: 12px 14px 6px; display: flex; flex-direction: column; gap: 9px; }
+.events-sheet-label {
+  margin: 2px 0 0; font-size: 11px; font-weight: 800; letter-spacing: .5px;
+  text-transform: uppercase; color: #8b95a8;
+}
+.events-sheet-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.events-sheet-chips .community-chip { padding: 6px 12px; min-height: 32px; }
+.events-sheet-chips .community-chip:focus-visible { outline: 3px solid #6654f544; outline-offset: 2px; }
+.events-sheet-selects { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-top: 4px; }
+.events-sheet-selects label {
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 11.5px; font-weight: 700; color: #5a6b83;
+}
+.events-sheet-selects label.disabled { opacity: 0.55; }
+.events-sheet-selects select {
+  border: 1px solid #e2e6ef; background: #fff; border-radius: 10px;
+  padding: 8px 9px; font-size: 12.5px; color: #34445c; min-height: 36px;
+}
+.events-sheet-note { margin: 0; font-size: 11px; color: #8a94a6; }
+.events-sheet-actions {
+  flex: none; display: flex; gap: 9px; padding: 10px 14px calc(14px + env(safe-area-inset-bottom));
+  border-top: 1px solid #f0eceb; background: #fffdfb;
+}
+.events-sheet-actions > * { flex: 1; }
 
 .events-filterrow { display: flex; gap: 10px; flex-wrap: wrap; margin: 4px 0 10px; }
 .events-filterrow label { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #5a6b83; font-weight: 600; }
@@ -4549,12 +4694,52 @@
 .warn-line { color: #8a5a13; }
 
 @media(max-width: 650px) {
-  .events-page { padding: 14px 13px 90px; }
-  .events-head { flex-direction: column; }
-  .events-viewrow { flex-direction: column-reverse; align-items: stretch; }
-  .events-viewtoggle { align-self: flex-end; }
-  .event-grid { grid-template-columns: 1fr; }
+  .events-page { padding: 12px 13px 90px; }
+  .events-page .events-subtitle, .events-page .events-context { display: none; }
+  .events-head { margin-bottom: 10px; gap: 10px; }
+  .events-head .page-title { font-size: 21px; margin: 0; }
+  .events-head .events-create { padding: 9px 12px; font-size: 12.5px; border-radius: 10px; }
+  .events-page .community-searchbar { padding: 8px 12px; margin-bottom: 10px; }
+  .events-viewrow { gap: 7px; margin-bottom: 10px; }
+  .event-tabs button { padding: 7px 11px; font-size: 12px; }
+  .events-viewtoggle { padding: 2px; }
+  .events-viewtoggle button { padding: 6px 7px; }
+  /* the summary control for everything that used to sprawl below the tabs */
+  .events-filter-bar { display: flex; margin: 0 0 10px; }
+  .events-filter-toggle { flex: 1; justify-content: center; }
+  /* the desktop rows live in the sheet on mobile */
+  .events-page > .community-category-row, .events-page > .events-filterrow { display: none; }
+
+  /* featured strip: smaller cards so real events surface sooner */
+  .featured-strip { margin: 4px 0 2px; }
+  .featured-strip h2 { font-size: 13px; margin: 0 0 7px; }
+  .featured-card { flex: 0 0 216px; }
+  .featured-banner { height: 84px; }
   .featured-scroll { margin: 0 -13px; padding: 0 13px 6px; }
+
+  /* cards: horizontal roster rows instead of banner-dominated tiles —
+     title, time, venue and state read in one glance, artwork stays but
+     never taller than the text needs */
+  .event-grid { grid-template-columns: 1fr; gap: 9px; }
+  .event-card { flex-direction: row; align-items: stretch; border-radius: 15px; }
+  .event-banner { width: 88px; height: auto; min-height: 96px; flex: none; align-self: stretch; }
+  .event-datechip { left: 6px; bottom: 6px; padding: 2px 7px; border-radius: 9px; gap: 0; }
+  .event-datechip b { font-size: 8.5px; }
+  .event-datechip i { font-size: 14px; }
+  .event-card-body { padding: 9px 11px 11px; gap: 5px; min-width: 0; flex: 1; }
+  .event-card-summary { display: none; }
+  .event-card-title { font-size: 14px; line-height: 1.25; }
+  .event-card-meta { font-size: 11px; gap: 5px; }
+  .event-chips { gap: 5px; }
+  .event-chips .chip { padding: 2px 8px; font-size: 10px; }
+  .event-card-actions { margin-top: 2px; gap: 7px; }
+  .event-card-actions .secondary-button { padding: 7px 11px; font-size: 12px; }
+  .event-card-actions .ghost-button { padding: 7px 9px; font-size: 12px; }
+  .event-card-manage { padding-top: 6px; margin-top: 2px; }
+  .mini-action { padding: 4px 8px; font-size: 11px; }
+
+  /* create/edit wizard + detail page + calendar keep their earlier mobile
+     guidance */
   .form-two { grid-template-columns: 1fr; }
   .event-detail-page { padding: 12px 13px 90px; }
   .event-hero-banner { height: 128px; }
@@ -4735,6 +4920,18 @@
   display: flex;
   flex-direction: column;
 }
+
+/* empty timeline: compact, honest, with the composer ready below */
+.cc-empty {
+  margin: auto 14px 18px;
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 20px 14px; text-align: center;
+  border: 1px dashed #e2ddf4; border-radius: 15px; background: #fbfaff;
+  color: #5a6b83;
+}
+.cc-empty svg { color: #8d7cf2; }
+.cc-empty b { font-size: 13px; color: #1b3157; }
+.cc-empty span { font-size: 11.5px; line-height: 1.55; max-width: 32ch; }
 
 /* header strip */
 .cc-head {

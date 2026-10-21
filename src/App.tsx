@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useLayoutEffect, useRef, useState, useCallback, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useOverlayBackGuard } from './lib/navHistory'
 import {
   Home, Compass, Sparkles, Users, CalendarDays, Trophy, BriefcaseBusiness,
   CircleDollarSign, BookOpen, MessageCircle, Bell, Bookmark, Search, Building2,
@@ -9,6 +10,7 @@ import {
   Pencil, Trash2, BadgeCheck
 } from 'lucide-react'
 import { AuthProvider, hasSeenWelcome, markWelcomeSeen, useAuth } from './lib/auth'
+import * as navHistory from './lib/navHistory'
 import * as db from './lib/db'
 import WelcomeScreen from './components/WelcomeScreen'
 import AuthModal, { type AuthMode } from './components/AuthModal'
@@ -117,6 +119,31 @@ function CAMPUSApp() {
 
   const [activeNav, setActiveNav] = useState('Home')
 
+  /* ---- history-aware view (see src/lib/navHistory.ts) --------------------- */
+  /** a direct/group conversation occupies the mobile thread screen */
+  const [dmThread, setDmThread] = useState<{ id: string; seq: number } | null>(null)
+  /** stable reporter: a fresh identity for it would re-trigger the Chats
+      reporting effect every render (Maximum-update-depth loop) */
+  const handleMobileThreadChange = useCallback((threadId: string | null) => {
+    setDmThread(prev => {
+      // bail when unchanged — new objects here would restart the reporting
+      // effect in Chats (which depends on this callback's identity) and loop
+      const prevId = prev?.id ?? null
+      if (prevId === threadId) return prev
+      return threadId ? { id: threadId, seq: Date.now() } : null
+    })
+  }, [])
+  /** current community detail tab, tracked so device Back walks tab history */
+  const [communityTab, setCommunityTab] = useState<string | null>(null)
+  const dmThreadRef = useRef<{ id: string; seq: number } | null>(null)
+  dmThreadRef.current = dmThread
+  /** bumped when a popped history entry says the inbox has no thread open */
+  const [threadCloseSeq, setThreadCloseSeq] = useState(0)
+  const communityTabRef = useRef<string | null>(null)
+  communityTabRef.current = communityTab
+
+  const isMobileViewport = () => typeof window !== 'undefined' && window.matchMedia('(max-width: 650px)').matches
+
   /* ---- boot experience --------------------------------------------------- */
   // The loader lives only on the real boot path (session + profile restore).
   // When the app becomes ready, a fixed veil keeps the loader on screen for a
@@ -178,11 +205,20 @@ function CAMPUSApp() {
   const [searchSeed, setSearchSeed] = useState('')
   const [mobileMenu, setMobileMenu] = useState(false)
   const [openChatId, setOpenChatId] = useState<string | null>(null)
+  const [chatAutoSeq, setChatAutoSeq] = useState(0)
+  /** auto-open request for the Chats page ({ seq } so Back/Forward re-fire);
+      memoised — a fresh object every render would re-trigger the Chats opener */
+  const chatAutoOpen = useMemo(
+    () => (openChatId ? { id: openChatId, seq: chatAutoSeq } : null),
+    [openChatId, chatAutoSeq],
+  )
   const [openCommunityId, setOpenCommunityId] = useState<string | null>(null)
   const [openEventSlug, setOpenEventSlug] = useState<string | null>(null)
   const [openListingSlug, setOpenListingSlug] = useState<string | null>(null)
   const [chatDraft, setChatDraft] = useState<string | null>(null)
   const [clubs, setClubs] = useState<db.Club[]>([])
+  const openCommunityIdRef = useRef<string | null>(null)
+  openCommunityIdRef.current = openCommunityId
   const [viewingProfileId, setViewingProfileId] = useState<string | null>(null)
   const [following, setFollowing] = useState<string[]>([])
   const [blockedHandles, setBlockedHandles] = useState<string[]>([])
@@ -199,6 +235,102 @@ function CAMPUSApp() {
     return view && allNav.includes(view) ? view : null
   })
   const noticeTimer = useRef<number | null>(null)
+
+  /* ---- history-integrated view (see src/lib/navHistory.ts) ---------------- */
+  const currentView = useMemo<navHistory.CampusView>(() => {
+    const view: navHistory.CampusView = { nav: activeNav }
+    if (openCommunityId) view.community = openCommunityId
+    if (communityTab) view.ctab = communityTab
+    if (openEventSlug) view.event = openEventSlug
+    if (openListingSlug) view.listing = openListingSlug
+    if (dmThread && isMobileViewport()) view.dm = { id: dmThread.id }
+    return view
+  }, [activeNav, openCommunityId, communityTab, openEventSlug, openListingSlug, dmThread])
+  const currentViewJson = JSON.stringify(currentView)
+
+  /** skip the pusher exactly once after a popstate restore applied a view */
+  const skipNextPush = useRef(false)
+  /** keep the last pushed/restored JSON so duplicate snapshots never re-push */
+  const lastPushedJson = useRef<string | null>(null)
+  /** first-shell-mount stamp of the boot entry (Deep-link handlers need it) */
+  const historyReady = useRef(false)
+
+  /** restore a popped history snapshot into shell state (no pushing here) */
+  const applyPoppedView = (view: navHistory.CampusView) => {
+    skipNextPush.current = true
+    const json = JSON.stringify(view)
+    lastPushedJson.current = json
+    if (view.nav !== activeNavRef.current) {
+      setSearchOpen(false)
+      setSearchSeed('')
+      setActiveNav(view.nav)
+      if (view.nav !== 'Communities') setOpenCommunityId(null)
+      if (view.nav !== 'Events') setOpenEventSlug(null)
+      if (view.nav !== 'Marketplace') setOpenListingSlug(null)
+    }
+    setOpenCommunityId(view.community ?? null)
+    setCommunityTab(view.ctab ?? null)
+    setOpenEventSlug(view.event ?? null)
+    setOpenListingSlug(view.listing ?? null)
+    const wantDmId = view.dm?.id ?? null
+    const hadOpen = activeNavRef.current === 'Chats' && !!dmThreadRef.current
+    if (view.nav === 'Chats' && wantDmId && dmThreadRef.current?.id !== wantDmId) {
+      // Forward restore (or jump): reopen the conversation
+      setOpenChatId(wantDmId)
+      setChatAutoSeq(n => n + 1)
+    } else if (!wantDmId && hadOpen) {
+      // Back into the inbox: close the thread + Chats overlays
+      setOpenChatId(null)
+      setThreadCloseSeq(n => n + 1)
+    }
+  }
+
+  /* Install the single popstate handler once the signed-in/visitor shell renders.
+     The boot entry is stamped on the FIRST activation and is left untouched on
+     re-activation (the shell only mounts once per page load). */
+  useEffect(() => {
+    if (historyReady.current || status !== 'member' || auth.booting) return
+    historyReady.current = true
+    navHistory.initNavHistory(currentView, {
+      onView: applyPoppedView,
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, auth.booting])
+
+  /* Push one history entry whenever the shell's view snapshot changes for a
+     reason OTHER than landing here through Back/Forward. A change that only
+     touches the community tab (same screen otherwise) is REPLACED in place —
+     tabs are one screen, and Back must never ping-pong between them. */
+  useEffect(() => {
+    if (!historyReady.current) return
+    if (skipNextPush.current) {
+      skipNextPush.current = false
+      lastPushedJson.current = currentViewJson
+      navHistory.tracePushedView(currentView)
+      return
+    }
+    if (lastPushedJson.current === currentViewJson) return
+    lastPushedJson.current = currentViewJson
+    const previousView = navHistory.currentPushedView()
+    if (previousView && navHistory.viewCoreKey(previousView) === navHistory.viewCoreKey(currentView)) {
+      navHistory.replaceView(currentView)
+    } else {
+      navHistory.pushView(currentView)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentViewJson])
+
+  /* Overlay (modal/sheet/drawer) entries: opening pushes one history step so
+     device Back closes the overlay first, whatever page it belongs to. */
+  useOverlayBackGuard(composer, () => setComposer(false))
+  useOverlayBackGuard(!!editingPost, () => setEditingPost(null))
+  useOverlayBackGuard(!!deleteTarget, () => setDeleteTarget(null))
+  useOverlayBackGuard(!!commentTarget, () => setCommentTarget(null))
+  useOverlayBackGuard(!!reportTarget, () => setReportTarget(null))
+  useOverlayBackGuard(trimOpen, () => setTrimOpen(false))
+  useOverlayBackGuard(searchOpen, () => { setSearchOpen(false); setSearchSeed('') })
+  useOverlayBackGuard(!!authMode, () => setAuthMode(null))
+  useOverlayBackGuard(mobileMenu, () => setMobileMenu(false))
 
   const flash = (message: string) => {
     setNotice(message)
@@ -421,6 +553,7 @@ function CAMPUSApp() {
   }
   /** null = no share sheet open; set = the content card to send into chats */
   const [openShareTarget, setOpenShareTarget] = useState<ShareTarget | null>(null)
+  useOverlayBackGuard(!!openShareTarget, () => setOpenShareTarget(null))
   const openShareSheet = (target: ShareTarget) => {
     if (!requireAuth('share content')) return
     setOpenShareTarget(target)
@@ -436,6 +569,12 @@ function CAMPUSApp() {
   useEffect(() => {
     if (!configured) return
     const handleDeepLink = () => {
+      // a hash change is a same-document navigation that creates a fresh
+      // history entry with native null state — stamp it as a CAMPUS entry
+      // carrying the current view so the in-app chain is never severed
+      if (/^#(p|c|e|m)\//i.test(window.location.hash)) {
+        navHistory.preserveCurrentEntry()
+      }
       const match = /#p\/([0-9a-f-]{8}-[0-9a-f-]{4}-[0-9a-f-]{4}-[0-9a-f-]{4}-[0-9a-f-]{12})$/i.exec(window.location.hash)
       if (match) {
         const id = match[1]
@@ -455,7 +594,9 @@ function CAMPUSApp() {
               setPosts(current => current.some(p => p.id === id) ? current : [post, ...current])
               setActiveNav('Home')
             }
-            window.history.replaceState(null, '', window.location.pathname + window.location.search)
+            // keep the app's own state on this history entry so the chain to
+            // the boot screen stays intact for device Back
+            navHistory.preserveCurrentEntry()
           })
           .catch(error => flash(db.friendlyMessage(error)))
         return
@@ -473,7 +614,7 @@ function CAMPUSApp() {
               if (!id) { flash('That community link is not available — it may be a hidden community or was archived.'); return }
               setActiveNav('Communities')
               setOpenCommunityId(id)
-              window.history.replaceState(null, '', window.location.pathname + window.location.search)
+              navHistory.preserveCurrentEntry()
             })
             .catch(error => flash(db.friendlyMessage(error)))
         }
@@ -490,7 +631,7 @@ function CAMPUSApp() {
         setExplored(true)
         setActiveNav('Events')
         setOpenEventSlug(eventSlug)
-        window.history.replaceState(null, '', window.location.pathname + window.location.search)
+        navHistory.preserveCurrentEntry()
         return
       }
       // listing share links: #m/<slug> — the detail page resolves visibility
@@ -504,7 +645,7 @@ function CAMPUSApp() {
         setExplored(true)
         setActiveNav('Marketplace')
         setOpenListingSlug(listingSlug)
-        window.history.replaceState(null, '', window.location.pathname + window.location.search)
+        navHistory.preserveCurrentEntry()
       }
     }
     handleDeepLink()
@@ -535,6 +676,7 @@ function CAMPUSApp() {
     try {
       const conversationId = await db.openDm(post.authorId)
       setOpenChatId(conversationId)
+      setChatAutoSeq(n => n + 1)
       navigate('Chats')
     } catch (error) {
       flash(db.friendlyMessage(error))
@@ -553,6 +695,7 @@ function CAMPUSApp() {
     try {
       const conversationId = await db.openDm(sellerId)
       setOpenChatId(conversationId)
+      setChatAutoSeq(n => n + 1)
       setChatDraft(`Hi, I'm interested in your listing: ${listingTitle}. Is it still available?`)
       navigate('Chats')
     } catch (error) {
@@ -583,6 +726,7 @@ function CAMPUSApp() {
     try {
       const conversationId = await db.openDm(profileId)
       setOpenChatId(conversationId)
+      setChatAutoSeq(n => n + 1)
       navigate('Chats')
     } catch (error) {
       flash(db.friendlyMessage(error))
@@ -707,9 +851,11 @@ function CAMPUSApp() {
       const scroller = isMobile ? mainRef.current : null
       pageScrollMemory.current[activeNav] = scroller ? scroller.scrollTop : window.scrollY
     }
-    if (label !== 'Communities') setOpenCommunityId(null)
+    if (label !== 'Communities') { setOpenCommunityId(null); setCommunityTab(null) }
     if (label !== 'Events') setOpenEventSlug(null)
     if (label !== 'Marketplace') setOpenListingSlug(null)
+    // leaving the Chats pane unmounts the thread screen with it
+    if (label !== 'Chats') setDmThread(null)
     setActiveNav(label)
     // any navigation leaves the search overlay behind (it re-opens on demand)
     if (label !== 'Search') { setSearchOpen(false); setSearchSeed('') }
@@ -1253,7 +1399,7 @@ function CAMPUSApp() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${dmThread && isMobileViewport() ? ' nav-hidden' : ''}`}>
       <header className="mobile-header">
         <div className="mobile-header-left">
           <button className="icon-button" aria-label="Menu" onClick={() => setMobileMenu(true)}><Menu size={21}/></button>
@@ -1410,7 +1556,19 @@ function CAMPUSApp() {
                 onAutoOpened={() => setReelAutoOpen(null)}
               />
             : activeNav === 'Chats'
-              ? <Chats key="chats" identity={identity && user ? { id: user.id, name: identity.name, username: identity.username, initials: identity.initials } : null} configured={configured} autoOpen={openChatId} onAutoOpened={() => setOpenChatId(null)} initialDraft={chatDraft} onDraftConsumed={() => setChatDraft(null)} onOpenProfile={openMentionProfile} />
+              ? <Chats
+                  key="chats"
+                  identity={identity && user ? { id: user.id, name: identity.name, username: identity.username, initials: identity.initials } : null}
+                  configured={configured}
+                  autoOpen={chatAutoOpen}
+                  onAutoOpened={() => setOpenChatId(null)}
+                  initialDraft={chatDraft}
+                  onDraftConsumed={() => setChatDraft(null)}
+                  onOpenProfile={openMentionProfile}
+                  onMobileThreadChange={handleMobileThreadChange}
+                  closeThreadRequest={threadCloseSeq}
+                  requestThreadBack={() => navHistory.popThreadEntry()}
+                />
               : activeNav === 'Profile'
               ? <Profile
                   key="profile"
@@ -1438,7 +1596,13 @@ function CAMPUSApp() {
                     notify={flash}
                     onOpenMention={openMentionProfile}
                     openCommunityId={openCommunityId}
-                    setOpenCommunityId={setOpenCommunityId}
+                    setOpenCommunityId={id => {
+                      if (id && id !== openCommunityIdRef.current) setCommunityTab(null)
+                      setOpenCommunityId(id)
+                      if (!id) setCommunityTab(null)
+                    }}
+                    onCommunityTabChange={tab => setCommunityTab(tab)}
+                    restoreCommunityTab={communityTab}
                   />
               : activeNav === 'Events'
                 ? <Events
@@ -1450,7 +1614,7 @@ function CAMPUSApp() {
                     notify={flash}
                     openEventSlug={openEventSlug}
                     setOpenEventSlug={setOpenEventSlug}
-                    onOpenCommunity={clubId => { setActiveNav('Communities'); setOpenCommunityId(clubId) }}
+                    onOpenCommunity={clubId => { setActiveNav('Communities'); setOpenCommunityId(clubId); setCommunityTab(null) }}
                   />
                 : activeNav === 'Marketplace'
                 ? <Marketplace
@@ -1542,13 +1706,15 @@ function CAMPUSApp() {
         </footer>
       </aside>
 
-      <nav className="mobile-bottom-nav">
-        <button className={activeNav==='Home'?'active':''} onClick={() => navigate('Home')}><Home size={21}/><span>Home</span></button>
-        <button className={activeNav==='Discover'?'active':''} onClick={() => navigate('Discover')}><Compass size={21}/><span>Discover</span></button>
-        <button className="mobile-create" aria-label="Create" onClick={() => openComposer()}><Plus size={28}/></button>
-        <button className={activeNav==='Chats'?'active':''} onClick={() => navigate('Chats')}><MessageCircle size={21}/><span>Chats{status !== 'member' && <i className="unread-dot"/>}</span></button>
-        <button className={activeNav==='Profile'?'active':''} onClick={() => navigate('Profile')}><UserRound size={21}/><span>Profile</span></button>
-      </nav>
+      {!(dmThread && isMobileViewport()) && (
+        <nav className="mobile-bottom-nav">
+          <button className={activeNav==='Home'?'active':''} onClick={() => navigate('Home')}><Home size={21}/><span>Home</span></button>
+          <button className={activeNav==='Discover'?'active':''} onClick={() => navigate('Discover')}><Compass size={21}/><span>Discover</span></button>
+          <button className="mobile-create" aria-label="Create" onClick={() => openComposer()}><Plus size={28}/></button>
+          <button className={activeNav==='Chats'?'active':''} onClick={() => navigate('Chats')}><MessageCircle size={21}/><span>Chats{status !== 'member' && <i className="unread-dot"/>}</span></button>
+          <button className={activeNav==='Profile'?'active':''} onClick={() => navigate('Profile')}><UserRound size={21}/><span>Profile</span></button>
+        </nav>
+      )}
 
       {composer && <div className="overlay" onMouseDown={e => {if(e.target===e.currentTarget)setComposer(false)}}><section className="bottom-sheet composer-sheet"><div className="sheet-handle"/><div className="sheet-heading"><div><span className="eyebrow">SHARE WITH YOUR CAMPUS</span><h2>Create {composerKind === 'confession' ? 'a confession' : composerKind === 'poll' ? 'a poll' : composerKind === 'reel' ? 'a reel' : 'a post'}</h2></div><button className="icon-button" onClick={() => setComposer(false)} aria-label="Close composer"><X size={20}/></button></div>
         <div className="composer-kind-row">{([{kind:'post' as PostKind,label:'Post',icon:Image,style:'purple'},{kind:'reel' as PostKind,label:'Reel',icon:Clapperboard,style:'pink'},{kind:'poll' as PostKind,label:'Poll',icon:ChartNoAxesColumn,style:'orange'},{kind:'confession' as PostKind,label:'Confess',icon:BookOpen,style:'dark'}]).map(item=><button key={item.kind} className={`kind-option ${composerKind===item.kind?'chosen':''}`} onClick={() => handleKindSelect(item.kind)}><span className={`kind-icon ${item.style}`}><item.icon size={22}/></span><b>{item.label}</b></button>)}</div>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useOverlayBackGuard } from '../lib/navHistory'
 import {
   ArrowLeft, Bell, BellOff, Check, ChevronsDown, Download, FileText,
   MessageCircle, Mic, MoreHorizontal, Paperclip, Pause, Pencil, Play, Plus, Search, Send,
@@ -22,8 +23,9 @@ type Identity = { id: string; name: string; username: string; initials: string }
 type Props = {
   identity: Identity | null
   configured: boolean
-  /** When set, the page boots straight into that conversation (opened from a post's ⋯ menu). */
-  autoOpen?: string | null
+  /** When set, the page boots straight into that conversation (opened from a post's ⋯ menu).
+   *  `{ seq }` re-fires even for the same id — device Back/Forward restores. */
+  autoOpen?: { id: string; seq: number } | null
   onAutoOpened?: () => void
   /** A message prefill for the opened conversation (e.g. Contact Seller) —
    *  the buyer reviews it and hits send themselves; nothing is auto-sent. */
@@ -31,6 +33,12 @@ type Props = {
   onDraftConsumed?: () => void
   /** Shared-content cards navigate to profiles through the app shell. */
   onOpenProfile?: (profileId: string) => void
+  /** Report the thread-screen state to the shell (drives nav visibility). */
+  onMobileThreadChange?: (threadId: string | null) => void
+  /** Device Back reached the inbox entry: close any open thread + overlays. */
+  closeThreadRequest?: number
+  /** In-app back arrow: let the shell pop the thread's history entry. */
+  requestThreadBack?: () => boolean
 }
 
 const REACTIONS = ['👍', '❤️', '😂', '🎉', '🙏', '🔥', '👀', '💯'] as const
@@ -54,11 +62,14 @@ type ConfirmKind =
  */
 export default function Chats({
   identity, configured, autoOpen, onAutoOpened, initialDraft, onDraftConsumed, onOpenProfile,
+  onMobileThreadChange, closeThreadRequest, requestThreadBack,
 }: Props) {
   const [conversations, setConversations] = useState<ChatSummary[]>([])
   const [loadingList, setLoadingList] = useState(true)
   const [listError, setListError] = useState<string | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
+  const openIdRef = useRef<string | null>(null)
+  openIdRef.current = openId
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loadingThread, setLoadingThread] = useState(false)
   const [threadError, setThreadError] = useState<string | null>(null)
@@ -120,6 +131,13 @@ export default function Chats({
 
   /* conversation details (groups + prefs) */
   const [detailsOpen, setDetailsOpen] = useState(false)
+
+  /* history: each modal/sheet becomes one device-Back step so an open
+     overlay is always closed first (policies §D) */
+  useOverlayBackGuard(!!confirmAsk, () => setConfirmAsk(null))
+  useOverlayBackGuard(!!reportTarget, () => setReportTarget(null))
+  useOverlayBackGuard(!!forwardFor, () => setForwardFor(null))
+  useOverlayBackGuard(detailsOpen, () => setDetailsOpen(false))
   const [members, setMembers] = useState<ConversationMember[]>([])
   const [membersLoading, setMembersLoading] = useState(false)
   const [detailsError, setDetailsError] = useState<string | null>(null)
@@ -237,12 +255,40 @@ export default function Chats({
     }
   }, [conversations, openId])
 
-  // a chat opened from a post's ⋯ menu lands here with the conversation id
+  // a chat opened from a post's ⋯ menu, a seller tap or device Back/Forward
+  // lands here with the conversation id ({ seq } re-fires the same id)
   useEffect(() => {
     if (!autoOpen) return
-    void openConversation(autoOpen).then(() => onAutoOpened?.())
+    void openConversation(autoOpen.id).then(() => onAutoOpened?.())
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoOpen])
+
+  /* history: a popped entry just declared the inbox thread-free. Close the
+     thread and its overlays without navigating anywhere. */
+  const handledCloseSeq = useRef(0)
+  useEffect(() => {
+    if (closeThreadRequest == null || closeThreadRequest === handledCloseSeq.current) return
+    handledCloseSeq.current = closeThreadRequest
+    voiceTeardownRef.current()
+    setOpenId(null)
+    setMobileThread(false)
+    setListMenuId(null)
+    setActionsFor(null)
+    setPickerFor(null)
+    setAttachMenuOpen(false)
+    setGlobalHits(null)
+    setConfirmAsk(null)
+    setReportTarget(null)
+    setForwardFor(null)
+    setDetailsOpen(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closeThreadRequest])
+
+  /* report the thread screen to the shell — it hides the global bottom
+     navigation while a conversation occupies the whole screen */
+  useEffect(() => {
+    onMobileThreadChange?.(mobileThread && openId ? openId : null)
+  }, [mobileThread, openId, identity, onMobileThreadChange])
 
   /* realtime: new messages in the open thread arrive live; edits/unsends/
      reactions/attachments replace the row in place. Bare payloads carry
@@ -1197,7 +1243,18 @@ export default function Chats({
         ) : (
           <>
             <div className="chat-thread-head">
-              <button className="icon-button chat-back" aria-label="Back to chats" onClick={() => { voiceTeardownRef.current(); setOpenId(null); setMobileThread(false) }}><ArrowLeft size={19}/></button>
+              <button
+                className="icon-button chat-back"
+                aria-label="Back to chats"
+                onClick={() => {
+                  // prefer popping the thread's own history entry so device
+                  // Back and the header arrow are one system
+                  if (requestThreadBack?.()) return
+                  voiceTeardownRef.current()
+                  setOpenId(null)
+                  setMobileThread(false)
+                }}
+              ><ArrowLeft size={19}/></button>
               {openSummary?.peerAvatar
                 ? <img className="avatar small" src={openSummary.peerAvatar} alt=""/>
                 : <span className="avatar small">{initialsFor(peerName, active?.peerUsername ?? '')}</span>}

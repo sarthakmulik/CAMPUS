@@ -27,6 +27,10 @@ type Props = {
   notify: (message: string) => void
   onOpenMention: (profileId: string) => void
   onBack: () => void
+  /** report the current tab to the shell (device Back walks tab history) */
+  onTabChange?: (tab: string) => void
+  /** a popped history entry restored a specific tab */
+  restoreTab?: string | null
 }
 
 const FEED_TABS = ['Feed', 'Chat', 'Resources', 'Events', 'Members', 'About'] as const
@@ -35,9 +39,10 @@ type DetailTab = typeof FEED_TABS[number]
 const PINNED_NOTE = 'Pinned to the top of the community feed.'
 
 export default function CommunityDetail({
-  communityId, identity, requireAuth, notify, onOpenMention, onBack,
+  communityId, identity, requireAuth, notify, onOpenMention, onBack, onTabChange, restoreTab,
 }: Props) {
   const [detail, setDetail] = useState<cm.CommunityDetail | null>(null)
+  const membershipRef = useRef<string | null>(null)
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'missing' | 'error'>('loading')
   const [loadError, setLoadError] = useState<string | null>(null)
   const [tab, setTab] = useState<DetailTab>('Feed')
@@ -45,6 +50,12 @@ export default function CommunityDetail({
   // while other tabs are up — drafts, scroll position and realtime history
   // survive tab switches without refetching
   const [visitedChat, setVisitedChat] = useState(false)
+
+  /* ---- membership-aware navigation --------------------------------------- */
+  /** history keeps the tab so device Back walks it; parent reports/restores */
+  const onTabChangeRef = useRef(onTabChange)
+  onTabChangeRef.current = onTabChange
+  const reportedTabRef = useRef<DetailTab | null>(null)
 
   const isModerator = useMemo(
     () => detail?.my_role !== null && detail?.my_role !== undefined &&
@@ -57,6 +68,28 @@ export default function CommunityDetail({
     [detail],
   )
   const isMember = detail?.my_status === 'active'
+  /** non-members see only the About tab — no restricted content pretends */
+  const visibleTabs: readonly DetailTab[] = isMember ? FEED_TABS : ['About']
+
+  useEffect(() => {
+    if (detail && !isMember && tab !== 'About') setTab('About')
+  }, [detail, isMember, tab])
+
+  /** restore a tab dropped here from a popped history entry */
+  useEffect(() => {
+    if (restoreTab && isMember && visibleTabs.includes(restoreTab as DetailTab)) {
+      setTab(restoreTab as DetailTab)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restoreTab, isMember])
+
+  /** report tab to the shell after each change (drives history) */
+  useEffect(() => {
+    if (tab !== reportedTabRef.current) {
+      reportedTabRef.current = tab
+      onTabChangeRef.current?.(tab)
+    }
+  }, [tab])
 
   const loadDetail = useCallback(async () => {
     setLoadState('loading')
@@ -67,8 +100,16 @@ export default function CommunityDetail({
         setDetail(null)
         setLoadState('missing')
       } else {
+        const prevStatus = membershipRef.current
+        membershipRef.current = data.my_status
         setDetail(data)
         setLoadState('ready')
+        // transitions from member actions land on the membership home tab:
+        // join/request approval → Feed once access is confirmed; leave → About
+        if (prevStatus !== null && prevStatus !== data.my_status) {
+          if (prevStatus !== 'active' && data.my_status === 'active') setTab('Feed')
+          if (prevStatus === 'active' && data.my_status !== 'active') setTab('About')
+        }
       }
     } catch (err) {
       setLoadError(friendlyMessage(err))
@@ -118,44 +159,48 @@ export default function CommunityDetail({
     <div className={`community-detail${tab === 'Chat' ? ' chat-open' : ''}`}>
       <DetailTopBar onBack={onBack} title={detail.name} privacy={detail.privacy} />
 
-      <header className="community-hero">
-        <div className="community-hero-cover">
-          {detail.cover_image_url
-            ? <img src={detail.cover_image_url} alt="" />
-            : <span className="community-hero-cover-fallback"/>}
-        </div>
-        <div className="community-hero-bar">
-          <span className="avatar community-hero-avatar">
-            {detail.logo_url ? <img src={detail.logo_url} alt=""/> : initialsFor(detail.name, detail.slug)}
-          </span>
-          <div className="community-hero-id">
-            <h1>
-              {detail.name}
-              {detail.archived && <span className="community-archived-chip">Archived</span>}
-            </h1>
-            <p className="community-hero-sub">
-              {detail.scope === 'college'
-                ? <><Building2 size={13}/>{detail.college_name ?? 'College community'}</>
-                : <><Globe2 size={13}/>Global community</>}
-              <i>·</i>{detail.category}
-              <i>·</i>{detail.privacy === 'public' ? 'Public' : detail.privacy === 'private' ? 'Private' : 'Hidden'}
-            </p>
+      {/* Layout A — the full overview exists ONLY on the About tab. Content
+          tabs start straight at the tab bar so the timeline/list owns the
+          whole viewport (component level, not CSS hiding). */}
+      {tab === 'About' && (
+        <header className="community-hero about-hero">
+          <div className="community-hero-cover">
+            {detail.cover_image_url
+              ? <img src={detail.cover_image_url} alt="" />
+              : <span className="community-hero-cover-fallback"/>}
           </div>
-          <span className="community-hero-count"><Users size={14}/>{detail.member_count}</span>
-        </div>
-        {detail.description && <p className="community-hero-desc">{detail.description}</p>}
-        <CommunityActions
-          detail={detail}
-          identity={identity}
-          isOwner={isOwner}
-          requireAuth={requireAuth}
-          notify={notify}
-          onChanged={() => void loadDetail()}
-        />
-      </header>
+          <div className="community-hero-bar">
+            <span className="avatar community-hero-avatar">
+              {detail.logo_url ? <img src={detail.logo_url} alt=""/> : initialsFor(detail.name, detail.slug)}
+            </span>
+            <div className="community-hero-id">
+              <h1>
+                {detail.name}
+                {detail.archived && <span className="community-archived-chip">Archived</span>}
+              </h1>
+              <p className="community-hero-sub">
+                {detail.scope === 'college'
+                  ? <><Building2 size={13}/>{detail.college_name ?? 'College community'}</>
+                  : <><Globe2 size={13}/>Global community</>}
+                <i>·</i>{detail.category}
+                <i>·</i>{detail.privacy === 'public' ? 'Public' : detail.privacy === 'private' ? 'Private' : 'Hidden'}
+              </p>
+            </div>
+            <span className="community-hero-count"><Users size={14}/>{detail.member_count}</span>
+          </div>
+          <CommunityActions
+            detail={detail}
+            identity={identity}
+            isOwner={isOwner}
+            requireAuth={requireAuth}
+            notify={notify}
+            onChanged={() => void loadDetail()}
+          />
+        </header>
+      )}
 
       <nav className="community-tabs detail-tabs" data-no-page-swipe="true" aria-label="Community sections">
-        {FEED_TABS.map(item => (
+        {visibleTabs.map(item => (
           <button key={item} className={item === tab ? 'on' : ''} onClick={() => { setTab(item); if (item === 'Chat') setVisitedChat(true) }}>{item}</button>
         ))}
       </nav>
