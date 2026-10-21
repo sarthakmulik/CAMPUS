@@ -60,6 +60,8 @@ export type Caps = {
   reports: boolean
   /** storage bucket 'avatars' exists and accepts uploads */
   avatars: boolean
+  /** 0026: public.list_saved_items + saved_resources exist (Saved page) */
+  savedItems: boolean
 }
 
 export const EMPTY_CAPS: Caps = {
@@ -71,6 +73,7 @@ export const EMPTY_CAPS: Caps = {
   usernameRpc: false,
   reports: false,
   avatars: false,
+  savedItems: false,
 }
 
 export const PROFILE_BASE_COLUMNS =
@@ -164,6 +167,12 @@ export async function probeCaps(): Promise<Caps> {
   const { error: rpcError } = await client.rpc('username_available', { p_username: 'campus_probe_user' })
   const usernameRpc = !rpcError || !isMissingFunction(rpcError)
 
+  // 0026: the Saved page read path exists only after the migration is applied
+  const { error: savedError } = await client.rpc('list_saved_items', {
+    p_kind: 'all', p_query: null, p_before: null, p_limit: 1, p_after_id: null,
+  })
+  const savedItems = !savedError || !isMissingFunction(savedError)
+
   // Storage: ask the bucket list; the avatars bucket is created by migration 0001.
   let avatars = false
   try {
@@ -173,7 +182,7 @@ export async function probeCaps(): Promise<Caps> {
     avatars = false
   }
 
-  return { loaded: true, profileExtras, suggestions, interests, blocks, usernameRpc, reports, avatars }
+  return { loaded: true, profileExtras, suggestions, interests, blocks, usernameRpc, reports, avatars, savedItems }
 }
 
 /* -------------------------------------------------------------------------- */

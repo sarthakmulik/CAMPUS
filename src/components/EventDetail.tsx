@@ -5,6 +5,7 @@ import {
   Square, Undo2, Users, Video, X,
 } from 'lucide-react'
 import * as ev from '../lib/events'
+import * as bk from '../lib/bookmarks'
 import * as db from '../lib/db'
 import { friendlyMessage } from '../lib/db'
 import { registrationState } from './Events'
@@ -129,6 +130,8 @@ export default function EventDetail({
     try {
       const saved = await ev.toggleSavedEvent(detail.id, !detail.saved)
       setDetail(current => current ? { ...current, saved } : current)
+      // mirror into the shared saved store so the Saved page stays in step
+      bk.savedStoreSet('event', detail.id, saved)
       notify(saved ? 'Event saved to your list.' : 'Removed from your saved events.')
     } catch (err) {
       setError(friendlyMessage(err))

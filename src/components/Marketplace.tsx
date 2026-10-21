@@ -5,6 +5,7 @@ import {
   Package, Plus, RotateCcw, Search, SlidersHorizontal, X,
 } from 'lucide-react'
 import * as mk from '../lib/marketplace'
+import * as bk from '../lib/bookmarks'
 import * as db from '../lib/db'
 import type { ListingSummary, ListingScope, ListingSort } from '../lib/marketplace'
 import ListingDetail from './ListingDetail'
@@ -217,6 +218,8 @@ export default function Marketplace({
       setRows(prev => prev.map(r => (r.id === id
         ? { ...r, savedByMe: saved, savedCount: Math.max(0, r.savedCount + (saved ? 1 : -1)) }
         : r)))
+      // mirror into the shared saved store so the Saved page stays in step
+      bk.savedStoreSet('listing', id, saved)
       notify(saved ? 'Listing saved — find it under Saved.' : 'Removed from your saved listings.')
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not change the saved state.')

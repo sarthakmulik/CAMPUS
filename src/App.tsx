@@ -29,6 +29,8 @@ import ReelPlayer from './components/ReelPlayer'
 import ReelsFeed from './components/ReelsFeed'
 import CommentsSheet from './components/CommentsSheet'
 import Chats from './components/Chats'
+import Bookmarks from './components/Bookmarks'
+import * as bk from './lib/bookmarks'
 import SearchPanel from './components/SearchPanel'
 import Profile from './components/Profile'
 import ReportDialog, { type ReportTarget } from './components/ReportDialog'
@@ -522,8 +524,24 @@ function CAMPUSApp() {
   }
   const toggleSave = (id: string) => {
     if (!requireAuth('bookmark posts')) return
-    setPosts(current => current.map(p => p.id === id ? { ...p, saved: !p.saved } : p))
+    const post = posts.find(p => p.id === id)
+    const kind = post?.kind === 'reel' ? 'reel' : 'post'
+    // persisted through the shared saved store: optimistic flip everywhere
+    // at once, honest rollback + error toast when the write fails
+    bk.toggleSaved(kind, id).catch(error => notify(db.friendlyMessage(error)))
   }
+  // the saved-state mirror is per-account: reset it the moment the identity
+  // changes (login, logout, account switch) so no saved flags ever leak
+  useEffect(() => {
+    bk.savedStoreBindUser(user?.id ?? null)
+  }, [user?.id])
+  // hydrate the mirror with real rows for the posts currently loaded
+  useEffect(() => {
+    if (!user || feedSource !== 'db' || posts.length === 0) return
+    // cosmetic hydration: a failure here leaves flags unsaved (never wrong-
+    // saved); the toggle itself still fails loudly if the write cannot happen
+    void bk.syncPostSaves(posts).catch(() => undefined)
+  }, [posts, user, feedSource])
   const toggleRepost = (id: string) => {
     if (!requireAuth('repost to your campus')) return
     setPosts(current => current.map(p => p.id === id ? { ...p, reposted: !p.reposted, reposts: p.reposts + (p.reposted ? -1 : 1) } : p))
@@ -861,7 +879,7 @@ function CAMPUSApp() {
     if (label !== 'Search') { setSearchOpen(false); setSearchSeed('') }
     else setSearchOpen(true)
     if (label === 'Profile' && label === activeNav) setViewingProfileId(null)
-    if (scaffoldNav.includes(label) && label !== 'Chats') flash(`${label} is coming soon.`)
+    if (scaffoldNav.includes(label) && !['Chats', 'Bookmarks'].includes(label)) flash(`${label} is coming soon.`)
   }
 
   /* ---- mobile swipe navigation (touch only, viewport ≤ 650px) -------------
@@ -1629,6 +1647,15 @@ function CAMPUSApp() {
                     onContactSeller={messageListing}
                     onOpenProfile={openMentionProfile}
                   />
+                : activeNav === 'Bookmarks'
+                  ? <Bookmarks
+                      key="bookmarks"
+                      identity={identity && user ? { id: user.id, name: identity.name, username: identity.username, initials: identity.initials } : null}
+                      configured={configured}
+                      requireAuth={requireAuth}
+                      notify={flash}
+                      onGoDiscover={() => navigate('Discover')}
+                    />
                 : infoNav.includes(activeNav)
               ? <InfoPage name={activeNav}/>
               : <SectionPage name={activeNav} onCreate={openComposer} onSignIn={() => setAuthMode('signup')} isMember={status === 'member'} displayName={identity.name} />}

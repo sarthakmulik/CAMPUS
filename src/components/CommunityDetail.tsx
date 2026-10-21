@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ArrowLeft, BadgeCheck, Building2, CalendarDays, Check, Clock,
+  ArrowLeft, BadgeCheck, Bookmark, BookmarkCheck, Building2, CalendarDays, Check, Clock,
   Copy, Download, EyeOff, FileText, Flag, Globe2, Link as LinkIcon, Loader2,
   Lock, MessageCircle, MoreHorizontal, Pencil, Pin, Plus, Search,
   Send, Settings, Share2, Trash2, UserPlus, Users, X,
@@ -10,6 +10,7 @@ import * as cm from '../lib/communities'
 import { friendlyMessage, initialsFor, relativeTime } from '../lib/db'
 import { mapFeedRow } from '../lib/db'
 import type { CampusPost } from '../types'
+import * as bk from '../lib/bookmarks'
 import PostCard from './PostCard'
 import CommentsSheet from './CommentsSheet'
 import CommunityChat from './CommunityChat'
@@ -510,7 +511,10 @@ function CommunityFeedPanel({ detail, identity, isModerator, notify, requireAuth
     setError(null)
     try {
       const rows = await cm.fetchCommunityFeed({ clubId: detail.id })
-      setPosts(rows.map(row => ({ ...mapFeedRow(row), isPinned: Boolean(row.is_pinned) })))
+      const mapped = rows.map(row => ({ ...mapFeedRow(row), isPinned: Boolean(row.is_pinned) }))
+      setPosts(mapped)
+      // hydrate which of these community posts the member bookmarked
+      void bk.syncPostSaves(mapped).catch(() => undefined)
     } catch (err) {
       setError(friendlyMessage(err))
     } finally {
@@ -647,7 +651,11 @@ function CommunityFeedPanel({ detail, identity, isModerator, notify, requireAuth
     })
   }
 
-  const savedHint = (post: CampusPost) => patchPost(post.id, { saved: !post.saved })
+  const savePost = (post: CampusPost) => {
+    if (!identity) { requireAuth('bookmark posts'); return }
+    bk.toggleSaved(post.kind === 'reel' ? 'reel' : 'post', post.id)
+      .catch(error => notify(friendlyMessage(error)))
+  }
 
   return (
     <section className="community-feed">
@@ -713,7 +721,7 @@ function CommunityFeedPanel({ detail, identity, isModerator, notify, requireAuth
               post={post}
               isOwn={Boolean(identity && post.authorId === identity.id)}
               onLike={() => void like(post)}
-              onSave={() => savedHint(post)}
+              onSave={() => savePost(post)}
               onComment={() => { if (requireAuth('join the conversation', 'Communities')) setCommentTarget(post) }}
               onShare={() => sharePost(post)}
               onReport={() => setReportTarget({ label: 'this post', postId: post.id, excerpt: post.body.slice(0, 200) })}
@@ -788,13 +796,18 @@ function ResourcesPanel({ communityId, identity, isMember, isModerator, requireA
   const [busy, setBusy] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [savedIds, setSavedIds] = useState<Set<string>>(new Set())
+  const [saveBusyId, setSaveBusyId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!isMember) { setLoading(false); return }
     setLoading(true)
     setError(null)
     try {
-      setRows(await cm.fetchCommunityResources(communityId))
+      const fresh = await cm.fetchCommunityResources(communityId)
+      setRows(fresh)
+      // hydrate which of these the member saved (0026; no-op before migration)
+      void bk.hydrateResourceSaves(fresh.map(r => r.id)).catch(() => undefined)
     } catch (err) {
       setError(friendlyMessage(err))
     } finally {
@@ -805,6 +818,27 @@ function ResourcesPanel({ communityId, identity, isMember, isModerator, requireA
   useEffect(() => {
     void load()
   }, [load])
+
+  // keep the per-row saved state in step with the shared saved store —
+  // saves can land from anywhere in the app while this panel is open
+  useEffect(() => {
+    const sync = () => setSavedIds(new Set(rows.filter(r => bk.isSaved('resource', r.id)).map(r => r.id)))
+    sync()
+    return bk.subscribeToStore(sync)
+  }, [rows])
+
+  const toggleSaveResource = async (row: cm.ResourceRow) => {
+    if (!identity) { requireAuth('save resources', 'Resources'); return }
+    setSaveBusyId(row.id)
+    try {
+      const saved = await bk.toggleSaved('resource', row.id)
+      notify(saved ? 'Resource saved — find it under Saved.' : 'Removed from your saved resources.')
+    } catch (err) {
+      notify(friendlyMessage(err))
+    } finally {
+      setSaveBusyId(null)
+    }
+  }
 
   if (!isMember) {
     return <div className="empty-state"><FileText size={28}/><b>Members-only resources</b><span>Join this community to share and download notes, papers and links.</span></div>
@@ -917,6 +951,9 @@ function ResourcesPanel({ communityId, identity, isMember, isModerator, requireA
                 {row.file_name ?? 'Link'}{row.file_size != null ? ` · ${(row.file_size / 1024).toFixed(0)} KB` : ''} · {row.uploader_name ?? 'Member'} · {relativeTime(row.created_at)}
               </span>
             </div>
+            <button className={`icon-button${savedIds.has(row.id) ? ' saved' : ''}`} onClick={() => void toggleSaveResource(row)} aria-label={savedIds.has(row.id) ? 'Remove saved resource' : 'Save resource'} disabled={saveBusyId === row.id}>
+              {saveBusyId === row.id ? <Loader2 size={15} className="spin"/> : savedIds.has(row.id) ? <BookmarkCheck size={16}/> : <Bookmark size={16}/>}
+            </button>
             <button className="icon-button" onClick={() => void openResource(row)} aria-label={row.link_url ? 'Open link' : 'Download'}>{row.link_url ? <LinkIcon size={16}/> : <Download size={16}/>}</button>
             {canManageRow(row) && (
               <button className="icon-button" onClick={() => void remove(row)} aria-label="Remove resource"><Trash2 size={15}/></button>

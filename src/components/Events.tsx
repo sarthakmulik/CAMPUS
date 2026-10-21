@@ -6,6 +6,7 @@ import {
   Bookmark, BookmarkCheck, Plus, VideoIcon,
 } from 'lucide-react'
 import * as ev from '../lib/events'
+import * as bk from '../lib/bookmarks'
 import * as db from '../lib/db'
 import { friendlyMessage } from '../lib/db'
 import EventDetail from './EventDetail'
@@ -224,6 +225,8 @@ export default function Events({
       const saved = await ev.toggleSavedEvent(row.id, !row.saved)
       setRows(current => current.map(r => r.id === row.id ? { ...r, saved } : r))
       setCalRows(current => current.map(r => r.id === row.id ? { ...r, saved } : r))
+      // mirror into the shared saved store so the Saved page stays in step
+      bk.savedStoreSet('event', row.id, saved)
       notify(saved ? 'Event saved to your list.' : 'Removed from your saved events.')
       if (tab === 'Saved') void load(0, 'replace')
     } catch (err) {

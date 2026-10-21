@@ -8,6 +8,8 @@ import {
   initialsFor,
 } from '../lib/db'
 import type { CampusPost } from '../types'
+import * as bk from '../lib/bookmarks'
+import { useSavedFlag } from '../lib/bookmarks'
 import CommentsSheet from './CommentsSheet'
 import type { ShareTarget } from './chat/ShareContentSheet'
 
@@ -59,6 +61,8 @@ export default function ReelsFeed({ userId, identity, requireAuth, flash, onRepo
       nextPage.current += 1
       hasMore.current = rows.length === PAGE_SIZE
       setReels(current => [...current, ...rows.filter(row => !current.some(c => c.id === row.id))])
+      // hydrate which of these reels the member actually bookmarked
+      void bk.syncPostSaves(rows).catch(() => undefined)
       setError(null)
     } catch (err) {
       setError(friendlyMessage(err))
@@ -142,7 +146,9 @@ export default function ReelsFeed({ userId, identity, requireAuth, flash, onRepo
 
   const saveReel = (post: CampusPost) => {
     if (!requireAuth('bookmark reels')) return
-    setReels(current => current.map(r => r.id === post.id ? { ...r, saved: !r.saved } : r))
+    // persisted through the shared saved store (post_bookmarks row keyed to
+    // this reel) — optimistic flip, rollback + honest toast on failure
+    bk.toggleSaved('reel', post.id).catch(err => flash(friendlyMessage(err)))
   }
 
   /** share: open the CAMPUS share sheet (send into chats) when wired —
@@ -273,6 +279,8 @@ function ReelSlide({
   const burstId = useRef(0)
   const lastTap = useRef(0)
   const tapTimer = useRef<number | null>(null)
+  // one truth for the saved state: the shared persisted saved store
+  const saved = useSavedFlag('reel', post.id)
 
   const src = post.media && post.media.length > 0 ? post.media[0] : ''
   const initials = post.anonymous ? '' : initialsFor(post.author, post.handle.replace('@', ''))
@@ -411,8 +419,8 @@ function ReelSlide({
             <button onClick={onShare} aria-label="Share reel"><Share2 size={25}/></button>
           </div>
           <div className="reel-rail-item">
-            <button className={post.saved ? 'saved' : ''} onClick={onSave} aria-label="Save reel">
-              <Bookmark size={25} fill={post.saved ? 'currentColor' : 'none'}/>
+            <button className={saved ? 'saved' : ''} onClick={onSave} aria-label={saved ? 'Remove saved reel' : 'Save reel'}>
+              <Bookmark size={25} fill={saved ? 'currentColor' : 'none'}/>
             </button>
           </div>
           <div className="reel-rail-item">

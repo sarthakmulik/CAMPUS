@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { useSavedFlag } from '../lib/bookmarks'
 import {
   BadgeCheck, BookOpen, Bookmark, EyeOff, Flag, Heart,
   MessageCircle, MoreHorizontal, Pencil, Pin, Repeat2, Share2, Sparkles, Trash2, VolumeX,
@@ -36,6 +37,9 @@ export function PostCard({
   const [slide, setSlide] = useState(0)
   const slides = post.media ?? []
   const canActOnAuthor = Boolean(post.handle) && !post.anonymous
+  // the saved flag comes from the shared saved store (persisted through
+  // post_bookmarks), so every feed that renders this card shows one truth
+  const saved = useSavedFlag(post.kind === 'reel' ? 'reel' : 'post', post.id)
   const trackRef = useRef<HTMLDivElement | null>(null)
   const onTrackScroll = () => {
     const track = trackRef.current
@@ -84,7 +88,7 @@ export function PostCard({
       {(post.trending || post.anonymous || post.tag) && <div className="post-badges">{post.trending&&<span className="badge trending-badge"><Sparkles size={12}/> Trending</span>}{post.anonymous&&<span className="badge confession-badge">😳 Confession</span>}{post.tag&&<span className="badge college-badge">{post.tag}</span>}</div>}
       {slides.length === 0 && <p className="post-body"><RichText text={post.body} onMention={onOpenMention} onHashtag={onOpenTag}/></p>}
       {mediaBlock}
-      <div className="post-actions"><button className={post.liked?'liked':''} onClick={onLike} aria-label={`Like post (${post.likes})`}><Heart size={19} fill={post.liked?'currentColor':'none'}/><span>{post.likes}</span></button><button onClick={onComment} aria-label={`Comment (${post.comments})`}><MessageCircle size={19}/><span>{post.comments}</span></button><button className={post.reposted?'reposted':''} onClick={onRepost} aria-label={`Repost (${post.reposts})`}><Repeat2 size={19}/><span>{post.reposts}</span></button><button onClick={onShare} aria-label="Share"><Share2 size={18}/></button><span className="action-spacer"/><button className={post.saved?'saved':''} onClick={onSave} aria-label="Bookmark"><Bookmark size={19} fill={post.saved?'currentColor':'none'}/></button><button onClick={onReport} aria-label="Report"><Flag size={18}/></button></div>
+      <div className="post-actions"><button className={post.liked?'liked':''} onClick={onLike} aria-label={`Like post (${post.likes})`}><Heart size={19} fill={post.liked?'currentColor':'none'}/><span>{post.likes}</span></button><button onClick={onComment} aria-label={`Comment (${post.comments})`}><MessageCircle size={19}/><span>{post.comments}</span></button><button className={post.reposted?'reposted':''} onClick={onRepost} aria-label={`Repost (${post.reposts})`}><Repeat2 size={19}/><span>{post.reposts}</span></button><button onClick={onShare} aria-label="Share"><Share2 size={18}/></button><span className="action-spacer"/><button className={saved?'saved':''} onClick={onSave} aria-label={saved ? 'Remove saved post' : 'Save post'}><Bookmark size={19} fill={saved?'currentColor':'none'}/></button><button onClick={onReport} aria-label="Report"><Flag size={18}/></button></div>
       {slides.length > 0 && <p className="post-body post-caption"><RichText text={post.body} onMention={onOpenMention} onHashtag={onOpenTag}/></p>}
     </div>
   </article>

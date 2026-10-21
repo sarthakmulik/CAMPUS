@@ -5,6 +5,7 @@ import {
   RefreshCcw, RotateCcw, Share2, ShieldAlert, Trash2, X,
 } from 'lucide-react'
 import * as mk from '../lib/marketplace'
+import * as bk from '../lib/bookmarks'
 import * as db from '../lib/db'
 import ShareContentSheet, { type ShareTarget } from './chat/ShareContentSheet'
 
@@ -75,6 +76,8 @@ export default function ListingDetail({
     try {
       const saved = await mk.toggleSavedListing(row.id)
       setRow({ ...row, savedByMe: saved, savedCount: Math.max(0, row.savedCount + (saved ? 1 : -1)) })
+      // mirror into the shared saved store so the Saved page stays in step
+      bk.savedStoreSet('listing', row.id, saved)
       notify(saved ? 'Saved to your listings.' : 'Removed from saved.')
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not change the saved state.')
