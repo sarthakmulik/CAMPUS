@@ -102,6 +102,13 @@ create table if not exists public.post_topics (
   primary key(post_id, topic_id)
 );
 
+create table if not exists public.poll_meta (
+  post_id uuid primary key references public.posts(id) on delete cascade,
+  multiple_choice boolean not null default false,
+  /* null = open-ended; cast_poll_vote() enforces expiry via the server clock */
+  closes_at timestamptz
+);
+
 create table if not exists public.poll_options (
   id uuid primary key default gen_random_uuid(),
   post_id uuid not null references public.posts(id) on delete cascade,
@@ -110,11 +117,13 @@ create table if not exists public.poll_options (
 );
 
 create table if not exists public.poll_votes (
+  /* multiple-choice polls store one row per selected option;
+     single-choice is enforced by cast_poll_vote() (migration 0028) */
   post_id uuid not null references public.posts(id) on delete cascade,
   option_id uuid not null references public.poll_options(id) on delete cascade,
   user_id uuid not null references public.profiles(id) on delete cascade,
   created_at timestamptz not null default now(),
-  primary key(post_id, user_id)
+  primary key(post_id, user_id, option_id)
 );
 
 create table if not exists public.conversations (
@@ -275,6 +284,7 @@ alter table public.topics enable row level security;
 alter table public.post_topics enable row level security;
 alter table public.poll_options enable row level security;
 alter table public.poll_votes enable row level security;
+alter table public.poll_meta enable row level security;
 alter table public.conversations enable row level security;
 alter table public.conversation_members enable row level security;
 alter table public.messages enable row level security;
@@ -336,10 +346,24 @@ drop policy if exists "post topics readable" on public.post_topics;
 create policy "post topics readable" on public.post_topics for select using (true);
 drop policy if exists "poll options readable" on public.poll_options;
 create policy "poll options readable" on public.poll_options for select using (true);
+drop policy if exists "poll meta readable" on public.poll_meta;
+/* settings are read-only to clients; create_poll() is the sole writer */
+create policy "poll meta readable" on public.poll_meta for select using (true);
+/* poll settings/options/votes are writable only through the 0028 definer RPCs */
+revoke all on public.poll_meta from anon, authenticated;
+grant select on public.poll_meta to anon, authenticated;
+revoke insert, update, delete, truncate on public.poll_options from anon, authenticated, public;
+revoke insert, update, delete, truncate on public.poll_meta from anon, authenticated, public;
 drop policy if exists "users read poll votes" on public.poll_votes;
-create policy "users read poll votes" on public.poll_votes for select to authenticated using (true);
+/* voters can see only their own rows — results come from poll_states()
+   aggregates (migration 0028), so vote identity is never enumerable */
+create policy "users read poll votes" on public.poll_votes for select to authenticated using (auth.uid() = user_id);
 drop policy if exists "users vote once" on public.poll_votes;
-create policy "users vote once" on public.poll_votes for insert to authenticated with check (auth.uid() = user_id);
+/* votes are writable ONLY through cast_poll_vote() (definer RPC) — no direct
+   client inserts, updates or deletes; the RPC enforces expiry, option
+   ownership and the single- vs multiple-choice limit transactionally */
+revoke all on public.poll_votes from anon, authenticated;
+grant select on public.poll_votes to authenticated;
 
 drop policy if exists "members read conversations" on public.conversations;
 create policy "members read conversations" on public.conversations for select to authenticated using (

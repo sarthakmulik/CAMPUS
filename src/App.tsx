@@ -30,12 +30,14 @@ import ReelsFeed from './components/ReelsFeed'
 import CommentsSheet from './components/CommentsSheet'
 import Chats from './components/Chats'
 import Bookmarks from './components/Bookmarks'
+import Confessions from './components/Confessions'
+import Leaderboard from './components/Leaderboard'
 import * as bk from './lib/bookmarks'
 import SearchPanel from './components/SearchPanel'
 import Profile from './components/Profile'
 import ReportDialog, { type ReportTarget } from './components/ReportDialog'
 import ShareContentSheet, { type ShareTarget } from './components/chat/ShareContentSheet'
-import type { CampusPost, PostKind } from './types'
+import type { CampusPost, PollState, PostKind } from './types'
 import * as media from './lib/media'
 import { REEL_WINDOW_SECONDS } from './lib/media'
 
@@ -203,6 +205,24 @@ function CAMPUSApp() {
   useEffect(() => () => { imageThumbs.forEach(thumb => URL.revokeObjectURL(thumb.url)) }, [imageThumbs])
   const [composerKind, setComposerKind] = useState<PostKind>('post')
   const [draft, setDraft] = useState('')
+  /* poll composer fields (migration 0028) — sane defaults: single choice,
+     7-day duration, two option inputs ready to fill */
+  const [pollOptions, setPollOptions] = useState<string[]>(['', ''])
+  const [pollMultiple, setPollMultiple] = useState(false)
+  const [pollDays, setPollDays] = useState(7)
+  const [pollErrors, setPollErrors] = useState<string[]>([])
+  /* authoritative poll state per post id — only entries fetched from
+     poll_states()/cast_poll_vote() live here, nothing is faked client-side
+     (null = authoritative lookup failed; undefined = not yet fetched) */
+  const [pollStateMap, setPollStateMap] = useState<Record<string, PollState | null>>({})
+  /* dedicated Confessions page (opened from the pink Home card) */
+  const [confessionsOpen, setConfessionsOpen] = useState(() =>
+    typeof window === 'undefined' ? false : window.location.hash === '#confessions')
+  const [confRefreshSeq, setConfRefreshSeq] = useState(0)
+  /** where the composer was opened from: publish-to-Home or publish-to-Confessions */
+  const [composerSource, setComposerSource] = useState<'home' | 'confessions'>('home')
+  /** live like/comment patches app-wide, replayed inside the Confessions page */
+  const [confessPatch, setConfessPatch] = useState<{ id: string; likes?: number; liked?: boolean; comments?: number } | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchSeed, setSearchSeed] = useState('')
   const [mobileMenu, setMobileMenu] = useState(false)
@@ -245,9 +265,10 @@ function CAMPUSApp() {
     if (communityTab) view.ctab = communityTab
     if (openEventSlug) view.event = openEventSlug
     if (openListingSlug) view.listing = openListingSlug
+    if (confessionsOpen && activeNav === 'Home') view.conf = true
     if (dmThread && isMobileViewport()) view.dm = { id: dmThread.id }
     return view
-  }, [activeNav, openCommunityId, communityTab, openEventSlug, openListingSlug, dmThread])
+  }, [activeNav, openCommunityId, communityTab, openEventSlug, openListingSlug, dmThread, confessionsOpen])
   const currentViewJson = JSON.stringify(currentView)
 
   /** skip the pusher exactly once after a popstate restore applied a view */
@@ -274,6 +295,10 @@ function CAMPUSApp() {
     setCommunityTab(view.ctab ?? null)
     setOpenEventSlug(view.event ?? null)
     setOpenListingSlug(view.listing ?? null)
+    // the Confessions page is a Home subview: leaving Home closes it, and a
+    // snapshot taken while it was open restores it (device Back-friendly)
+    if (view.nav !== 'Home') setConfessionsOpen(false)
+    else setConfessionsOpen(Boolean(view.conf))
     const wantDmId = view.dm?.id ?? null
     const hadOpen = activeNavRef.current === 'Chats' && !!dmThreadRef.current
     if (view.nav === 'Chats' && wantDmId && dmThreadRef.current?.id !== wantDmId) {
@@ -415,6 +440,16 @@ function CAMPUSApp() {
       // The database is the truth — an empty feed shows the empty state, not
       // the sample posts, so a live-but-empty campus is never misrepresented.
       setPosts(rows)
+      // refresh the authoritative poll snapshots for this page in one call;
+      // ids the RPC does not answer for (e.g. un-created poll meta) resolve
+      // to `null` so a card degrades honestly instead of spinning forever
+      const map = await db.pollStatesFor(rows)
+      const pollIds = rows.filter(p => p.kind === 'poll').map(p => p.id)
+      const hydrate: Record<string, PollState | null> = {}
+      for (const id of pollIds) hydrate[id] = map[id] ?? null
+      if (Object.keys(hydrate).length) {
+        setPollStateMap(current => ({ ...current, ...hydrate }))
+      }
     } catch (error) {
       setFeedSource('local')
       setFeedError(db.friendlyMessage(error))
@@ -506,18 +541,23 @@ function CAMPUSApp() {
 
   /* ---- gated actions (visitors get the sign-up prompt) ----------------- */
 
-  const toggleLike = async (id: string) => {
+  /** like/unlike; `item` lets feeds outside `posts` (the Confessions page
+   *  keeps its own list) take part — outcomes replay to them via confessPatch */
+  const toggleLike = async (id: string, item?: CampusPost) => {
     if (!requireAuth('react to posts')) return
     // Optimistic flip, then a real write. Any failure is rolled back and
     // reported — the count on screen always matches the database.
-    const target = posts.find(p => p.id === id)
+    const target = posts.find(p => p.id === id) ?? item
     if (!target) return
+    const nextLiked = !target.liked
     setPosts(current => current.map(p => p.id === id ? { ...p, liked: !p.liked, likes: p.likes + (p.liked ? -1 : 1) } : p))
+    setConfessPatch({ id, liked: nextLiked, likes: target.likes + (target.liked ? -1 : 1) })
     if (feedSource === 'db' && user) {
       try {
-        await db.toggleLike(id, user.id, !target.liked)
+        await db.toggleLike(id, user.id, nextLiked)
       } catch (error) {
         setPosts(current => current.map(p => p.id === id ? { ...p, liked: target.liked, likes: target.likes } : p))
+        setConfessPatch({ id, liked: target.liked, likes: target.likes })
         notify(db.friendlyMessage(error))
       }
     }
@@ -542,9 +582,12 @@ function CAMPUSApp() {
     // saved); the toggle itself still fails loudly if the write cannot happen
     void bk.syncPostSaves(posts).catch(() => undefined)
   }, [posts, user, feedSource])
-  const toggleRepost = (id: string) => {
+  const toggleRepost = (id: string, item?: CampusPost) => {
     if (!requireAuth('repost to your campus')) return
+    const target = posts.find(p => p.id === id) ?? item
+    if (!target) return
     setPosts(current => current.map(p => p.id === id ? { ...p, reposted: !p.reposted, reposts: p.reposts + (p.reposted ? -1 : 1) } : p))
+    setConfessPatch({ id })
   }
   const openComments = (post: CampusPost) => {
     if (!requireAuth('join the conversation')) return
@@ -611,6 +654,8 @@ function CAMPUSApp() {
             } else {
               setPosts(current => current.some(p => p.id === id) ? current : [post, ...current])
               setActiveNav('Home')
+              // a deep-linked poll still shows real totals on its first paint
+              if (post.kind === 'poll') void db.pollStatesFor([post]).then(map => setPollStateMap(cur => ({ ...cur, ...map })))
             }
             // keep the app's own state on this history entry so the chain to
             // the boot screen stays intact for device Back
@@ -782,11 +827,75 @@ function CAMPUSApp() {
     }
   }
 
+  /** inline validation for the poll composer fields (no alerts — messages
+   *  render next to the options) */
+  const validatePollDraft = (): string[] => {
+    const options = pollOptions.map(value => value.trim()).filter(Boolean)
+    const errors: string[] = []
+    if (!draft.trim()) errors.push('Write the poll question first.')
+    if (options.length < 2) errors.push('A poll needs at least two different options.')
+    const seen = new Set<string>()
+    for (const option of options) {
+      const key = option.toLowerCase()
+      if (seen.has(key)) { errors.push('Poll options must be different from each other.'); break }
+      seen.add(key)
+    }
+    return errors
+  }
+
+  /**
+   * Publish a poll: post + options + settings land in ONE server transaction
+   * (create_poll, migration 0028) and the fresh authoritative state hydrates
+   * the new card immediately.
+   */
+  const publishPollDraft = async () => {
+    const errors = validatePollDraft()
+    if (errors.length) { setPollErrors(errors); return }
+    if (!configured || !user) {
+      flash('Polls need the campus database — connect CAMPUS to publish a real poll.')
+      return
+    }
+    setPublishing(true)
+    try {
+      const collegeRow = colleges.find(c => c.id === profile?.college_id) ?? colleges[0]
+      const options = pollOptions.map(value => value.trim()).filter(Boolean)
+      const pollPost = await db.createPoll({
+        userId: user.id,
+        body: draft.trim(),
+        kind: 'poll',
+        isAnonymous: false,
+        collegeId: profile?.college_id ?? null,
+        collegeShort: collegeRow?.short_name ?? '',
+        authorName: identity.name,
+        authorUsername: identity.username,
+        mediaUrls: [],
+        options,
+        multipleChoice: pollMultiple,
+        closeDays: pollDays,
+      })
+      const map = await db.pollStatesFor([pollPost])
+      setPollStateMap(current => ({ ...current, ...map }))
+      setPosts(current => [pollPost, ...current])
+      setDraft(''); setPollOptions(['', '']); setPollMultiple(false); setPollDays(7); setPollErrors([])
+      setComposer(false)
+      setActiveNav('Home'); setFeedTab('For You')
+      setConfessionsOpen(false)
+      flash(pollMultiple ? 'Poll posted — classmates can pick several options.' : 'Poll posted to the campus feed.')
+    } catch (error) {
+      // a failed publish keeps the composer open with the whole draft intact
+      flash(db.friendlyMessage(error))
+    } finally {
+      setPublishing(false)
+      setPublishProgress(null)
+    }
+  }
+
   const createPost = async () => {
     if (!requireAuth('create posts, polls and confessions')) return
-    if (!draft.trim()) { flash('Write something before posting.'); return }
+    // polls validate inline through publishPollDraft (question included)
+    if (!draft.trim() && composerKind !== 'poll') { flash('Write something before posting.'); return }
     if (composerKind === 'poll') {
-      flash('Polls are not connected to the database yet — share your question as a regular post for now.')
+      await publishPollDraft()
       return
     }
     setPublishing(true)
@@ -834,9 +943,11 @@ function CAMPUSApp() {
       if (result === 'error') return // composer stays open, draft intact
       setDraft(''); setDraftImages([]); setDraftVideo(null); setVideoTrim(null)
       setComposer(false)
-      flash(composerKind === 'confession'
-        ? 'Confession posted to the campus feed — your name stays hidden.'
-        : 'Posted to the campus feed.')
+      flash(composerSource === 'confessions' && composerKind === 'confession'
+        ? 'Confession posted — it appears here in the Confessions feed.'
+        : composerKind === 'confession'
+          ? 'Confession posted to the campus feed — your name stays hidden.'
+          : 'Posted to the campus feed.')
     } catch (error) {
       // Media processing or a database failure: the composer stays open with
       // the draft intact.
@@ -872,6 +983,10 @@ function CAMPUSApp() {
     if (label !== 'Communities') { setOpenCommunityId(null); setCommunityTab(null) }
     if (label !== 'Events') setOpenEventSlug(null)
     if (label !== 'Marketplace') setOpenListingSlug(null)
+    // the Confessions page lives inside Home only; a second Home press from
+    // inside it returns to the feed
+    if (label !== 'Home') setConfessionsOpen(false)
+    else if (label === activeNav) setConfessionsOpen(false)
     // leaving the Chats pane unmounts the thread screen with it
     if (label !== 'Chats') setDmThread(null)
     setActiveNav(label)
@@ -879,7 +994,7 @@ function CAMPUSApp() {
     if (label !== 'Search') { setSearchOpen(false); setSearchSeed('') }
     else setSearchOpen(true)
     if (label === 'Profile' && label === activeNav) setViewingProfileId(null)
-    if (scaffoldNav.includes(label) && !['Chats', 'Bookmarks'].includes(label)) flash(`${label} is coming soon.`)
+    if (scaffoldNav.includes(label) && !['Chats', 'Bookmarks', 'Leaderboard'].includes(label)) flash(`${label} is coming soon.`)
   }
 
   /* ---- mobile swipe navigation (touch only, viewport ≤ 650px) -------------
@@ -1133,7 +1248,7 @@ function CAMPUSApp() {
     }
   }, [])
 
-  const openComposer = (kind: PostKind = 'post'): boolean => {
+  const openComposer = (kind: PostKind = 'post', source: 'home' | 'confessions' = 'home'): boolean => {
     if (!requireAuth('create posts, polls and confessions')) return false
     setComposerKind(kind)
     setDraftImages([])
@@ -1141,8 +1256,37 @@ function CAMPUSApp() {
     setVideoTrim(null)
     setTrimOpen(false)
     setPublishProgress(null)
+    // poll fields start fresh every time the composer opens
+    setPollOptions(['', ''])
+    setPollMultiple(false)
+    setPollDays(7)
+    setPollErrors([])
+    setComposerSource(source)
     setComposer(true)
     return true
+  }
+
+  /**
+   * Submit a poll vote (or replace an existing one). The server is
+   * authoritative: its returned fresh state replaces the local snapshot;
+   * a failed request changes nothing and surfaces a retryable message.
+   */
+  const votePoll = async (post: CampusPost, optionIds: string[]): Promise<boolean> => {
+    if (!requireAuth('vote in campus polls')) return false
+    if (!configured || !user) return false
+    try {
+      const state = await db.castPollVote(post.id, optionIds)
+      setPollStateMap(current => ({ ...current, [post.id]: state }))
+      return true
+    } catch (error) {
+      flash(db.friendlyMessage(error))
+      return false
+    }
+  }
+
+  /** open the dedicated Confessions destination (pink Home card) */
+  const openConfessionsPage = () => {
+    setConfessionsOpen(true)
   }
 
   /**
@@ -1175,6 +1319,11 @@ function CAMPUSApp() {
           flash('Posted — but pick your college in the onboarding step so your campus can find it.')
         }
         setPosts(current => [post, ...current])
+        if (composerSource === 'confessions' && kind === 'confession') {
+          // published from the Confessions page: stay on it and let it refresh
+          setConfRefreshSeq(seq => seq + 1)
+          return 'posted'
+        }
         setActiveNav('Home'); setFeedTab('For You')
         return 'posted'
       } catch (error) {
@@ -1274,6 +1423,11 @@ function CAMPUSApp() {
     setDraftVideo(null)
     setVideoTrim(null)
     setPublishProgress(null)
+    // fresh poll fields on every switch into the poll composer
+    setPollOptions(['', ''])
+    setPollMultiple(false)
+    setPollDays(7)
+    setPollErrors([])
   }
 
   /**
@@ -1478,7 +1632,33 @@ function CAMPUSApp() {
         )}
 
         {searchOpen && <SearchPanel colleges={colleges} clubs={clubs} blockedHandles={blockedHandles} mutedHandles={mutedHandles} initialQuery={searchSeed} onClose={() => { setSearchOpen(false); setSearchSeed('') }} onOpenProfile={personId => { setViewingProfileId(personId); navigate('Profile') }} onMessagePerson={personId => void messagePerson(personId)} onNavigate={navigate} />}
-        {activeNav === 'Home' ? <>
+        {activeNav === 'Home' && confessionsOpen ? (
+          /* dedicated Confessions destination — Home as a subview, real
+             history entry, shares the composer + all post interactions */
+          <Confessions
+            userId={user?.id ?? null}
+            myCollegeId={profile?.college_id ?? null}
+            myCollegeShort={identity.college}
+            configured={configured}
+            requireAuth={requireAuth}
+            notify={message => { flash(message) }}
+            onShareConfession={() => { openComposer('confession', 'confessions') }}
+            onBack={() => { if (!navHistory.popSubviewEntry()) setConfessionsOpen(false) }}
+            refreshSeq={confRefreshSeq}
+            patch={confessPatch}
+            onLike={item => void toggleLike(item.id, item)}
+            onSave={item => toggleSave(item.id)}
+            onComment={item => openComments(item)}
+            onShare={item => void sharePost(item)}
+            onReport={item => openReport(item)}
+            onRepost={item => toggleRepost(item.id, item)}
+            onBlock={item => void setRelation('user_blocks', item)}
+            onMute={item => void setRelation('user_mutes', item)}
+            onMessage={item => void messageAuthor(item)}
+            onOpenMention={openMentionProfile}
+            onOpenTag={openHashtagSearch}
+          />
+        ) : activeNav === 'Home' ? <>
           <div className="desktop-topbar"><div className="desktop-search-trigger" onClick={() => setSearchOpen(true)} role="button" tabIndex={0}><Search size={18}/><span>Search for people, posts, colleges, clubs...</span></div><div className="topbar-actions"><button className="icon-button" aria-label="Notifications" onClick={() => navigate('Notifications')}><Bell size={20}/>{unreadNotifs > 0 && <i className="notification-dot"/>}</button><button className="icon-button" aria-label="My profile" onClick={() => navigate('Profile')}><UserRound size={20}/></button></div></div>
           <section className="campus-hero-banner"><div className="hero-copy"><span className="hero-eyebrow">YOUR PEOPLE. YOUR PLACE.</span><h2>Same Campus,<br/><em>Bigger Dreams.</em></h2><span className="hero-swish"/><p>Connect · Share · Grow</p></div><div className="hero-campus-art" aria-hidden="true"><div className="art-sun"/><div className="art-building"><span/><span/><span/><span/><b/></div><div className="art-hill"/></div><button className="college-pill" onClick={() => navigate('My College')}><span className="college-seal"><Building2 size={22}/></span><span><b>{activeCollege?.short_name ?? 'SPPU'}</b><small>{activeCollege?.name ?? 'Savitribai Phule Pune University'}</small></span><ChevronDown size={16}/></button></section>
           <div className="feed-tabs" role="tablist">
@@ -1486,7 +1666,7 @@ function CAMPUSApp() {
           </div>
           <div className="feature-row">
             <button className="feature-card leaderboard" onClick={() => navigate('Leaderboard')}><Trophy size={18}/><b>Not ranked yet</b><span>Post to get on the board</span></button>
-            <button className="feature-card confessions" onClick={() => openComposer('confession')}><BookOpen size={18}/><b>Confessions</b><span>Anonymous, campus-only</span></button>
+            <button className="feature-card confessions" aria-label="Open the Confessions feed" onClick={openConfessionsPage}><BookOpen size={18}/><b>Confessions</b><span>Anonymous, campus-only</span></button>
           </div>
           <p className="campus-presence">2 students from {identity.college} are on CAMPUS</p>
           <section className="composer-inline">
@@ -1540,6 +1720,8 @@ function CAMPUSApp() {
               key={post.id}
               post={post}
               isOwn={Boolean(user && post.authorId && post.authorId === user.id && !post.anonymous)}
+              poll={pollStateMap[post.id]}
+              onVote={optionIds => votePoll(post, optionIds)}
               onLike={() => void toggleLike(post.id)}
               onSave={() => toggleSave(post.id)}
               onComment={() => openComments(post)}
@@ -1655,6 +1837,15 @@ function CAMPUSApp() {
                       requireAuth={requireAuth}
                       notify={flash}
                       onGoDiscover={() => navigate('Discover')}
+                    />
+                : activeNav === 'Leaderboard'
+                  ? <Leaderboard
+                      key="leaderboard"
+                      identity={identity && user ? { id: user.id, name: identity.name, username: identity.username, initials: identity.initials } : null}
+                      configured={configured}
+                      requireAuth={requireAuth}
+                      notify={flash}
+                      onOpenProfile={openMentionProfile}
                     />
                 : infoNav.includes(activeNav)
               ? <InfoPage name={activeNav}/>
@@ -1790,8 +1981,52 @@ function CAMPUSApp() {
             {publishProgress && <span className="media-progress">{publishProgress}</span>}
           </div>
         )}
-        <div className="sheet-helper">{composerKind==='confession'?'Your identity will be hidden in the feed.':composerKind==='poll'?'Poll options will be enabled when the polls backend is connected.':'Keep it kind. Your campus is listening.'}<span>{draft.length}/500</span></div>
-        <div className="sheet-actions"><button className="secondary-button" onClick={() => setComposer(false)}>Cancel</button><button className="primary-button" disabled={publishing} onClick={() => void createPost()}><Send size={16}/>{publishing ? (publishProgress || 'Posting…') : ' Publish'}</button></div>
+        {composerKind === 'poll' && (
+          <div className="poll-composer-block">
+            <span className="poll-field-label" id="poll-options-label">Answer options <i>(2–6, all different)</i></span>
+            {pollOptions.map((value, index) => (
+              <div className="poll-option-row" key={index}>
+                <input
+                  value={value}
+                  onChange={e => setPollOptions(current => current.map((v, i) => i === index ? e.target.value : v))}
+                  placeholder={index < 2 ? `Option ${index + 1} (required)` : `Option ${index + 1}`}
+                  maxLength={120}
+                  aria-labelledby="poll-options-label"
+                  aria-label={`Answer option ${index + 1}`}
+                />
+                {pollOptions.length > 2 && (
+                  <button className="icon-button" aria-label={`Remove option ${index + 1}`}
+                    onClick={() => setPollOptions(current => current.length <= 2 ? current : current.filter((_, i) => i !== index))}>
+                    <X size={15}/>
+                  </button>
+                )}
+              </div>
+            ))}
+            {pollOptions.length < 6 && (
+              <button className="poll-add-option" onClick={() => setPollOptions(current => [...current, ''])}>
+                <Plus size={14}/> Add option
+              </button>
+            )}
+            <div className="poll-settings-row">
+              <label className="poll-check">
+                <input type="checkbox" checked={pollMultiple} onChange={e => setPollMultiple(e.target.checked)} aria-label="Allow multiple choices"/>
+                <span>Multiple choices allowed</span>
+              </label>
+              <label className="poll-length">
+                <span>Poll length</span>
+                <select value={pollDays} onChange={e => setPollDays(Number(e.target.value))} aria-label="Poll duration">
+                  <option value={1}>1 day</option>
+                  <option value={3}>3 days</option>
+                  <option value={7}>7 days</option>
+                  <option value={30}>30 days</option>
+                </select>
+              </label>
+            </div>
+            {pollErrors.length > 0 && <p className="poll-error" role="alert">{pollErrors[0]}</p>}
+          </div>
+        )}
+        <div className="sheet-helper">{composerKind==='confession'?'Your identity will be hidden in the feed.':composerKind==='poll'?'Single choice by default — set multiple choices and the poll length below.':'Keep it kind. Your campus is listening.'}<span>{draft.length}/500</span></div>
+        <div className="sheet-actions"><button className="secondary-button" onClick={() => setComposer(false)}>Cancel</button><button className="primary-button" disabled={publishing} onClick={() => void createPost()}><Send size={16}/>{publishing ? (publishProgress || (composerKind === 'poll' ? 'Publishing poll…' : 'Posting…')) : composerKind === 'poll' ? ' Publish poll' : ' Publish'}</button></div>
       </section></div>}
 
       {/* Persistent media pickers: tapping Post/Reel in the composer opens the
@@ -1842,7 +2077,10 @@ function CAMPUSApp() {
           identity={identity}
           requireAuth={requireAuth}
           onClose={() => setCommentTarget(null)}
-          onCountChange={count => setPosts(current => current.map(p => p.id === commentTarget.id ? { ...p, comments: count } : p))}
+          onCountChange={count => {
+            setPosts(current => current.map(p => p.id === commentTarget.id ? { ...p, comments: count } : p))
+            setConfessPatch({ id: commentTarget.id, comments: count })
+          }}
         />
       )}
 

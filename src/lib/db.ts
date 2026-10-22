@@ -62,6 +62,8 @@ export type Caps = {
   avatars: boolean
   /** 0026: public.list_saved_items + saved_resources exist (Saved page) */
   savedItems: boolean
+  /** 0027: public.list_leaderboard exists (Leaderboard page) */
+  leaderboard: boolean
 }
 
 export const EMPTY_CAPS: Caps = {
@@ -74,6 +76,7 @@ export const EMPTY_CAPS: Caps = {
   reports: false,
   avatars: false,
   savedItems: false,
+  leaderboard: false,
 }
 
 export const PROFILE_BASE_COLUMNS =
@@ -173,6 +176,12 @@ export async function probeCaps(): Promise<Caps> {
   })
   const savedItems = !savedError || !isMissingFunction(savedError)
 
+  // 0027: the Leaderboard read path exists only after the migration is applied
+  const { error: lbError } = await client.rpc('list_leaderboard', {
+    p_category: 'overall', p_period: 'week', p_limit: 1, p_offset: 0,
+  })
+  const leaderboard = !lbError || !isMissingFunction(lbError)
+
   // Storage: ask the bucket list; the avatars bucket is created by migration 0001.
   let avatars = false
   try {
@@ -182,7 +191,7 @@ export async function probeCaps(): Promise<Caps> {
     avatars = false
   }
 
-  return { loaded: true, profileExtras, suggestions, interests, blocks, usernameRpc, reports, avatars, savedItems }
+  return { loaded: true, profileExtras, suggestions, interests, blocks, usernameRpc, reports, avatars, savedItems, leaderboard }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1890,6 +1899,180 @@ export async function createPost(input: CreatePostInput): Promise<CampusPost> {
   }
 }
 
+/* -------------------------------------------------------------------------- */
+/* Polls (migration 0028)                                                      */
+/* -------------------------------------------------------------------------- */
+
+import type { PollState } from '../types'
+
+type PollStateRow = {
+  post_id: string
+  multiple_choice: boolean
+  closes_at: string | null
+  is_open: boolean
+  total_votes: number | string
+  options: { id: string; label: string; position: number; votes: number | string; mine: boolean }[]
+}
+
+function mapPollRow(row: PollStateRow, fallbackId?: string): PollState {
+  return {
+    postId: row?.post_id ?? fallbackId ?? '',
+    multipleChoice: Boolean(row?.multiple_choice),
+    closesAt: row?.closes_at ?? null,
+    isOpen: Boolean(row?.is_open),
+    totalVotes: Number(row?.total_votes ?? 0),
+    options: (row?.options ?? []).map(option => ({
+      id: String(option.id),
+      label: String(option.label ?? ''),
+      position: Number(option.position ?? 0),
+      votes: Number(option.votes ?? 0),
+      mine: Boolean(option.mine),
+    })),
+  }
+}
+
+/** PGRST202/“Could not find the function” means migration 0028 has not been
+ *  applied — say exactly that instead of a generic failure. */
+function pollBackedMessage(error: unknown): string {
+  const raw = String((error as { message?: string } | null)?.message ?? '')
+  if (/Could not find the function|schema cache|PGRST202|PGRST20[45]/i.test(raw)) {
+    return 'Polls are not enabled on the server yet. Apply supabase/migrations/0028_polls.sql in the Supabase SQL editor.'
+  }
+  return friendlyMessage(error)
+}
+
+/**
+ * Authoritative snapshot for a batch of posts (one call per feed page).
+ * `{ id: state }`; posts outside the batch simply stay absent. A returned
+ * state is NEVER fabricated client-side — totals always come from the DB.
+ */
+export async function fetchPollStates(postIds: string[]): Promise<Record<string, PollState>> {
+  if (!supabase || postIds.length === 0) return {}
+  const { data, error } = await supabase.rpc('poll_states', { p_ids: postIds })
+  if (error) throw new Error(pollBackedMessage(error))
+  const out: Record<string, PollState> = {}
+  for (const row of (data ?? []) as PollStateRow[]) out[row.post_id] = mapPollRow(row)
+  return out
+}
+
+/**
+ * Replace the caller's selections on one poll and return the fresh state.
+ * The client sends only option ids — everything else is re-validated by the
+ * RPC (expiry, option ownership, single-choice restriction).
+ */
+export async function castPollVote(postId: string, optionIds: string[]): Promise<PollState> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('cast_poll_vote', {
+    p_post_id: postId,
+    p_option_ids: optionIds,
+  })
+  if (error) throw new Error(pollBackedMessage(error))
+  const rows = (data ?? []) as PollStateRow[]
+  if (!rows.length) throw new Error('Your vote could not be recorded — try again.')
+  return mapPollRow(rows[0], postId)
+}
+
+export type CreatePollInput = CreatePostInput & {
+  options: string[]
+  multipleChoice: boolean
+  closeDays: number
+}
+
+/**
+ * Publish a poll (post + options + settings in one server transaction).
+ * Returns the post in feed shape; the poll block itself stays undefined
+ * until the caller hydrates its real state — nothing is invented here.
+ */
+export async function createPoll(input: CreatePollInput): Promise<CampusPost> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('create_poll', {
+    p_body: input.body,
+    p_options: input.options,
+    p_multiple_choice: input.multipleChoice,
+    p_close_days: input.closeDays,
+  })
+  if (error) throw new Error(pollBackedMessage(error))
+  const row = ((data ?? []) as { id: string; created_at: string }[])[0]
+  if (!row?.id) throw new Error('The poll server did not return a post id — try again.')
+  const name = input.authorName || 'Student'
+  const username = input.authorUsername
+  return {
+    id: row.id,
+    author: name,
+    handle: username ? `@${username}` : '',
+    initials: initialsFor(name, username),
+    college: input.collegeShort,
+    time: 'just now',
+    body: input.body.trim(),
+    likes: 0,
+    comments: 0,
+    reposts: 0,
+    kind: 'poll',
+    media: [],
+    authorId: input.userId,
+    editedAt: null,
+    trending: false,
+    anonymous: false,
+    liked: false,
+    saved: false,
+    reposted: false,
+    tag: '',
+    poll: undefined,
+  }
+}
+
+/** hydrate + merge a poll map into posts; failed lookups mark `poll: null` */
+export async function pollStatesFor(posts: CampusPost[]): Promise<Record<string, PollState | null>> {
+  const ids = Array.from(new Set(posts.filter(p => p.kind === 'poll').map(p => p.id)))
+  if (!ids.length) return {}
+  try {
+    return await fetchPollStates(ids)
+  } catch {
+    const failed: Record<string, PollState | null> = {}
+    for (const id of ids) failed[id] = null
+    return failed
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Confessions page (migration 0028)                                           */
+/* -------------------------------------------------------------------------- */
+
+export type ConfessionSort = 'latest' | 'trending'
+
+/**
+ * One page of the dedicated confessions feed. Returns only eligible
+ * confession posts; the RPC keeps author fields NULL for anonymous rows,
+ * so real identities can never cross this boundary.
+ */
+export async function fetchConfessions(options: {
+  sort: ConfessionSort
+  collegeId?: string | null
+  limit?: number
+  offset?: number
+}): Promise<{ posts: CampusPost[]; total: number }> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const limit = Math.min(Math.max(options.limit ?? 20, 1), 50)
+  const offset = Math.max(options.offset ?? 0, 0)
+  const { data, error } = await supabase.rpc('list_confessions', {
+    p_sort: options.sort,
+    p_college_id: options.collegeId ?? null,
+    p_limit: limit,
+    p_offset: offset,
+  })
+  if (error) {
+    const raw = String((error as { message?: string } | null)?.message ?? '')
+    if (/Could not find the function|schema cache|PGRST202|PGRST20[45]/i.test(raw)) {
+      throw new Error('The confessions feed is not enabled on the server yet. Apply supabase/migrations/0028_polls.sql in the Supabase SQL editor.')
+    }
+    throw new Error(friendlyMessage(error))
+  }
+  type ConfessionRow = FeedRow & { total_count: number | string }
+  const rows = (data ?? []) as ConfessionRow[]
+  const total = rows.length ? Number(rows[0].total_count ?? 0) : 0
+  return { posts: rows.map(row => mapFeedRow(row)), total }
+}
+
 /**
  * Like / unlike a post. post_likes uses a composite key (user_id, post_id), so
  * the like side is an upsert — a re-press can never create a duplicate.
@@ -2138,3 +2321,166 @@ export async function deletePost(postId: string): Promise<void> {
     throw new Error('CAMPUS could not delete that post. You can only delete your own posts.')
   }
 }
+
+/* -------------------------------------------------------------------------- */
+/* Leaderboard (migration 0027)                                                */
+/* -------------------------------------------------------------------------- */
+
+export type LeaderboardCategory = 'overall' | 'college' | 'community' | 'creators' | 'events'
+export type LeaderboardPeriod = 'week' | 'month' | 'all'
+
+export type LeaderboardEntry = {
+  userId: string
+  displayName: string
+  username: string | null
+  avatarUrl: string | null
+  isVerified: boolean
+  collegeShortName: string | null
+  points: number
+  /** rank() over score — ties share the same rank */
+  competitionRank: number
+  /** stable display order (score desc, last earned asc, user id asc) */
+  position: number
+  lastEarnedAt: string | null
+  /** position in the closed previous period (week/month only) */
+  previousPosition: number | null
+  /** negative = moved up, positive = moved down, 0 = same, null = new */
+  movement: number | null
+}
+
+export type MyLeaderboardStanding = {
+  status: 'ok' | 'no_college' | 'signed_out'
+  points: number
+  competitionRank: number | null
+  position: number | null
+  totalRanked: number
+}
+
+export type LeaderboardAchievement = {
+  key: string
+  label: string
+  description: string
+  earned: boolean
+  progress: number
+  target: number
+}
+
+export type LeaderboardRule = {
+  activityType: string
+  label: string
+  points: number
+  dailyCap: number
+  enabled: boolean
+}
+
+type RawLeaderboardRow = {
+  user_id: string
+  display_name: string
+  username: string | null
+  avatar_url: string | null
+  is_verified: boolean
+  college_short_name: string | null
+  points: number | string | null
+  competition_rank: number | string | null
+  display_position: number | string | null
+  last_earned_at: string | null
+  previous_position: number | string | null
+  movement: number | null
+}
+
+function toInt(value: unknown): number {
+  if (value === null || value === undefined || value === '') return 0
+  const parsed = typeof value === 'number' ? value : Number.parseInt(String(value), 10)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function toIntOrNull(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null
+  const parsed = typeof value === 'number' ? value : Number.parseInt(String(value), 10)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+/** One ranked page of a category/period board. The list is a real server
+ *  aggregation (security-definer SQL in migration 0027) — the browser never
+ *  computes scores. Anonymous visitors get the public boards; the college
+ *  board resolves the caller's own college server-side. */
+export async function fetchLeaderboard(
+  category: LeaderboardCategory,
+  period: LeaderboardPeriod,
+  offset = 0,
+  limit = 50,
+): Promise<LeaderboardEntry[]> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('list_leaderboard', {
+    p_category: category, p_period: period, p_limit: limit, p_offset: offset,
+  })
+  if (error) throw new Error(friendlyMessage(error))
+  return (data ?? []).map((row: RawLeaderboardRow) => ({
+    userId: row.user_id,
+    displayName: row.display_name,
+    username: row.username,
+    avatarUrl: row.avatar_url,
+    isVerified: row.is_verified,
+    collegeShortName: row.college_short_name,
+    points: toInt(row.points ?? 0),
+    competitionRank: toInt(row.competition_rank ?? 0),
+    position: toInt(row.display_position ?? 0),
+    lastEarnedAt: row.last_earned_at,
+    previousPosition: toIntOrNull(row.previous_position),
+    movement: row.movement === null ? null : toInt(row.movement),
+  }))
+}
+
+/** The signed-in member's own standing in a category/period. Distinguishes
+ *  honestly between "ranked", "not ranked yet", and "no college selected". */
+export async function fetchMyStanding(
+  category: LeaderboardCategory,
+  period: LeaderboardPeriod,
+): Promise<MyLeaderboardStanding> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('leaderboard_me', {
+    p_category: category, p_period: period,
+  })
+  if (error) throw new Error(friendlyMessage(error))
+  const row = (data ?? [])[0]
+  if (!row) return { status: 'ok', points: 0, competitionRank: null, position: null, totalRanked: 0 }
+  return {
+    status: (row.status as MyLeaderboardStanding['status']) ?? 'ok',
+    points: toInt(row.points ?? 0),
+    competitionRank: toIntOrNull(row.competition_rank),
+    position: toIntOrNull(row.display_position),
+    totalRanked: toInt(row.total_ranked ?? 0),
+  }
+}
+
+/** Milestones for the signed-in member; computed server-side from real
+ *  ledger history on every call, so they cannot be forged or re-granted. */
+export async function fetchMyAchievements(): Promise<LeaderboardAchievement[]> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('list_my_achievements')
+  if (error) throw new Error(friendlyMessage(error))
+  return (data ?? []).map((row: Record<string, unknown>) => ({
+    key: String(row.key ?? ''),
+    label: String(row.label ?? ''),
+    description: String(row.description ?? ''),
+    earned: Boolean(row.earned),
+    progress: toInt(row.progress ?? 0),
+    target: toInt(row.target ?? 0),
+  }))
+}
+
+/** The live scoring weights (from leaderboard_weights) for the "How points
+ *  work" disclosure, so the stated rules always match what is enforced. */
+export async function fetchLeaderboardRules(): Promise<LeaderboardRule[]> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('leaderboard_rules')
+  if (error) throw new Error(friendlyMessage(error))
+  return (data ?? []).map((row: Record<string, unknown>) => ({
+    activityType: String(row.activity_type ?? ''),
+    label: String(row.label ?? ''),
+    points: toInt(row.points ?? 0),
+    dailyCap: toInt(row.daily_cap ?? 0),
+    enabled: Boolean(row.enabled),
+  }))
+}
+

@@ -44,6 +44,8 @@ export type CampusView = {
   event?: string | null
   /** open marketplace listing slug */
   listing?: string | null
+  /** Home subview: the dedicated Confessions feed page is open */
+  conf?: boolean | null
   /** a direct/group conversation occupies the screen on mobile */
   dm?: { id: string } | null
 }
@@ -76,6 +78,7 @@ function normaliseView(view: CampusView): CampusView {
   if (view.ctab) next.ctab = view.ctab
   if (view.event) next.event = view.event
   if (view.listing) next.listing = view.listing
+  if (view.conf && view.nav === 'Home') next.conf = true
   if (view.dm?.id) next.dm = { id: view.dm.id }
   return next
 }
@@ -200,6 +203,7 @@ export function viewCoreKey(view: CampusView): string {
     community: view.community ?? null,
     event: view.event ?? null,
     listing: view.listing ?? null,
+    conf: view.conf ?? null,
     dm: view.dm?.id ?? null,
   })
 }
