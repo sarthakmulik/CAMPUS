@@ -1116,6 +1116,7 @@ export async function fetchUnreadNotificationCount(): Promise<number> {
     .from('notifications')
     .select('id', { count: 'exact', head: true })
     .is('read_at', null)
+    .eq('inapp_visible', true)
   if (error) throw new Error(friendlyMessage(error))
   return count ?? 0
 }
