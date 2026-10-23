@@ -144,9 +144,17 @@ export default function CommunityChat({ communityId, identity, isModerator, noti
     void openChat()
   }, [openStatus, openChat])
 
+  /* pin banner state: tracks the pinned_at of every message we know about so
+     realtime UPDATE events only trigger a pins refetch when a pin state
+     actually changed (edits to already-pinned messages used to re-pull the
+     pin list on every keystroke-save) */
+  const pinTimesRef = useRef<Map<string, string | null>>(new Map())
+
   const refreshPins = useCallback(async (conversation: string) => {
     try {
-      setPins(await db.fetchChatPins(conversation))
+      const rows = await db.fetchChatPins(conversation)
+      setPins(rows)
+      pinTimesRef.current = new Map(rows.map(row => [row.id, row.pinnedAt ?? null]))
     } catch {
       setPins([]) // the banner hides instead of failing loudly; chat still works
     }
@@ -163,7 +171,7 @@ export default function CommunityChat({ communityId, identity, isModerator, noti
         if (cancelled) return
         setMessages(rows)
         setOlderAvailable(rows.length >= PAGE_SIZE)
-        void db.markConversationRead(conversationId).catch(() => {})
+        void db.markConversationRead(conversationId, identity?.id).catch(() => {})
       })
       .catch(err => { if (!cancelled) setThreadError(friendlyMessage(err)) })
       .finally(() => { if (!cancelled) setLoadingThread(false) })
@@ -203,14 +211,21 @@ export default function CommunityChat({ communityId, identity, isModerator, noti
   /* realtime: inserts + updates (edits, unsends, reactions, pins)     */
   /* ---------------------------------------------------------------- */
 
+  /* throttled at 2 s (trailing): the near-bottom/visibility gate does the
+     hygiene, and the burst never fires more than one UPDATE in the window */
+  const markReadThrottleRef = useRef<number | null>(null)
   const markReadIfWatched = useCallback(() => {
     if (!conversationId) return
     const box = scrollRef.current
     const nearBottom = !box || box.scrollHeight - box.scrollTop - box.clientHeight < 140
     if (nearBottom && document.visibilityState === 'visible') {
-      void db.markConversationRead(conversationId).catch(() => {})
+      if (markReadThrottleRef.current) return
+      markReadThrottleRef.current = window.setTimeout(() => {
+        markReadThrottleRef.current = null
+        void db.markConversationRead(conversationId, myId ?? undefined).catch(() => {})
+      }, 2000)
     }
-  }, [conversationId])
+  }, [conversationId, myId])
 
   /* Realtime chat_messages payloads carry ONLY table columns — the persona
      fields (sender name/username/avatar) and the derived reply fields
@@ -289,9 +304,13 @@ export default function CommunityChat({ communityId, identity, isModerator, noti
       }
     }
 
-    // pin changes move the banner
-    if (type === 'update' && conversationId && incoming.pinnedAt) {
-      void refreshPins(conversationId)
+    // pin changes move the banner — only when the pin state actually changed
+    if (type === 'update' && conversationId) {
+      const known = pinTimesRef.current.get(incoming.id) ?? null
+      if ((incoming.pinnedAt ?? null) !== known) {
+        pinTimesRef.current.set(incoming.id, incoming.pinnedAt ?? null)
+        void refreshPins(conversationId)
+      }
     }
   }, [conversationId, markReadIfWatched, myId, refreshPins])
 

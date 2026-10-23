@@ -1129,12 +1129,14 @@ export function getSupabaseClient() {
 }
 
 /** Mark a conversation read by the caller (drives unread badges). */
-export async function markConversationRead(conversationId: string): Promise<void> {
+export async function markConversationRead(conversationId: string, userId?: string): Promise<void> {
   if (!supabase) throw new Error('CAMPUS is not connected.')
-  const { error } = await supabase
+  let query = supabase
     .from('conversation_members')
     .update({ last_read_at: new Date().toISOString() })
     .eq('conversation_id', conversationId)
+  if (userId) query = query.eq('user_id', userId)
+  const { error } = await query
   if (error) throw new Error(friendlyMessage(error))
 }
 
@@ -1250,15 +1252,41 @@ export async function uploadChatAttachment(conversationId: string, file: File): 
   return { path, name: file.name.slice(0, 180), mime: file.type, size: file.size }
 }
 
-/** Short-lived signed URLs for private chat attachments (1 hour). */
+/** Short-lived signed URLs for private chat attachments (1 hour).
+ *  Session-cached: repeated renders of the same bubble never re-hit
+ *  storage (heavy chats would otherwise mint one signed URL per render
+ *  cycle per attachment). */
+const attachmentUrlCache = new Map<string, { url: string; exp: number }>()
+const ATTACHMENT_URL_TTL_MS = 45 * 60 * 1000 // re-mint before the 60 min expiry
+
 export async function chatAttachmentUrls(paths: string[]): Promise<Record<string, string>> {
   if (!supabase || paths.length === 0) return {}
-  const entries = await Promise.all(paths.map(async path => {
-    const { data, error } = await supabase!.storage.from('chat-media').createSignedUrl(path, 3600)
-    return [path, error ? null : (data?.signedUrl ?? null)] as const
-  }))
+  const now = Date.now()
   const out: Record<string, string> = {}
-  for (const [path, url] of entries) if (url) out[path] = url
+  const missing: string[] = []
+  for (const path of paths) {
+    const hit = attachmentUrlCache.get(path)
+    if (hit && hit.exp > now) out[path] = hit.url
+    else missing.push(path)
+  }
+  if (missing.length > 0) {
+    const entries = await Promise.all(missing.map(async path => {
+      const { data, error } = await supabase!.storage.from('chat-media').createSignedUrl(path, 3600)
+      return [path, error ? null : (data?.signedUrl ?? null)] as const
+    }))
+    for (const [path, url] of entries) {
+      if (url) {
+        attachmentUrlCache.set(path, { url, exp: now + ATTACHMENT_URL_TTL_MS })
+        out[path] = url
+      }
+    }
+    // keep the cache bounded: drop expired entries once it grows past 500
+    if (attachmentUrlCache.size > 500) {
+      for (const [path, entry] of attachmentUrlCache) {
+        if (entry.exp <= now) attachmentUrlCache.delete(path)
+      }
+    }
+  }
   return out
 }
 
@@ -1268,6 +1296,9 @@ export async function chatAttachmentUrls(paths: string[]): Promise<Record<string
  * thread stays up-to-the-second without any refetch. Returns an unsubscribe
  * function; callers dedupe inserts by message id and replace rows on update.
  */
+/* sender persona cache shared by every chat subscription (module scope) */
+const personaCache = new Map<string, { username: string; name: string; avatar: string | null }>()
+
 export function subscribeChatMessages(
   conversationId: string,
   onChange: (message: ChatMessage, type: 'insert' | 'update') => void,
@@ -1280,8 +1311,9 @@ export function subscribeChatMessages(
      reply fields are preserved client-side by the panel's merge; the
      persona is hydrated here once per sender (small, cached): the bare
      row is delivered FIRST so the bubble appears instantly, then the
-     name lands a moment later. */
-  const personaCache = new Map<string, { username: string; name: string; avatar: string | null }>()
+     name lands a moment later. The cache is module-scope + shared
+     across re-subscribes (navigating between chats used to rebuild it
+     and re-query every sender's profile). */
   // profiles that returned nothing this session are not re-queried
   const personaMisses = new Set<string>()
   const applyPersona = (bare: ChatMessage, persona: { username: string; name: string; avatar: string | null }) => {
@@ -1312,6 +1344,7 @@ export function subscribeChatMessages(
       applyPersona(bare, entry)
     })()
   }
+
   const handle = (row: Record<string, unknown>, type: 'insert' | 'update') => {
     if (!row?.id) return
     const bare = mapChatMessage({
@@ -1644,15 +1677,21 @@ export function subscribeTyping(
   }
   const client = supabase
   const typing = new Map<string, number>() // userId → last ping (ms epoch)
-  const othersTyping = () => {
+  /** The sweeper runs on a timer, but the subscriber callback fires ONLY
+   *  when the set of typers actually changed — an idle open thread stays
+   *  render-silent instead of re-rendering every 1.2 s. */
+  let lastEmittedSig = '' // comma-joined typer ids, '' = nobody
+  const emit = () => {
     const now = Date.now()
     for (const [userId, at] of [...typing]) {
       if (now - at > 3500) typing.delete(userId)
     }
-    return [...typing.keys()].filter(userId => userId !== myUserId)
+    const ids = [...typing.keys()].filter(userId => userId !== myUserId)
+    const sig = ids.join(',')
+    if (sig === lastEmittedSig) return
+    lastEmittedSig = sig
+    onTypingChange(ids)
   }
-
-  const emit = () => { onTypingChange(othersTyping()) }
 
   const channel = client.channel(`typing:${conversationId}`)
     .on('broadcast', { event: 'typing' }, payload => {

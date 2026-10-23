@@ -174,6 +174,8 @@ export default function Chats({
   const voiceBusyRef = useRef(false)
   const lastPingRef = useRef(0)
   const typingCtlRef = useRef<{ ping: () => Promise<void>; unsubscribe: () => void } | null>(null)
+  /** throttled mark-read timer for the open thread's realtime burst */
+  const readMarkTimerRef = useRef<number | null>(null)
 
   const loadConversations = useCallback(async () => {
     setLoadingList(true)
@@ -185,6 +187,59 @@ export default function Chats({
       setListError(db.friendlyMessage(error))
     } finally {
       setLoadingList(false)
+    }
+  }, [])
+
+  /* heavy-traffic guard: realtime events (open-thread edits, peer inserts,
+     throtted activity pings) used to each fire a FULL inbox refetch
+     immediately — an active chat re-pulled the whole list many times a
+     second. Every burst now coalesces into one scheduled refresh, and a
+     refresh is single-flight (never two in the air at once). User actions
+     (opening a chat, changing prefs, answering a request) still get the
+     immediate loader. */
+  const refreshInFlightRef = useRef(false)
+  const refreshQueuedRef = useRef(false)
+  const lastRefreshAtRef = useRef(0)
+  const scheduledRefreshRef = useRef<number | null>(null)
+  const REFRESH_MIN_GAP_MS = 1500
+
+  const runConversationsRefresh = useCallback(async () => {
+    if (refreshInFlightRef.current) { refreshQueuedRef.current = true; return }
+    refreshInFlightRef.current = true
+    try {
+      const rows = await db.fetchConversations()
+      setConversations(rows)
+    } catch { /* the list keeps its previous honest state */ }
+    finally {
+      refreshInFlightRef.current = false
+      lastRefreshAtRef.current = Date.now()
+      if (refreshQueuedRef.current) {
+        refreshQueuedRef.current = false
+        scheduledRefreshRef.current = window.setTimeout(() => {
+          scheduledRefreshRef.current = null
+          void runConversationsRefresh()
+        }, REFRESH_MIN_GAP_MS)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /* coalesce bursts: one timer only; the first call schedules inside the
+     min gap, later calls are no-ops until the refresh completes */
+  const scheduleRefresh = useCallback(() => {
+    if (scheduledRefreshRef.current) return
+    scheduledRefreshRef.current = window.setTimeout(() => {
+      scheduledRefreshRef.current = null
+      void runConversationsRefresh()
+    }, Math.max(0, REFRESH_MIN_GAP_MS - (Date.now() - lastRefreshAtRef.current)))
+  }, [runConversationsRefresh])
+
+  useEffect(() => {
+    return () => {
+      if (scheduledRefreshRef.current) {
+        window.clearTimeout(scheduledRefreshRef.current)
+        scheduledRefreshRef.current = null
+      }
     }
   }, [])
 
@@ -246,7 +301,7 @@ export default function Chats({
           })
           .catch(() => {})
       }
-      void db.markConversationRead(conversationId)
+      void db.markConversationRead(conversationId, identity?.id)
       setConversations(list => list.map(c => c.id === conversationId ? { ...c, unread: 0 } : c))
     } catch (error) {
       setThreadError(db.friendlyMessage(error))
@@ -325,7 +380,7 @@ export default function Chats({
     const unsubscribe = db.subscribeChatMessages(openId, (message, type) => {
       if (type === 'update') {
         setMessages(list => list.map(item => item.id === message.id ? mergeIncoming(item, message) : item))
-        void db.fetchConversations().then(rows => setConversations(rows)).catch(() => {})
+        scheduleRefresh()
         return
       }
       if (seenIds.current.has(message.id)) return
@@ -341,15 +396,28 @@ export default function Chats({
       })
       setHasOlder(current => current || false)
       if (message.senderId !== identity?.id) {
-        void db.markConversationRead(openId)
-        void db.fetchConversations().then(rows => setConversations(rows)).catch(() => {})
+        // badge zeroes immediately for the visible thread; the server-side
+        // last_read_at catches up within ≤2 s (burst-throttled)
+        setConversations(list => list.map(c => c.id === openId ? { ...c, unread: 0 } : c))
+        if (!readMarkTimerRef.current) {
+          readMarkTimerRef.current = window.setTimeout(() => {
+            readMarkTimerRef.current = null
+            void db.markConversationRead(openId, identity?.id).catch(() => {})
+          }, 2000)
+        }
+        scheduleRefresh()
       }
     })
     return () => {
+      // leading flush so the unread badge zeroes for a quickly-closed chat
+      if (readMarkTimerRef.current) {
+        window.clearTimeout(readMarkTimerRef.current)
+        readMarkTimerRef.current = null
+      }
       unsubscribe()
-      void db.fetchConversations().then(rows => setConversations(rows)).catch(() => {})
+      scheduleRefresh()
     }
-  }, [openId, identity?.id])
+  }, [openId, identity?.id, scheduleRefresh])
 
   /* typing indicators: one broadcast channel while a thread is open */
   useEffect(() => {
@@ -371,29 +439,50 @@ export default function Chats({
     void typingCtlRef.current?.ping()
   }
 
-  /* the chats list stays live */
+  /* the chats list stays live: every burst of inserts/edits coalesces into
+     one scheduled refetch (never one HTTP round-trip per message) */
   useEffect(() => {
     if (!identity) return
-    let timer: number | null = null
-    const throttled = () => {
-      if (timer) return
-      timer = window.setTimeout(() => {
-        timer = null
-        void db.fetchConversations().then(rows => setConversations(rows)).catch(() => {})
-      }, 900)
-    }
-    const unsubscribe = db.subscribeChatActivity(throttled)
+    const unsubscribe = db.subscribeChatActivity(() => scheduleRefresh())
     return () => {
-      if (timer) window.clearTimeout(timer)
       unsubscribe()
+      if (scheduledRefreshRef.current) {
+        window.clearTimeout(scheduledRefreshRef.current)
+        scheduledRefreshRef.current = null
+      }
     }
-  }, [identity?.id])
+  }, [identity?.id, scheduleRefresh])
 
-  /* keep the newest message in view */
+  /* keep the newest message in view — WITHOUT destroying the reader's
+     position when older history is prepended (Load earlier / reply jump):
+     snapshots the thread's height + first/last ids each render, and only
+     snaps or anchors when the tail/head actually changed. Edits, reactions
+     and detail-sheet toggles never move the viewport. */
+  const lastThreadIdRef = useRef<string | null>(null)
+  const threadLayoutRef = useRef({ height: 0, firstId: null as string | null, lastId: null as string | null })
   useLayoutEffect(() => {
     const box = scrollRef.current
-    if (box && !highlightId) box.scrollTop = box.scrollHeight
-  }, [messages.length, loadingThread, openId, highlightId])
+    if (!box) return
+    const firstId = messages[0]?.id ?? null
+    const lastId = messages[messages.length - 1]?.id ?? null
+    const sameThread = lastThreadIdRef.current === openId
+    const prev = threadLayoutRef.current
+    const prepended = sameThread && prev.firstId !== null && firstId !== prev.firstId
+    const tailGrew = sameThread && prev.lastId !== null && lastId !== prev.lastId
+    const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 160
+    if (!highlightId) {
+      if (!sameThread) {
+        box.scrollTop = box.scrollHeight // conversation just opened
+      } else if (tailGrew && nearBottom) {
+        box.scrollTop = box.scrollHeight // newest message arrived while reading the bottom
+      } else if (prepended && !nearBottom) {
+        box.scrollTop += box.scrollHeight - prev.height // older page loaded: anchor the viewport
+      }
+      // otherwise (edits / reactions / paging at the top): keep the position
+    }
+    lastThreadIdRef.current = openId
+    threadLayoutRef.current = { height: box.scrollHeight, firstId, lastId }
+  }, [messages, openId, highlightId, loadingThread])
 
   /* jump + highlight (search hits, reply quotes, forward targets) */
   const pendingJumpRef = useRef<string | null>(null)
@@ -514,13 +603,13 @@ export default function Chats({
         ? { ...item, body, editedAt: at } : item))
       setEditing(null)
       setDraft('')
-      void db.fetchConversations().then(rows => setConversations(rows)).catch(() => {})
+      scheduleRefresh()
     } catch (error) {
       setThreadError(db.friendlyMessage(error))
     } finally {
       setSending(false)
     }
-  }, [draft, editing, sending])
+  }, [draft, editing, sending, scheduleRefresh])
 
   const unsendMessage = useCallback(async (messageId: string) => {
     setThreadError(null)
@@ -529,11 +618,11 @@ export default function Chats({
       const at = new Date().toISOString()
       setMessages(list => list.map(item => item.id === messageId
         ? { ...item, body: '', deletedAt: at, attachments: [], reactions: {} } : item))
-      void db.fetchConversations().then(rows => setConversations(rows)).catch(() => {})
+      scheduleRefresh()
     } catch (error) {
       setThreadError(db.friendlyMessage(error))
     }
-  }, [])
+  }, [scheduleRefresh])
 
   /* incoming chat requests */
   const respondRequest = useCallback(async (action: 'accept' | 'decline') => {
