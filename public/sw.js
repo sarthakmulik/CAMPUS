@@ -39,13 +39,25 @@ self.addEventListener('push', (event) => {
   }
   // No title → malformed/empty payload: show nothing rather than junk.
   if (!data.title) return
+  // timestamp = when the EVENT happened (server insert time), not when the
+  // device woke up — the OS then renders the real relative age ("2 min ago").
+  let ts = Date.now()
+  if (data.created_at) ts = Date.parse(data.created_at)
+  if (!Number.isFinite(ts)) ts = Date.now()
   const options = {
     body: data.body || '',
     icon: '/campus-icon.png',
     badge: '/campus-badge.png',
     tag: data.tag || 'campus',
     renotify: Boolean(data.tag),
-    data: { url: data.url || '/#home' },
+    lang: 'en',
+    dir: 'ltr',
+    timestamp: ts,
+    data: {
+      url: data.url || '/#home',
+      nid: data.nid || null,
+      category: data.category || null,
+    },
     // Android heads-up behaviour; seconds, minimum 5
     vibrate: [40, 30, 40],
   }

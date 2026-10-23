@@ -130,7 +130,9 @@ begin
     v_url := '#chat/' || coalesce(p_row.entity_id::text, '');
     v_tag := 'chat:' || coalesce(p_row.entity_id::text, '');
     return jsonb_build_object('title', v_title, 'body', v_body,
-                              'url', v_url, 'tag', v_tag);
+                              'url', v_url, 'tag', v_tag,
+                              'category', v_cat, 'nid', p_row.id,
+                              'created_at', to_jsonb(p_row.created_at));
 
   elsif p_row.type = 'follow' then
     v_title := 'New follower';
@@ -243,7 +245,9 @@ begin
     p_row.entity_id::text,
     '');
   return jsonb_build_object('title', v_title, 'body', v_body,
-                            'url', coalesce(v_url, ''), 'tag', v_tag);
+                            'url', coalesce(v_url, ''), 'tag', v_tag,
+                            'category', v_cat, 'nid', p_row.id,
+                            'created_at', to_jsonb(p_row.created_at));
 end $$;
 
 grant execute on function public.list_notifications(text, int, int) to authenticated;
