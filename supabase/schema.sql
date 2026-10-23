@@ -160,8 +160,63 @@ create table if not exists public.notifications (
   entity_type text,
   entity_id uuid,
   read_at timestamptz,
+  metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
+
+/* 0029 — notification preferences, push subscriptions, delivery queue */
+create table if not exists public.notification_prefs (
+  user_id uuid primary key references public.profiles(id) on delete cascade,
+  like_inapp        boolean not null default true,
+  like_push        boolean not null default false,
+  comment_inapp     boolean not null default true,
+  comment_push      boolean not null default true,
+  follow_inapp      boolean not null default true,
+  follow_push       boolean not null default true,
+  mention_inapp     boolean not null default true,
+  mention_push      boolean not null default true,
+  message_inapp     boolean not null default true,
+  message_push      boolean not null default true,
+  community_inapp   boolean not null default true,
+  community_push    boolean not null default true,
+  event_inapp       boolean not null default true,
+  event_push        boolean not null default true,
+  marketplace_inapp boolean not null default true,
+  marketplace_push  boolean not null default false,
+  message_preview   boolean not null default true,
+  quiet_enabled     boolean not null default false,
+  quiet_start       text not null default '22:30',
+  quiet_end         text not null default '07:30',
+  timezone          text,
+  updated_at        timestamptz not null default now()
+);
+
+create table if not exists public.push_subscriptions (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references public.profiles(id) on delete cascade,
+  endpoint   text not null unique,
+  p256dh     text not null,
+  auth_key   text not null,
+  user_agent text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.push_queue (
+  id              uuid primary key default gen_random_uuid(),
+  notification_id uuid not null references public.notifications(id) on delete cascade,
+  recipient_id    uuid not null references public.profiles(id) on delete cascade,
+  payload         jsonb not null,
+  status          text not null default 'pending'
+                  check (status in ('pending', 'delivered', 'failed')),
+  attempts        int not null default 0,
+  last_error      text,
+  delivered_at    timestamptz,
+  next_attempt_at timestamptz not null default now(),
+  created_at      timestamptz not null default now()
+);
+/* like poll_votes: delivery is service-role only */
+revoke all on public.push_queue from anon, authenticated;
 
 create table if not exists public.clubs (
   id uuid primary key default gen_random_uuid(),
@@ -235,6 +290,14 @@ create index if not exists posts_college_created_idx on public.posts(college_id,
 create index if not exists comments_post_created_idx on public.post_comments(post_id, created_at);
 create index if not exists messages_conversation_created_idx on public.messages(conversation_id, created_at);
 create index if not exists notifications_recipient_created_idx on public.notifications(recipient_id, created_at desc);
+create index if not exists notifications_recipient_unread_idx on public.notifications(recipient_id, created_at desc) where read_at is null;
+create unique index if not exists notifications_unread_event_dedup_idx
+  on public.notifications (recipient_id, type, coalesce(entity_id::text, ''), actor_id)
+  where read_at is null
+    and type in ('post_like', 'post_repost', 'post_comment', 'post_reply',
+                 'comment_like', 'post_mention', 'follow');
+create index if not exists push_subscriptions_user_idx on public.push_subscriptions(user_id);
+create index if not exists push_queue_due_idx on public.push_queue(next_attempt_at) where status = 'pending';
 create index if not exists events_starts_at_idx on public.events(starts_at);
 create index if not exists opportunities_deadline_idx on public.opportunities(deadline);
 
@@ -389,6 +452,16 @@ drop policy if exists "users read own notifications" on public.notifications;
 create policy "users read own notifications" on public.notifications for select to authenticated using (auth.uid() = recipient_id);
 drop policy if exists "users update own notifications" on public.notifications;
 create policy "users update own notifications" on public.notifications for update to authenticated using (auth.uid() = recipient_id) with check (auth.uid() = recipient_id);
+
+/* 0029 — notification prefs and push subscriptions are own-row only;
+   push_queue has NO policies and NO client grants (delivery is
+   service-role via the push-deliver edge function). */
+drop policy if exists "prefs are the owner's" on public.notification_prefs;
+create policy "prefs are the owner's" on public.notification_prefs
+  for all to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "own push subscriptions" on public.push_subscriptions;
+create policy "own push subscriptions" on public.push_subscriptions
+  for all to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 drop policy if exists "clubs readable" on public.clubs;
 create policy "clubs readable" on public.clubs for select using (true);

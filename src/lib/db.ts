@@ -1120,6 +1120,13 @@ export async function fetchUnreadNotificationCount(): Promise<number> {
   return count ?? 0
 }
 
+/** Raw client access for components composing a few own-scoped reads
+    (notification follow-suggestions). Never used for anything needing
+    server validation — those always go through definer RPCs. */
+export function getSupabaseClient() {
+  return supabase
+}
+
 /** Mark a conversation read by the caller (drives unread badges). */
 export async function markConversationRead(conversationId: string): Promise<void> {
   if (!supabase) throw new Error('CAMPUS is not connected.')
@@ -2481,6 +2488,302 @@ export async function fetchLeaderboardRules(): Promise<LeaderboardRule[]> {
     points: toInt(row.points ?? 0),
     dailyCap: toInt(row.daily_cap ?? 0),
     enabled: Boolean(row.enabled),
+  }))
+}
+
+/* ============================================================================ */
+/* Notifications: center data, preferences, web-push subscriptions (0029)        */
+/* ============================================================================ */
+
+export type NotificationActor = {
+  id: string
+  username: string | null
+  name: string | null
+  avatar: string | null
+}
+
+export type NotificationItem = {
+  id: string
+  type: string
+  entityType: string | null
+  entityId: string | null
+  metadata: Record<string, unknown>
+  readAt: string | null
+  createdAt: string
+  slug: string | null
+  title: string | null
+  actor: NotificationActor | null
+}
+
+export type NotificationFilter =
+  | 'all' | 'unread' | 'mention' | 'message' | 'community' | 'follow' | 'event'
+
+/**
+ * One paged, filtered read of the signed-in member's own notifications
+ * via the definer RPC (recipient-scoped server-side; the client never
+ * sees anybody else's rows even transiently).
+ */
+export async function fetchNotifications(
+  filter: NotificationFilter = 'all',
+  limit = 30,
+  offset = 0,
+): Promise<NotificationItem[]> {
+  if (!supabase) return []
+  const { data, error } = await supabase.rpc('list_notifications', {
+    p_filter: filter,
+    p_limit: Math.min(Math.max(limit, 1), 50),
+    p_offset: Math.max(offset, 0),
+  })
+  if (error) throw new Error(friendlyMessage(error))
+  const rows = (data ?? []) as Record<string, unknown>[]
+  return rows.map(row => {
+    const actor = row.actor as Record<string, unknown> | null
+    return {
+      id: String(row.id ?? ''),
+      type: String(row.type ?? ''),
+      entityType: (row.entity_type as string | null) ?? null,
+      entityId: (row.entity_id as string | null) ?? null,
+      metadata: (row.metadata as Record<string, unknown> | null) ?? {},
+      readAt: (row.read_at as string | null) ?? null,
+      createdAt: String(row.created_at ?? ''),
+      slug: (row.slug as string | null) ?? null,
+      title: (row.title as string | null) ?? null,
+      actor: actor
+        ? {
+            id: String(actor.id ?? ''),
+            username: (actor.username as string | null) ?? null,
+            name: (actor.name as string | null) ?? null,
+            avatar: (actor.avatar as string | null) ?? null,
+          }
+        : null,
+    }
+  })
+}
+
+/** Mark specific rows read (recipient-scoped updates, enforced by RLS). */
+export async function markNotificationsRead(ids: string[]): Promise<void> {
+  if (!supabase || ids.length === 0) return
+  const { error } = await supabase
+    .from('notifications')
+    .update({ read_at: new Date().toISOString() })
+    .in('id', ids)
+    .is('read_at', null)
+  if (error) throw new Error(friendlyMessage(error))
+}
+
+/** Mark every unread row read (optionally scoped to one filter). */
+export async function markAllNotificationsRead(
+  filter: NotificationFilter = 'all',
+): Promise<void> {
+  if (!supabase) return
+  let query = supabase
+    .from('notifications')
+    .update({ read_at: new Date().toISOString() })
+    .is('read_at', null)
+  if (filter === 'mention') query = query.in('type', ['post_mention', 'chat_mention'])
+  else if (filter === 'message') query = query.eq('type', 'chat_message')
+  else if (filter === 'community')
+    query = query.in('type', [
+      'club_join_accepted', 'club_join_rejected', 'club_invitation',
+      'club_role_changed', 'club_banned', 'club_removed',
+      'club_ownership', 'chat_reply', 'chat_mention',
+    ])
+  else if (filter === 'follow') query = query.eq('type', 'follow')
+  else if (filter === 'event')
+    query = query.in('type', ['event_updated', 'event_cancelled', 'event_registered', 'event_promoted'])
+  const { error } = await query
+  if (error) throw new Error(friendlyMessage(error))
+}
+
+/* Realtime: a targeted channel on MY notification rows only. INSERT=+1
+   when unread, UPDATE (a read side-effect) settles the badge. The DB
+   stays the source of truth; these events only move the UI. */
+export function subscribeNotifications(
+  myUserId: string,
+  onChange: (event: 'insert' | 'update' | 'subscribed') => void,
+): () => void {
+  if (!supabase) return () => {}
+  const client = supabase
+  const channel = client
+    .channel(`notifications:${myUserId.slice(0, 8)}`)
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'notifications',
+        filter: `recipient_id=eq.${myUserId}`,
+      },
+      () => onChange('insert'),
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'notifications',
+        filter: `recipient_id=eq.${myUserId}`,
+      },
+      () => onChange('update'),
+    )
+    .subscribe(status => {
+      if (status === 'SUBSCRIBED') onChange('subscribed')
+    })
+  return () => {
+    void client.removeChannel(channel)
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Preferences                                                                */
+/* -------------------------------------------------------------------------- */
+
+export type NotificationPrefs = {
+  likeInapp: boolean
+  likePush: boolean
+  commentInapp: boolean
+  commentPush: boolean
+  followInapp: boolean
+  followPush: boolean
+  mentionInapp: boolean
+  mentionPush: boolean
+  messageInapp: boolean
+  messagePush: boolean
+  communityInapp: boolean
+  communityPush: boolean
+  eventInapp: boolean
+  eventPush: boolean
+  marketplaceInapp: boolean
+  marketplacePush: boolean
+  messagePreview: boolean
+  quietEnabled: boolean
+  quietStart: string
+  quietEnd: string
+  timezone: string | null
+}
+
+type NotifPrefsRow = {
+  user_id?: string
+  like_inapp?: boolean | null
+  like_push?: boolean | null
+  comment_inapp?: boolean | null
+  comment_push?: boolean | null
+  follow_inapp?: boolean | null
+  follow_push?: boolean | null
+  mention_inapp?: boolean | null
+  mention_push?: boolean | null
+  message_inapp?: boolean | null
+  message_push?: boolean | null
+  community_inapp?: boolean | null
+  community_push?: boolean | null
+  event_inapp?: boolean | null
+  event_push?: boolean | null
+  marketplace_inapp?: boolean | null
+  marketplace_push?: boolean | null
+  message_preview?: boolean | null
+  quiet_enabled?: boolean | null
+  quiet_start?: string | null
+  quiet_end?: string | null
+  timezone?: string | null
+}
+
+function mapNotificationPrefs(row: NotifPrefsRow): NotificationPrefs {
+  return {
+    likeInapp: Boolean(row.like_inapp ?? true),
+    likePush: Boolean(row.like_push ?? false),
+    commentInapp: Boolean(row.comment_inapp ?? true),
+    commentPush: Boolean(row.comment_push ?? true),
+    followInapp: Boolean(row.follow_inapp ?? true),
+    followPush: Boolean(row.follow_push ?? true),
+    mentionInapp: Boolean(row.mention_inapp ?? true),
+    mentionPush: Boolean(row.mention_push ?? true),
+    messageInapp: Boolean(row.message_inapp ?? true),
+    messagePush: Boolean(row.message_push ?? true),
+    communityInapp: Boolean(row.community_inapp ?? true),
+    communityPush: Boolean(row.community_push ?? true),
+    eventInapp: Boolean(row.event_inapp ?? true),
+    eventPush: Boolean(row.event_push ?? true),
+    marketplaceInapp: Boolean(row.marketplace_inapp ?? true),
+    marketplacePush: Boolean(row.marketplace_push ?? false),
+    messagePreview: Boolean(row.message_preview ?? true),
+    quietEnabled: Boolean(row.quiet_enabled ?? false),
+    quietStart: String(row.quiet_start ?? '22:30'),
+    quietEnd: String(row.quiet_end ?? '07:30'),
+    timezone: (row.timezone as string | null) ?? null,
+  }
+}
+
+/** Read (creating the row on first use) the member's notification prefs. */
+export async function fetchNotificationPrefs(): Promise<NotificationPrefs> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('ensure_notification_prefs')
+  if (error) throw new Error(friendlyMessage(error))
+  return mapNotificationPrefs((data ?? {}) as NotifPrefsRow)
+}
+
+/** Persist a partial update; the RPC validates + downcasts every key.
+    `null` is allowed for the timezone field (clears it). */
+export async function saveNotificationPrefs(
+  update: Partial<Record<string, boolean | string | null>>,
+): Promise<NotificationPrefs> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const payload: Record<string, boolean | string | null> = {}
+  for (const [key, value] of Object.entries(update)) {
+    if (value !== undefined) payload[key] = value
+  }
+  const { data, error } = await supabase.rpc('update_notification_prefs', {
+    p_update: payload,
+  })
+  if (error) throw new Error(friendlyMessage(error))
+  return mapNotificationPrefs((data ?? {}) as NotifPrefsRow)
+}
+
+/* -------------------------------------------------------------------------- */
+/* Web-push subscriptions (VAPID)                                             */
+/* -------------------------------------------------------------------------- */
+
+export type PushSubscriptionRecord = {
+  id: string
+  endpoint: string
+  createdAt: string
+}
+
+export async function savePushSubscription(sub: {
+  endpoint: string
+  p256dh: string
+  auth: string
+  userAgent?: string | null
+}): Promise<string> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('save_push_subscription', {
+    p_endpoint: sub.endpoint,
+    p_p256dh: sub.p256dh,
+    p_auth: sub.auth,
+    p_user_agent: sub.userAgent ?? null,
+  })
+  if (error) throw new Error(friendlyMessage(error))
+  return String(data ?? '')
+}
+
+export async function removePushSubscription(endpoint: string): Promise<void> {
+  if (!supabase) return
+  const { error } = await supabase.rpc('remove_push_subscription', {
+    p_endpoint: endpoint,
+  })
+  if (error) throw new Error(friendlyMessage(error))
+}
+
+export async function fetchPushSubscriptions(): Promise<PushSubscriptionRecord[]> {
+  if (!supabase) return []
+  const { data, error } = await supabase
+    .from('push_subscriptions')
+    .select('id, endpoint, created_at')
+    .order('created_at', { ascending: false })
+  if (error) throw new Error(friendlyMessage(error))
+  return ((data ?? []) as Record<string, unknown>[]).map(row => ({
+    id: String(row.id ?? ''),
+    endpoint: String(row.endpoint ?? ''),
+    createdAt: String(row.created_at ?? ''),
   }))
 }
 

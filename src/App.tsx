@@ -30,6 +30,7 @@ import ReelsFeed from './components/ReelsFeed'
 import CommentsSheet from './components/CommentsSheet'
 import Chats from './components/Chats'
 import Bookmarks from './components/Bookmarks'
+import NotificationCenter from './components/NotificationCenter'
 import Confessions from './components/Confessions'
 import Leaderboard from './components/Leaderboard'
 import * as bk from './lib/bookmarks'
@@ -112,6 +113,8 @@ let handledDeepLinkId: string | null = null
 let handledCommunitySlug: string | null = null
 let handledEventSlug: string | null = null
 let handledListingSlug: string | null = null
+let handledChatId: string | null = null
+let handledUsername: string | null = null
 
 /** Pages already reachable from the persistent mobile chrome (bottom nav +
  * header icons), so they are dropped from the mobile drawer to avoid duplicates. */
@@ -462,8 +465,14 @@ function CAMPUSApp() {
     if (status === 'member' || status === 'visitor') void loadFeed()
   }, [status, user?.id, loadFeed])
 
-  /* real notification badge: the bell only lights when unread rows exist */
+  /* real notification badge: the bell only lights when unread rows exist.
+     Live updates ride a TARGETED Supabase realtime channel on my own rows:
+     inserts settle the count via a server re-read (the DB is the source of
+     truth — realtime events never mint anything), and the same ritual
+     re-syncs other tabs and recovery from reconnects. */
   const [unreadNotifs, setUnreadNotifs] = useState(0)
+  const [notifTick, setNotifTick] = useState(0)
+  const [bellRefetch, setBellRefetch] = useState(0)
   useEffect(() => {
     if (status !== 'member' || !user?.id || !configured) { setUnreadNotifs(0); return }
     let alive = true
@@ -474,8 +483,50 @@ function CAMPUSApp() {
     const timer = window.setInterval(load, 30000)
     const onFocus = () => load()
     window.addEventListener('focus', onFocus)
-    return () => { alive = false; window.clearInterval(timer); window.removeEventListener('focus', onFocus) }
+    const unsubscribe = db.subscribeNotifications(user.id, () => {
+      setNotifTick(tick => tick + 1)
+      // small settle delay keeps the re-read consistent with the write
+      window.setTimeout(load, 400)
+    })
+    return () => {
+      alive = false
+      window.clearInterval(timer)
+      window.removeEventListener('focus', onFocus)
+      unsubscribe()
+    }
   }, [status, user?.id, configured])
+  // explicit re-reads from the notification center (mark read / mark all)
+  useEffect(() => {
+    if (bellRefetch === 0) return
+    if (status !== 'member' || !user?.id || !configured) return
+    void db.fetchUnreadNotificationCount()
+      .then(n => setUnreadNotifs(n))
+      .catch(() => { /* keep the last honest value */ })
+  }, [bellRefetch, status, user?.id, configured])
+
+  /* web-push plumbing: register the service worker once (secure contexts
+     only); permission is NEVER requested here — the center offers it. */
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('serviceWorker' in window.navigator)) return
+    const secure = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    if (!secure) return
+    void window.navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {})
+  }, [])
+
+  /* push clicks navigate the app: the SW posts the deep link, we route it
+     through the same hash handler every other entry point uses */
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('serviceWorker' in window.navigator)) return
+    const handler = (event: MessageEvent) => {
+      const data = event.data as { type?: string; url?: string } | null
+      if (data?.type !== 'CAMPUS_NAVIGATE' || typeof data.url !== 'string') return
+      const hashIndex = data.url.indexOf('#')
+      if (hashIndex < 0) return
+      window.location.hash = data.url.slice(hashIndex)
+    }
+    window.navigator.serviceWorker.addEventListener('message', handler)
+    return () => window.navigator.serviceWorker.removeEventListener('message', handler)
+  }, [])
 
   /* ---- real right-panel data -------------------------------------------- */
 
@@ -633,7 +684,7 @@ function CAMPUSApp() {
       // a hash change is a same-document navigation that creates a fresh
       // history entry with native null state — stamp it as a CAMPUS entry
       // carrying the current view so the in-app chain is never severed
-      if (/^#(p|c|e|m)\//i.test(window.location.hash)) {
+      if (/^#(p|c|e|m|chat|u)\//i.test(window.location.hash)) {
         navHistory.preserveCurrentEntry()
       }
       const match = /#p\/([0-9a-f-]{8}-[0-9a-f-]{4}-[0-9a-f-]{4}-[0-9a-f-]{4}-[0-9a-f-]{12})$/i.exec(window.location.hash)
@@ -709,6 +760,49 @@ function CAMPUSApp() {
         setActiveNav('Marketplace')
         setOpenListingSlug(listingSlug)
         navHistory.preserveCurrentEntry()
+      }
+      // chat deep links (push + share): #chat/<conversation uuid>. Access
+      // itself is enforced by list_chat_messages + member checks, never by
+      // the URL — the id in the hash is opaque.
+      const chatMatch = /#chat\/([0-9a-f-]{32,36})$/i.exec(window.location.hash)
+      if (chatMatch) {
+        const conversationId = chatMatch[1]
+        if (handledChatId !== conversationId) {
+          handledChatId = conversationId
+          markWelcomeSeen()
+          setExplored(true)
+          setOpenChatId(conversationId)
+          setChatAutoSeq(n => n + 1)
+          setActiveNav('Chats')
+          navHistory.preserveCurrentEntry()
+        }
+        return
+      }
+      // profile deep links (push): #u/<username> — resolved server-side;
+      // private profiles show whatever profile fetch() allows
+      const userMatch = /#u\/([a-z0-9_]{2,32})$/i.exec(window.location.hash)
+      if (userMatch) {
+        const username = userMatch[1].toLowerCase()
+        if (handledUsername !== username) {
+          handledUsername = username
+          markWelcomeSeen()
+          setExplored(true)
+          void db.getSupabaseClient()
+            ?.from('profiles')
+            .select('id')
+            .ilike('username', username)
+            .maybeSingle()
+            .then(({ data }: { data: { id: string } | null }) => {
+              if (data?.id) {
+                setViewingProfileId(data.id)
+                setActiveNav('Profile')
+                navHistory.preserveCurrentEntry()
+              } else {
+                flash('That profile link does not exist.')
+              }
+            })
+        }
+        return
       }
     }
     handleDeepLink()
@@ -1845,6 +1939,22 @@ function CAMPUSApp() {
                       configured={configured}
                       requireAuth={requireAuth}
                       notify={flash}
+                      onOpenProfile={openMentionProfile}
+                    />
+                : activeNav === 'Notifications'
+                  ? <NotificationCenter
+                      key="notifications"
+                      identity={identity && user ? { id: user.id, name: identity.name, username: identity.username, initials: identity.initials } : { id: '', name: '', username: '', initials: '' }}
+                      configured={configured}
+                      notify={flash}
+                      collegeId={profile?.college_id ?? null}
+                      liveTick={notifTick}
+                      onCountsChanged={() => setBellRefetch(n => n + 1)}
+                      onOpenChat={conversationId => {
+                        setOpenChatId(conversationId)
+                        setChatAutoSeq(n => n + 1)
+                        navigate('Chats')
+                      }}
                       onOpenProfile={openMentionProfile}
                     />
                 : infoNav.includes(activeNav)
