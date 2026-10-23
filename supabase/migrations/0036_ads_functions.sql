@@ -680,7 +680,7 @@ begin
                'clicks', coalesce(x.clicks, 0),
                'ctr', case when coalesce(x.imps, 0) = 0 then 0
                       else round(100.0 * coalesce(x.clicks, 0) / x.imps, 2) end
-             ) order by x.imps desc nulls last, x.college), '[]'::jsonb)
+             ) order by x.imps desc nulls last, x.short, x.nm), '[]'::jsonb)
       from (
         select g.short_name as short, g.name as nm, ii.imps as imps, kk.clicks as clicks
         from (select distinct college_id from public.ad_impressions where campaign_id = p_campaign) cells
