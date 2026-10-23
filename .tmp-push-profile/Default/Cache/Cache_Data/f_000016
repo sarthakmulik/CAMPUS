@@ -1,0 +1,231 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/components/BootScreen.tsx");import __vite__cjsImport0_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=ba7d90ec"; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import * as RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.$RefreshReg$) {
+    throw new Error(
+      "@vitejs/plugin-react can't detect preamble. Something is wrong."
+    );
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = RefreshRuntime.getRefreshReg("C:/CAMPUS/src/components/BootScreen.tsx");
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+export default function BootScreen({ quiescent, slow, error, onRetry, onSignOut, notice }) {
+  return /* @__PURE__ */ jsxDEV(
+    "main",
+    {
+      className: `boot-screen${quiescent ? " boot-static" : ""}`,
+      role: "status",
+      "aria-live": "polite",
+      "aria-label": error ? "CAMPUS could not finish loading your profile" : "Loading CAMPUS",
+      children: [
+        /* @__PURE__ */ jsxDEV("div", { className: "boot-atmos", "aria-hidden": "true", children: [
+          /* @__PURE__ */ jsxDEV("span", { className: "boot-blob boot-blob-a" }, void 0, false, {
+            fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+            lineNumber: 57,
+            columnNumber: 9
+          }, this),
+          /* @__PURE__ */ jsxDEV("span", { className: "boot-blob boot-blob-b" }, void 0, false, {
+            fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+            lineNumber: 58,
+            columnNumber: 9
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+          lineNumber: 56,
+          columnNumber: 7
+        }, this),
+        /* @__PURE__ */ jsxDEV("div", { className: "boot-mark", "aria-hidden": "true", children: [
+          /* @__PURE__ */ jsxDEV("span", { className: "boot-halo" }, void 0, false, {
+            fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+            lineNumber: 62,
+            columnNumber: 9
+          }, this),
+          /* @__PURE__ */ jsxDEV("span", { className: "boot-logo", children: [
+            /* @__PURE__ */ jsxDEV("svg", { viewBox: "0 0 24 24", className: "boot-logo-shine", preserveAspectRatio: "none", children: /* @__PURE__ */ jsxDEV("polygon", { points: "0,0 10,0 2,24 -2,24", fill: "#ffffff" }, void 0, false, {
+              fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+              lineNumber: 65,
+              columnNumber: 13
+            }, this) }, void 0, false, {
+              fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+              lineNumber: 64,
+              columnNumber: 11
+            }, this),
+            /* @__PURE__ */ jsxDEV("span", { className: "boot-logo-lockup", children: /* @__PURE__ */ jsxDEV("b", { children: "C" }, void 0, false, {
+              fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+              lineNumber: 67,
+              columnNumber: 46
+            }, this) }, void 0, false, {
+              fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+              lineNumber: 67,
+              columnNumber: 11
+            }, this)
+          ] }, void 0, true, {
+            fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+            lineNumber: 63,
+            columnNumber: 9
+          }, this),
+          /* @__PURE__ */ jsxDEV("svg", { className: "boot-net", viewBox: "0 0 232 64", fill: "none", "aria-hidden": "true", children: [
+            /* @__PURE__ */ jsxDEV("line", { x1: "26", y1: "44", x2: "82", y2: "20" }, void 0, false, {
+              fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+              lineNumber: 70,
+              columnNumber: 11
+            }, this),
+            /* @__PURE__ */ jsxDEV("line", { x1: "82", y1: "20", x2: "138", y2: "42" }, void 0, false, {
+              fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+              lineNumber: 71,
+              columnNumber: 11
+            }, this),
+            /* @__PURE__ */ jsxDEV("line", { x1: "138", y1: "42", x2: "192", y2: "16" }, void 0, false, {
+              fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+              lineNumber: 72,
+              columnNumber: 11
+            }, this),
+            /* @__PURE__ */ jsxDEV("line", { x1: "192", y1: "16", x2: "218", y2: "38" }, void 0, false, {
+              fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+              lineNumber: 73,
+              columnNumber: 11
+            }, this),
+            /* @__PURE__ */ jsxDEV("line", { x1: "82", y1: "20", x2: "58", y2: "8" }, void 0, false, {
+              fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+              lineNumber: 74,
+              columnNumber: 11
+            }, this),
+            /* @__PURE__ */ jsxDEV("circle", { className: "boot-node", cx: "58", cy: "8", r: "2" }, void 0, false, {
+              fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+              lineNumber: 75,
+              columnNumber: 11
+            }, this),
+            /* @__PURE__ */ jsxDEV("circle", { className: "boot-node", cx: "26", cy: "44", r: "2.4" }, void 0, false, {
+              fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+              lineNumber: 76,
+              columnNumber: 11
+            }, this),
+            /* @__PURE__ */ jsxDEV("circle", { className: "boot-node", cx: "82", cy: "20", r: "2.6" }, void 0, false, {
+              fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+              lineNumber: 77,
+              columnNumber: 11
+            }, this),
+            /* @__PURE__ */ jsxDEV("circle", { className: "boot-node", cx: "138", cy: "42", r: "2.4" }, void 0, false, {
+              fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+              lineNumber: 78,
+              columnNumber: 11
+            }, this),
+            /* @__PURE__ */ jsxDEV("circle", { className: "boot-node", cx: "192", cy: "16", r: "2.2" }, void 0, false, {
+              fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+              lineNumber: 79,
+              columnNumber: 11
+            }, this),
+            /* @__PURE__ */ jsxDEV("circle", { className: "boot-node", cx: "218", cy: "38", r: "2" }, void 0, false, {
+              fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+              lineNumber: 80,
+              columnNumber: 11
+            }, this)
+          ] }, void 0, true, {
+            fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+            lineNumber: 69,
+            columnNumber: 9
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+          lineNumber: 61,
+          columnNumber: 7
+        }, this),
+        /* @__PURE__ */ jsxDEV("div", { className: "boot-copy", children: [
+          /* @__PURE__ */ jsxDEV("b", { className: "boot-wordmark", children: "CAMPUS" }, void 0, false, {
+            fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+            lineNumber: 85,
+            columnNumber: 9
+          }, this),
+          /* @__PURE__ */ jsxDEV("p", { className: "boot-tag", children: "Bringing your campus together." }, void 0, false, {
+            fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+            lineNumber: 86,
+            columnNumber: 9
+          }, this),
+          slow && /* @__PURE__ */ jsxDEV("p", { className: "boot-slow", children: "Still connecting — this is taking longer than usual." }, void 0, false, {
+            fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+            lineNumber: 87,
+            columnNumber: 18
+          }, this),
+          /* @__PURE__ */ jsxDEV("span", { className: "boot-bar", "aria-hidden": "true", children: /* @__PURE__ */ jsxDEV("i", {}, void 0, false, {
+            fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+            lineNumber: 88,
+            columnNumber: 55
+          }, this) }, void 0, false, {
+            fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+            lineNumber: 88,
+            columnNumber: 9
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+          lineNumber: 84,
+          columnNumber: 7
+        }, this),
+        error && /* @__PURE__ */ jsxDEV("div", { className: "boot-error", children: [
+          /* @__PURE__ */ jsxDEV("h2", { children: "We could not load your profile." }, void 0, false, {
+            fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+            lineNumber: 93,
+            columnNumber: 11
+          }, this),
+          /* @__PURE__ */ jsxDEV("p", { className: "form-error", role: "alert", children: error }, void 0, false, {
+            fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+            lineNumber: 94,
+            columnNumber: 11
+          }, this),
+          /* @__PURE__ */ jsxDEV("div", { className: "wizard-actions inline", children: [
+            /* @__PURE__ */ jsxDEV("button", { className: "secondary-button", onClick: onSignOut, children: "Sign out" }, void 0, false, {
+              fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+              lineNumber: 96,
+              columnNumber: 13
+            }, this),
+            /* @__PURE__ */ jsxDEV("button", { className: "primary-button", onClick: onRetry, children: "Try again" }, void 0, false, {
+              fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+              lineNumber: 97,
+              columnNumber: 13
+            }, this)
+          ] }, void 0, true, {
+            fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+            lineNumber: 95,
+            columnNumber: 11
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+          lineNumber: 92,
+          columnNumber: 7
+        }, this),
+        notice
+      ]
+    },
+    void 0,
+    true,
+    {
+      fileName: "C:/CAMPUS/src/components/BootScreen.tsx",
+      lineNumber: 50,
+      columnNumber: 5
+    },
+    this
+  );
+}
+_c = BootScreen;
+var _c;
+$RefreshReg$(_c, "BootScreen");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("C:/CAMPUS/src/components/BootScreen.tsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("C:/CAMPUS/src/components/BootScreen.tsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJtYXBwaW5ncyI6IkFBcUNROzs7Ozs7Ozs7Ozs7Ozs7O0FBVFIsd0JBQXdCQSxXQUFXLEVBQUVDLFdBQVdDLE1BQU1DLE9BQU9DLFNBQVNDLFdBQVdDLE9BQWMsR0FBRztBQUNoRyxTQUNFO0FBQUEsSUFBQztBQUFBO0FBQUEsTUFDQyxXQUFXLGNBQWNMLFlBQVksaUJBQWlCLEVBQUU7QUFBQSxNQUN4RCxNQUFLO0FBQUEsTUFDTCxhQUFVO0FBQUEsTUFDVixjQUFZRSxRQUFRLGlEQUFpRDtBQUFBLE1BRXJFO0FBQUEsK0JBQUMsU0FBSSxXQUFVLGNBQWEsZUFBWSxRQUN0QztBQUFBLGlDQUFDLFVBQUssV0FBVSwyQkFBaEI7QUFBQTtBQUFBO0FBQUE7QUFBQSxpQkFBdUM7QUFBQSxVQUN2Qyx1QkFBQyxVQUFLLFdBQVUsMkJBQWhCO0FBQUE7QUFBQTtBQUFBO0FBQUEsaUJBQXVDO0FBQUEsYUFGekM7QUFBQTtBQUFBO0FBQUE7QUFBQSxlQUdBO0FBQUEsUUFFQSx1QkFBQyxTQUFJLFdBQVUsYUFBWSxlQUFZLFFBQ3JDO0FBQUEsaUNBQUMsVUFBSyxXQUFVLGVBQWhCO0FBQUE7QUFBQTtBQUFBO0FBQUEsaUJBQTJCO0FBQUEsVUFDM0IsdUJBQUMsVUFBSyxXQUFVLGFBQ2Q7QUFBQSxtQ0FBQyxTQUFJLFNBQVEsYUFBWSxXQUFVLG1CQUFrQixxQkFBb0IsUUFDdkUsaUNBQUMsYUFBUSxRQUFPLHVCQUFzQixNQUFLLGFBQTNDO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBQW9ELEtBRHREO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBRUE7QUFBQSxZQUNBLHVCQUFDLFVBQUssV0FBVSxvQkFBbUIsaUNBQUMsT0FBRSxpQkFBSDtBQUFBO0FBQUE7QUFBQTtBQUFBLG1CQUFJLEtBQXZDO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBQTJDO0FBQUEsZUFKN0M7QUFBQTtBQUFBO0FBQUE7QUFBQSxpQkFLQTtBQUFBLFVBQ0EsdUJBQUMsU0FBSSxXQUFVLFlBQVcsU0FBUSxjQUFhLE1BQUssUUFBTyxlQUFZLFFBQ3JFO0FBQUEsbUNBQUMsVUFBSyxJQUFHLE1BQUssSUFBRyxNQUFLLElBQUcsTUFBSyxJQUFHLFFBQWpDO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBQXFDO0FBQUEsWUFDckMsdUJBQUMsVUFBSyxJQUFHLE1BQUssSUFBRyxNQUFLLElBQUcsT0FBTSxJQUFHLFFBQWxDO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBQXNDO0FBQUEsWUFDdEMsdUJBQUMsVUFBSyxJQUFHLE9BQU0sSUFBRyxNQUFLLElBQUcsT0FBTSxJQUFHLFFBQW5DO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBQXVDO0FBQUEsWUFDdkMsdUJBQUMsVUFBSyxJQUFHLE9BQU0sSUFBRyxNQUFLLElBQUcsT0FBTSxJQUFHLFFBQW5DO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBQXVDO0FBQUEsWUFDdkMsdUJBQUMsVUFBSyxJQUFHLE1BQUssSUFBRyxNQUFLLElBQUcsTUFBSyxJQUFHLE9BQWpDO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBQW9DO0FBQUEsWUFDcEMsdUJBQUMsWUFBTyxXQUFVLGFBQVksSUFBRyxNQUFLLElBQUcsS0FBSSxHQUFFLE9BQS9DO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBQWtEO0FBQUEsWUFDbEQsdUJBQUMsWUFBTyxXQUFVLGFBQVksSUFBRyxNQUFLLElBQUcsTUFBSyxHQUFFLFNBQWhEO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBQXFEO0FBQUEsWUFDckQsdUJBQUMsWUFBTyxXQUFVLGFBQVksSUFBRyxNQUFLLElBQUcsTUFBSyxHQUFFLFNBQWhEO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBQXFEO0FBQUEsWUFDckQsdUJBQUMsWUFBTyxXQUFVLGFBQVksSUFBRyxPQUFNLElBQUcsTUFBSyxHQUFFLFNBQWpEO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBQXNEO0FBQUEsWUFDdEQsdUJBQUMsWUFBTyxXQUFVLGFBQVksSUFBRyxPQUFNLElBQUcsTUFBSyxHQUFFLFNBQWpEO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBQXNEO0FBQUEsWUFDdEQsdUJBQUMsWUFBTyxXQUFVLGFBQVksSUFBRyxPQUFNLElBQUcsTUFBSyxHQUFFLE9BQWpEO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBQW9EO0FBQUEsZUFYdEQ7QUFBQTtBQUFBO0FBQUE7QUFBQSxpQkFZQTtBQUFBLGFBcEJGO0FBQUE7QUFBQTtBQUFBO0FBQUEsZUFxQkE7QUFBQSxRQUVBLHVCQUFDLFNBQUksV0FBVSxhQUNiO0FBQUEsaUNBQUMsT0FBRSxXQUFVLGlCQUFnQixzQkFBN0I7QUFBQTtBQUFBO0FBQUE7QUFBQSxpQkFBbUM7QUFBQSxVQUNuQyx1QkFBQyxPQUFFLFdBQVUsWUFBVyw4Q0FBeEI7QUFBQTtBQUFBO0FBQUE7QUFBQSxpQkFBc0Q7QUFBQSxVQUNyREQsUUFBUSx1QkFBQyxPQUFFLFdBQVUsYUFBWSxvRUFBekI7QUFBQTtBQUFBO0FBQUE7QUFBQSxpQkFBNkU7QUFBQSxVQUN0Rix1QkFBQyxVQUFLLFdBQVUsWUFBVyxlQUFZLFFBQU8saUNBQUMsU0FBRDtBQUFBO0FBQUE7QUFBQTtBQUFBLGlCQUFFLEtBQWhEO0FBQUE7QUFBQTtBQUFBO0FBQUEsaUJBQW1EO0FBQUEsYUFKckQ7QUFBQTtBQUFBO0FBQUE7QUFBQSxlQUtBO0FBQUEsUUFFQ0MsU0FDQyx1QkFBQyxTQUFJLFdBQVUsY0FDYjtBQUFBLGlDQUFDLFFBQUcsK0NBQUo7QUFBQTtBQUFBO0FBQUE7QUFBQSxpQkFBbUM7QUFBQSxVQUNuQyx1QkFBQyxPQUFFLFdBQVUsY0FBYSxNQUFLLFNBQVNBLG1CQUF4QztBQUFBO0FBQUE7QUFBQTtBQUFBLGlCQUE4QztBQUFBLFVBQzlDLHVCQUFDLFNBQUksV0FBVSx5QkFDYjtBQUFBLG1DQUFDLFlBQU8sV0FBVSxvQkFBbUIsU0FBU0UsV0FBVyx3QkFBekQ7QUFBQTtBQUFBO0FBQUE7QUFBQSxtQkFBaUU7QUFBQSxZQUNqRSx1QkFBQyxZQUFPLFdBQVUsa0JBQWlCLFNBQVNELFNBQVMseUJBQXJEO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBQThEO0FBQUEsZUFGaEU7QUFBQTtBQUFBO0FBQUE7QUFBQSxpQkFHQTtBQUFBLGFBTkY7QUFBQTtBQUFBO0FBQUE7QUFBQSxlQU9BO0FBQUEsUUFFREU7QUFBQUE7QUFBQUE7QUFBQUEsSUFuREg7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBLEVBb0RBO0FBRUo7QUFBQ0MsS0F4RHVCUDtBQUFVLElBQUFPO0FBQUEsYUFBQUEsSUFBQSIsIm5hbWVzIjpbIkJvb3RTY3JlZW4iLCJxdWllc2NlbnQiLCJzbG93IiwiZXJyb3IiLCJvblJldHJ5Iiwib25TaWduT3V0Iiwibm90aWNlIiwiX2MiXSwiaWdub3JlTGlzdCI6W10sInNvdXJjZXMiOlsiQm9vdFNjcmVlbi50c3giXSwic291cmNlc0NvbnRlbnQiOlsiaW1wb3J0IHR5cGUgeyBSZWFjdE5vZGUgfSBmcm9tICdyZWFjdCdcblxuLyoqXG4gKiBDQU1QVVMgYm9vdCBleHBlcmllbmNlIOKAlCBzaG93biBvbmx5IHdoaWxlIHRoZSBhcHAgaXMgZ2VudWluZWx5IHJlc3RvcmluZ1xuICogaXRzIHNlc3Npb24gYW5kIHByb2ZpbGUgKGF1dGguYm9vdGluZyksIHBsdXMgdGhlIHByb2ZpbGUtZmFpbHVyZSBzdXJmYWNlLlxuICpcbiAqIEV2ZXJ5dGhpbmcgYW5pbWF0ZWQgaXMgQ1NTLWRyaXZlbiAob3BhY2l0eS90cmFuc2Zvcm0gb25seSk6IGFuIGFtYmllbnRcbiAqIGl2b3J5ICsgbGF2ZW5kZXIgYXRtb3NwaGVyZSwgdGhlIGJyYW5kIG1hcmsgZW50ZXJpbmcgd2l0aCBhIHNvZnQgc3ByaW5nIGFuZFxuICogYW4gb2NjYXNpb25hbCBncmFkaWVudCBoaWdobGlnaHQgc3dlZXAsIGEgYnJlYXRoaW5nIGhhbG8sIGEgdGlueSBub2RlXG4gKiBuZXR3b3JrIHN1Z2dlc3Rpbmcgc3R1ZGVudHMgY29ubmVjdGluZywgYW5kIGFuIGhvbmVzdCAqaW5kZXRlcm1pbmF0ZSpcbiAqIHByb2dyZXNzIGhhaXJsaW5lICh0aGUgYm9vdCBzZXF1ZW5jZSBoYXMgbm8gbWVhc3VyYWJsZSBzdGVwcyDigJQgbm8gZmFrZVxuICogcGVyY2VudGFnZXMpLiBgc2xvd2AgYWRkcyBhIFwic3RpbGwgY29ubmVjdGluZ1wiIGhpbnQgYWZ0ZXIgMTRzOyBgZXJyb3JgXG4gKiBoYW5kcyB0aGUgdXNlciB0aGUgZXhpc3Rpbmcgc2lnbi1vdXQgLyByZXRyeSBhY3Rpb25zIGluc3RlYWQgb2YgaGlkaW5nXG4gKiBiZWhpbmQgdGhlIGFuaW1hdGlvbi5cbiAqL1xuXG50eXBlIFByb3BzID0ge1xuICAvKiogUmVuZGVyIHdpdGggYWxsIG1vdGlvbiBmcm96ZW4g4oCUIHVzZWQgYnkgdGhlIGZhZGUtb3V0IHZlaWwuICovXG4gIHF1aWVzY2VudD86IGJvb2xlYW5cbiAgLyoqIFNldCBieSBhIGJvb3Qgd2F0Y2hkb2cg4oCUIGluaXRpYWxpemF0aW9uIGlzIHRha2luZyB1bnVzdWFsbHkgbG9uZy4gKi9cbiAgc2xvdz86IGJvb2xlYW5cbiAgLyoqIFByb2ZpbGUgbG9hZCBmYWlsdXJlIOKAlCByZXVzZXMgQ0FNUFVTJyBleGlzdGluZyByZXRyeSAvIHNpZ24tb3V0IGZsb3cuICovXG4gIGVycm9yPzogc3RyaW5nIHwgbnVsbFxuICBvblJldHJ5PzogKCkgPT4gdm9pZFxuICBvblNpZ25PdXQ/OiAoKSA9PiB2b2lkXG4gIG5vdGljZT86IFJlYWN0Tm9kZVxufVxuXG5leHBvcnQgZGVmYXVsdCBmdW5jdGlvbiBCb290U2NyZWVuKHsgcXVpZXNjZW50LCBzbG93LCBlcnJvciwgb25SZXRyeSwgb25TaWduT3V0LCBub3RpY2UgfTogUHJvcHMpIHtcbiAgcmV0dXJuIChcbiAgICA8bWFpblxuICAgICAgY2xhc3NOYW1lPXtgYm9vdC1zY3JlZW4ke3F1aWVzY2VudCA/ICcgYm9vdC1zdGF0aWMnIDogJyd9YH1cbiAgICAgIHJvbGU9XCJzdGF0dXNcIlxuICAgICAgYXJpYS1saXZlPVwicG9saXRlXCJcbiAgICAgIGFyaWEtbGFiZWw9e2Vycm9yID8gJ0NBTVBVUyBjb3VsZCBub3QgZmluaXNoIGxvYWRpbmcgeW91ciBwcm9maWxlJyA6ICdMb2FkaW5nIENBTVBVUyd9XG4gICAgPlxuICAgICAgPGRpdiBjbGFzc05hbWU9XCJib290LWF0bW9zXCIgYXJpYS1oaWRkZW49XCJ0cnVlXCI+XG4gICAgICAgIDxzcGFuIGNsYXNzTmFtZT1cImJvb3QtYmxvYiBib290LWJsb2ItYVwiIC8+XG4gICAgICAgIDxzcGFuIGNsYXNzTmFtZT1cImJvb3QtYmxvYiBib290LWJsb2ItYlwiIC8+XG4gICAgICA8L2Rpdj5cblxuICAgICAgPGRpdiBjbGFzc05hbWU9XCJib290LW1hcmtcIiBhcmlhLWhpZGRlbj1cInRydWVcIj5cbiAgICAgICAgPHNwYW4gY2xhc3NOYW1lPVwiYm9vdC1oYWxvXCIgLz5cbiAgICAgICAgPHNwYW4gY2xhc3NOYW1lPVwiYm9vdC1sb2dvXCI+XG4gICAgICAgICAgPHN2ZyB2aWV3Qm94PVwiMCAwIDI0IDI0XCIgY2xhc3NOYW1lPVwiYm9vdC1sb2dvLXNoaW5lXCIgcHJlc2VydmVBc3BlY3RSYXRpbz1cIm5vbmVcIj5cbiAgICAgICAgICAgIDxwb2x5Z29uIHBvaW50cz1cIjAsMCAxMCwwIDIsMjQgLTIsMjRcIiBmaWxsPVwiI2ZmZmZmZlwiIC8+XG4gICAgICAgICAgPC9zdmc+XG4gICAgICAgICAgPHNwYW4gY2xhc3NOYW1lPVwiYm9vdC1sb2dvLWxvY2t1cFwiPjxiPkM8L2I+PC9zcGFuPlxuICAgICAgICA8L3NwYW4+XG4gICAgICAgIDxzdmcgY2xhc3NOYW1lPVwiYm9vdC1uZXRcIiB2aWV3Qm94PVwiMCAwIDIzMiA2NFwiIGZpbGw9XCJub25lXCIgYXJpYS1oaWRkZW49XCJ0cnVlXCI+XG4gICAgICAgICAgPGxpbmUgeDE9XCIyNlwiIHkxPVwiNDRcIiB4Mj1cIjgyXCIgeTI9XCIyMFwiIC8+XG4gICAgICAgICAgPGxpbmUgeDE9XCI4MlwiIHkxPVwiMjBcIiB4Mj1cIjEzOFwiIHkyPVwiNDJcIiAvPlxuICAgICAgICAgIDxsaW5lIHgxPVwiMTM4XCIgeTE9XCI0MlwiIHgyPVwiMTkyXCIgeTI9XCIxNlwiIC8+XG4gICAgICAgICAgPGxpbmUgeDE9XCIxOTJcIiB5MT1cIjE2XCIgeDI9XCIyMThcIiB5Mj1cIjM4XCIgLz5cbiAgICAgICAgICA8bGluZSB4MT1cIjgyXCIgeTE9XCIyMFwiIHgyPVwiNThcIiB5Mj1cIjhcIiAvPlxuICAgICAgICAgIDxjaXJjbGUgY2xhc3NOYW1lPVwiYm9vdC1ub2RlXCIgY3g9XCI1OFwiIGN5PVwiOFwiIHI9XCIyXCIgLz5cbiAgICAgICAgICA8Y2lyY2xlIGNsYXNzTmFtZT1cImJvb3Qtbm9kZVwiIGN4PVwiMjZcIiBjeT1cIjQ0XCIgcj1cIjIuNFwiIC8+XG4gICAgICAgICAgPGNpcmNsZSBjbGFzc05hbWU9XCJib290LW5vZGVcIiBjeD1cIjgyXCIgY3k9XCIyMFwiIHI9XCIyLjZcIiAvPlxuICAgICAgICAgIDxjaXJjbGUgY2xhc3NOYW1lPVwiYm9vdC1ub2RlXCIgY3g9XCIxMzhcIiBjeT1cIjQyXCIgcj1cIjIuNFwiIC8+XG4gICAgICAgICAgPGNpcmNsZSBjbGFzc05hbWU9XCJib290LW5vZGVcIiBjeD1cIjE5MlwiIGN5PVwiMTZcIiByPVwiMi4yXCIgLz5cbiAgICAgICAgICA8Y2lyY2xlIGNsYXNzTmFtZT1cImJvb3Qtbm9kZVwiIGN4PVwiMjE4XCIgY3k9XCIzOFwiIHI9XCIyXCIgLz5cbiAgICAgICAgPC9zdmc+XG4gICAgICA8L2Rpdj5cblxuICAgICAgPGRpdiBjbGFzc05hbWU9XCJib290LWNvcHlcIj5cbiAgICAgICAgPGIgY2xhc3NOYW1lPVwiYm9vdC13b3JkbWFya1wiPkNBTVBVUzwvYj5cbiAgICAgICAgPHAgY2xhc3NOYW1lPVwiYm9vdC10YWdcIj5CcmluZ2luZyB5b3VyIGNhbXB1cyB0b2dldGhlci48L3A+XG4gICAgICAgIHtzbG93ICYmIDxwIGNsYXNzTmFtZT1cImJvb3Qtc2xvd1wiPlN0aWxsIGNvbm5lY3Rpbmcg4oCUIHRoaXMgaXMgdGFraW5nIGxvbmdlciB0aGFuIHVzdWFsLjwvcD59XG4gICAgICAgIDxzcGFuIGNsYXNzTmFtZT1cImJvb3QtYmFyXCIgYXJpYS1oaWRkZW49XCJ0cnVlXCI+PGkgLz48L3NwYW4+XG4gICAgICA8L2Rpdj5cblxuICAgICAge2Vycm9yICYmIChcbiAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJib290LWVycm9yXCI+XG4gICAgICAgICAgPGgyPldlIGNvdWxkIG5vdCBsb2FkIHlvdXIgcHJvZmlsZS48L2gyPlxuICAgICAgICAgIDxwIGNsYXNzTmFtZT1cImZvcm0tZXJyb3JcIiByb2xlPVwiYWxlcnRcIj57ZXJyb3J9PC9wPlxuICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwid2l6YXJkLWFjdGlvbnMgaW5saW5lXCI+XG4gICAgICAgICAgICA8YnV0dG9uIGNsYXNzTmFtZT1cInNlY29uZGFyeS1idXR0b25cIiBvbkNsaWNrPXtvblNpZ25PdXR9PlNpZ24gb3V0PC9idXR0b24+XG4gICAgICAgICAgICA8YnV0dG9uIGNsYXNzTmFtZT1cInByaW1hcnktYnV0dG9uXCIgb25DbGljaz17b25SZXRyeX0+VHJ5IGFnYWluPC9idXR0b24+XG4gICAgICAgICAgPC9kaXY+XG4gICAgICAgIDwvZGl2PlxuICAgICAgKX1cbiAgICAgIHtub3RpY2V9XG4gICAgPC9tYWluPlxuICApXG59XG4iXSwiZmlsZSI6IkM6L0NBTVBVUy9zcmMvY29tcG9uZW50cy9Cb290U2NyZWVuLnRzeCJ9

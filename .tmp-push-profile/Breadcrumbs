@@ -1,0 +1,18 @@
+0:00:00 Startup
+0:00:00 UserEducation.Session.ActivePeriodStart
+0:00:00 Tab1 StartNav3 #auto_toplevel
+0:00:00 Browser1 Insert active Tab1 at 0
+0:00:00 TouchMode.EnteredNonTouchMode
+0:00:00 Tab1 FinishNav3
+0:00:02 Tab1 PageLoad
+0:00:09 Memory Pressure: Moderate
+0:00:19 Memory Pressure: None
+0:00:50 Tab1 StartNav13 #renderer-user #link
+0:00:50 Tab1 FinishNav13
+0:01:32 PasswordManager_LoginPassed
+0:01:32 Autofill_OnWillSubmitForm
+0:01:32 Tab1 StartNav14 #renderer-user #link
+0:01:32 Tab1 FinishNav14
+0:01:40 Tab1 StartNav15 #renderer-user #link
+0:01:40 Tab1 FinishNav15
+0:02:06 Browser1 Close Tab1 at 0
