@@ -6174,8 +6174,22 @@
 .nc-follow.on { background: #eef1f6; color: #5a6b83; }
 
 /* settings sheet */
-.nc-settings { max-height: 86vh; }
-.nc-settings-scroll { overflow-y: auto; padding: 0 16px 16px; }
+.nc-settings {
+  /* flex column so the heading stays pinned while only the body scrolls;
+     height bounded to the viewport so the last card can never slide under
+     the mobile tab bar */
+  max-height: min(86vh, calc(100vh - 24px));
+  display: flex;
+  flex-direction: column;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.nc-settings-scroll {
+  overflow-y: auto;
+  min-height: 0;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 16px 16px;
+}
 .nc-settings .settings-card { margin-top: 12px; }
 .nc-settings .settings-hint { margin: 7px 0 2px; display: flex; align-items: flex-start; gap: 6px; }
 .nc-cat-head {

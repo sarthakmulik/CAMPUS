@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   AlertCircle, Bell, BellOff, CheckCircle2, Clock, Loader2, Mail, MessageSquare,
   Settings2, Smartphone, Users, X,
@@ -166,8 +167,9 @@ export default function NotificationSettings({ open, onClose, notify, userId }: 
           : 'Off on this device'
 
   return (
-    <div className="overlay" onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}>
-      <section className="bottom-sheet nc-settings" role="dialog" aria-label="Notification settings">
+    createPortal(
+      <div className="overlay" onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}>
+        <section className="bottom-sheet nc-settings" role="dialog" aria-label="Notification settings">
         <div className="sheet-handle"/>
         <div className="sheet-heading">
           <div>
@@ -367,7 +369,9 @@ export default function NotificationSettings({ open, onClose, notify, userId }: 
             <p className="settings-hint nc-dead-zone"><Mail size={14}/> Muting someone (profile menu) silences their in-app activity immediately, and every conversation has its own mute switch in Chats.</p>
           </section>
         </div>
-      </section>
-    </div>
+        </section>
+      </div>,
+      document.body,
+    )
   )
 }
