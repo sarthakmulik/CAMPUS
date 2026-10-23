@@ -23,6 +23,21 @@ self.addEventListener('message', (event) => {
   if (event.data === 'CAMPUS_SKIP_WAITING') self.skipWaiting()
 })
 
+/* The browser may rotate a push subscription while no CAMPUS tab is open
+ * (endpoint/key regeneration). The old registration then goes dead
+ * server-side. Ask any open CAMPUS tab to re-sync; if none is open the
+ * app reconciles itself the next time it starts (webPush.reconcilePush).
+ */
+self.addEventListener('pushsubscriptionchange', () => {
+  self.clients
+    .matchAll({ type: 'window', includeUncontrolled: true })
+    .then((clientList) => {
+      for (const client of clientList) {
+        client.postMessage({ type: 'CAMPUS_RESUBSCRIBE' })
+      }
+    })
+})
+
 /**
  * Push payloads come from the push-deliver edge function:
  * { title, body, url, tag }

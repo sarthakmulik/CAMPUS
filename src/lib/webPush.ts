@@ -92,6 +92,7 @@ export async function enablePush(userId: string): Promise<
       auth,
       userAgent: window.navigator.userAgent.slice(0, 180),
     })
+    setPushActiveFlag()
     void userId
     return 'granted'
   } catch {
@@ -110,11 +111,78 @@ export async function disablePush(): Promise<void> {
     }
   } catch {
     // best-effort: the server row is cleaned up when it next fails
+  } finally {
+    try {
+      window.localStorage.removeItem(ACTIVE_FLAG)
+    } catch { /* private mode */ }
   }
 }
 
 /** One-time nudge flag: never nag a user who dismissed the offer. */
 const PROMPT_FLAG = 'campus-push-prompt-dismissed'
+
+/** Marks that THIS user turned browser push on in THIS browser. The
+ * startup reconcile only acts for devices that opted in — turning the
+ * preference off must not resurrect itself. */
+const ACTIVE_FLAG = 'campus-push-active'
+
+function setPushActiveFlag(): void {
+  try {
+    window.localStorage.setItem(ACTIVE_FLAG, '1')
+  } catch { /* private mode: reconcile simply won't run */ }
+}
+
+/**
+ * Self-healing subscription sync — call on every app start for a
+ * signed-in user. Web-push subscriptions are perishable: browsers rotate
+ * endpoints, FCM retires stale registrations, and a pushed push can end
+ * up addressing a dead endpoint while the app still believes it is
+ * enrolled. This repairs that silently, but only for devices that have
+ * opted in (permission granted + the active flag set):
+ *   - live subscription    → re-save it (server row again up to date)
+ *   - missing subscription → re-subscribe once and save
+ * Never prompts: if permission was revoked it does nothing.
+ */
+export async function reconcilePush(): Promise<
+  'repaired' | 'restored' | 'unchanged' | 'inactive' | 'error'
+> {
+  if (!pushConfigured() || !pushSupported()) return 'inactive'
+  if (currentPermission() !== 'granted') return 'inactive'
+  try {
+    if (window.localStorage.getItem(ACTIVE_FLAG) !== '1') return 'inactive'
+  } catch {
+    return 'inactive'
+  }
+  const registration = await getRegistration()
+  if (!registration) return 'error'
+  const key = urlBase64ToUint8Array(vapidPublicKey)
+  try {
+    let sub = await registration.pushManager.getSubscription()
+    if (!sub) {
+      sub = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: key as unknown as BufferSource,
+      })
+    }
+    const json = sub.toJSON()
+    const keys = json.keys as Record<string, string> | undefined
+    const p256dh = keys?.p256dh
+    const auth = keys?.auth
+    if (!p256dh || !auth) return 'error'
+    await savePushSubscription({
+      endpoint: sub.endpoint,
+      p256dh,
+      auth,
+      userAgent: window.navigator.userAgent.slice(0, 180),
+    })
+    setPushActiveFlag()
+    return 'repaired'
+  } catch {
+    // A dead registration that cannot re-subscribe (e.g. new permission
+    // rules): leave it — the user can always re-enable from the sheet.
+    return 'error'
+  }
+}
 
 export function pushPromptDismissed(): boolean {
   try {

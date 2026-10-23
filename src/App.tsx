@@ -10,6 +10,7 @@ import {
   Pencil, Trash2, BadgeCheck
 } from 'lucide-react'
 import { AuthProvider, hasSeenWelcome, markWelcomeSeen, useAuth } from './lib/auth'
+import { reconcilePush } from './lib/webPush'
 import * as navHistory from './lib/navHistory'
 import * as db from './lib/db'
 import WelcomeScreen from './components/WelcomeScreen'
@@ -513,12 +514,26 @@ function CAMPUSApp() {
     void window.navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {})
   }, [])
 
+  /* self-healing push: browsers rotate/drop web-push subscriptions while
+     the app is closed, which silently orphans the server-side device row.
+     Repair it on every signed-in start (no prompt, idempotent, and only
+     for devices the user explicitly enabled). */
+  useEffect(() => {
+    if (status !== 'member' || !user?.id) return
+    void reconcilePush().catch(() => { /* best-effort only */ })
+  }, [status, user?.id])
+
   /* push clicks navigate the app: the SW posts the deep link, we route it
      through the same hash handler every other entry point uses */
   useEffect(() => {
     if (typeof window === 'undefined' || !('serviceWorker' in window.navigator)) return
     const handler = (event: MessageEvent) => {
       const data = event.data as { type?: string; url?: string } | null
+      // SW noticed a subscription rotation — re-sync the server side
+      if (data?.type === 'CAMPUS_RESUBSCRIBE') {
+        void reconcilePush().catch(() => {})
+        return
+      }
       if (data?.type !== 'CAMPUS_NAVIGATE' || typeof data.url !== 'string') return
       const hashIndex = data.url.indexOf('#')
       if (hashIndex < 0) return
@@ -527,6 +542,7 @@ function CAMPUSApp() {
     window.navigator.serviceWorker.addEventListener('message', handler)
     return () => window.navigator.serviceWorker.removeEventListener('message', handler)
   }, [])
+
 
   /* ---- real right-panel data -------------------------------------------- */
 
