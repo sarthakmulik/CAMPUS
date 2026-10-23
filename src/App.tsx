@@ -21,6 +21,10 @@ import SafetyCentre from './components/SafetyCentre'
 import ReelTrim from './components/ReelTrim'
 import RichText from './components/RichText'
 import PostCard from './components/PostCard'
+import AdsAdmin from './components/AdsAdmin'
+import SponsoredCard from './components/SponsoredCard'
+import * as ads from './lib/ads'
+import type { SponsoredAd } from './lib/ads'
 import Communities from './components/Communities'
 import Events from './components/Events'
 import Marketplace from './components/Marketplace'
@@ -605,6 +609,42 @@ function CAMPUSApp() {
     }
     return result
   }, [posts, feedTab, following, blockedHandles, mutedHandles, identity.college])
+
+  /* ---- first-party sponsored placements ---------------------------------- */
+  /* Admin-managed ads. The SERVER decides who sees an ad (college targeting,
+   * schedule, creative, frequency) — the client just renders what it gets,
+   * once per session. A student of a non-targeted college gets an empty
+   * payload and sees no card at all; nothing presumes global reach. */
+  const [sponsoredAds, setSponsoredAds] = useState<SponsoredAd[]>([])
+  const [hiddenAdIds, setHiddenAdIds] = useState<string[]>([])
+  const hiddenAdRef = useRef<string[]>([])
+  useEffect(() => { hiddenAdRef.current = hiddenAdIds }, [hiddenAdIds])
+  const sponsoredLoadedRef = useRef(false)
+  useEffect(() => {
+    if (!configured || status !== 'member' || sponsoredLoadedRef.current) return
+    sponsoredLoadedRef.current = true
+    ads.fetchSponsoredAds(2)
+      .then(loaded => setSponsoredAds(loaded.filter(ad => !hiddenAdRef.current.includes(ad.id))))
+      .catch(() => { /* no ads is a fine feed — never disturb it */ })
+  }, [configured, status])
+
+  /** Hidden ads stay hidden for this session (the server keeps frequency caps). */
+  const hideAd = (id: string) => setHiddenAdIds(prev => prev.includes(id) ? prev : [...prev, id])
+
+  /** Feed list with sponsored cards interleaved: first slot after post 2,
+   *  then every 8th post, capped by the (already server-capped) payload. */
+  const feedItems = useMemo(() => {
+    const items: Array<{ kind: 'post'; post: CampusPost } | { kind: 'sponsored'; ad: SponsoredAd }> =
+      visiblePosts.map(post => ({ kind: 'post' as const, post }))
+    const eligibleAds = sponsoredAds.filter(ad => !hiddenAdIds.includes(ad.id))
+    if (!eligibleAds.length) return items
+    const out: typeof items = [...items]
+    let adIdx = 0
+    for (let i = 1; i < out.length && adIdx < eligibleAds.length; i += 8) {
+      out.splice(i === 1 ? 2 : i, 0, { kind: 'sponsored' as const, ad: eligibleAds[adIdx++] })
+    }
+    return out
+  }, [visiblePosts, sponsoredAds, hiddenAdIds])
 
   /* ---- gated actions (visitors get the sign-up prompt) ----------------- */
 
@@ -1707,6 +1747,11 @@ function CAMPUSApp() {
               <Icon size={21} strokeWidth={activeNav === label ? 2.4 : 2}/><span>{label}</span>
             </button>
           ))}
+          {profile?.role === 'admin' && (
+            <button className={`nav-item ${activeNav === 'Advertising' ? 'active' : ''}`} onClick={() => navigate('Advertising')} title="Advertising">
+              <Megaphone size={21} strokeWidth={activeNav === 'Advertising' ? 2.4 : 2}/><span>Advertising</span>
+            </button>
+          )}
         </nav>
         <div className="drawer-footer">
           {infoNav.map(label => (
@@ -1826,23 +1871,30 @@ function CAMPUSApp() {
               </div>
             )}
             {feedLoading && <p className="feed-status" role="status">Loading the campus feed…</p>}
-            {visiblePosts.length ? visiblePosts.map(post => <PostCard
-              key={post.id}
-              post={post}
-              isOwn={Boolean(user && post.authorId && post.authorId === user.id && !post.anonymous)}
-              poll={pollStateMap[post.id]}
-              onVote={optionIds => votePoll(post, optionIds)}
-              onLike={() => void toggleLike(post.id)}
-              onSave={() => toggleSave(post.id)}
-              onComment={() => openComments(post)}
-              onShare={() => void sharePost(post)}
-              onReport={() => openReport(post)}
-              onRepost={() => toggleRepost(post.id)}
-              onBlock={() => void setRelation('user_blocks', post)}
-              onMute={() => void setRelation('user_mutes', post)}
-              onEdit={() => startEditPost(post)}
-              onDelete={() => setDeleteTarget(post)}
-              onMessage={() => void messageAuthor(post)}
+            {feedItems.length ? feedItems.map(item => item.kind === 'sponsored'
+              ? <SponsoredCard
+                  key={`ad-${item.ad.id}`}
+                  ad={item.ad}
+                  flash={flash}
+                  onHide={() => hideAd(item.ad.id)}
+                />
+              : <PostCard
+              key={item.post.id}
+              post={item.post}
+              isOwn={Boolean(user && item.post.authorId && item.post.authorId === user.id && !item.post.anonymous)}
+              poll={pollStateMap[item.post.id]}
+              onVote={optionIds => votePoll(item.post, optionIds)}
+              onLike={() => void toggleLike(item.post.id)}
+              onSave={() => toggleSave(item.post.id)}
+              onComment={() => openComments(item.post)}
+              onShare={() => void sharePost(item.post)}
+              onReport={() => openReport(item.post)}
+              onRepost={() => toggleRepost(item.post.id)}
+              onBlock={() => void setRelation('user_blocks', item.post)}
+              onMute={() => void setRelation('user_mutes', item.post)}
+              onEdit={() => startEditPost(item.post)}
+              onDelete={() => setDeleteTarget(item.post)}
+              onMessage={() => void messageAuthor(item.post)}
               onOpenMention={openMentionProfile}
               onOpenTag={openHashtagSearch}
             />) :
@@ -1975,7 +2027,11 @@ function CAMPUSApp() {
                     />
                 : infoNav.includes(activeNav)
               ? <InfoPage name={activeNav}/>
-              : <SectionPage name={activeNav} onCreate={openComposer} onSignIn={() => setAuthMode('signup')} isMember={status === 'member'} displayName={identity.name} />}
+              : activeNav === 'Advertising'
+                ? profile?.role === 'admin'
+                  ? <AdsAdmin flash={flash}/>
+                  : <SectionPage name="Advertising" onCreate={openComposer} onSignIn={() => setAuthMode('signup')} isMember={status === 'member'} displayName={identity.name}/>
+                : <SectionPage name={activeNav} onCreate={openComposer} onSignIn={() => setAuthMode('signup')} isMember={status === 'member'} displayName={identity.name} />}
       </main>
 
       <aside className="right-sidebar">
@@ -2038,7 +2094,7 @@ function CAMPUSApp() {
           )}
         </section>
 
-        <button className="advertise-panel" onClick={() => flash('Campus advertising tools can be added as an admin feature.')}><span><Megaphone size={17}/> Advertise on CAMPUS</span><small>Reach students at one college. Flat monthly pricing.</small></button>
+        <button className="advertise-panel" onClick={() => { if (profile?.role === 'admin') navigate('Advertising'); else flash('Advertising on CAMPUS is managed by the campus admin team.') }}><span><Megaphone size={17}/> Advertise on CAMPUS</span><small>{profile?.role === 'admin' ? 'Manage sponsored campaigns, college targeting and analytics.' : 'First-party sponsored posts, delivered by college targeting.'}</small></button>
 
         <footer className="right-footer">
           <div className="footer-links">
@@ -2307,6 +2363,7 @@ const INFO_PAGES: Record<string, {
       ]},
       { heading: 'What we do not do', bullets: [
         'We do not sell your data, run third-party ad trackers or build advertising profiles from your activity.',
+        'The only advertising on CAMPUS is first-party sponsored posts chosen by your college targeting — no outsiders buy access to your data, and a sponsorship is always labelled as one.',
         'We do not expose your email to other users — profiles show your chosen name and username only.',
         'We do not publish your likes or private lists; they are yours.',
       ]},
