@@ -150,9 +150,10 @@ export default function OnboardingWizard() {
       if (usernameState === 'idle') return 'Check that this username is available.'
       return null
     }
-    // Admins are platform-level and are never assigned a college (0042) —
-    // let them continue past the college step without choosing one.
-    if (step === 2 && !collegeId && !suggested && profile?.role !== 'admin') {
+    // Staff (admin / super_admin) are platform-level and are never assigned a
+    // college (0042) — let them continue past the college step without
+    // choosing one.
+    if (step === 2 && !collegeId && !suggested && profile?.role !== 'member') {
       return 'Choose your college, or request that we add it.'
     }
     if (step === 3) {

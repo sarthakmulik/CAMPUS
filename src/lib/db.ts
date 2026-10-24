@@ -1829,6 +1829,7 @@ export async function fetchFollowSuggestions(
       .from('profiles')
       .select('id, username, display_name')
       .eq('is_private', false)
+      .eq('role', 'member') // 0043: staff never appear as follow suggestions
       .not('username', 'is', null)
       .neq('id', excludeUserId)
       .limit(24)

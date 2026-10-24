@@ -379,16 +379,25 @@ function CAMPUSApp() {
     const name = profile?.display_name?.trim() || user?.email?.split('@')[0] || 'CAMPUS member'
     const username = profile?.username || (user?.email ? user.email.split('@')[0] : '')
     const initials = name.split(/\s+/).filter(Boolean).map(part => part[0]).slice(0, 2).join('').toUpperCase() || 'CM'
-    // Admins are platform-level: no college fallback, no fake affiliation chip.
+    // Staff (admin / super_admin) are platform-level: no college fallback,
+    // no fake affiliation chip anywhere they appear.
+    const staff = profile?.role === 'admin' || profile?.role === 'super_admin'
     const college = colleges.find(item => item.id === profile?.college_id)?.short_name
-      ?? (profile?.role === 'admin' ? '' : (colleges[0]?.short_name ?? 'SPPU'))
+      ?? (staff ? '' : (colleges[0]?.short_name ?? 'SPPU'))
     return { name, username, initials, college, handle: username ? `@${username}` : '@campus' }
   }, [profile, user, colleges])
 
   const activeCollege = useMemo(
-    () => colleges.find(item => item.id === profile?.college_id) ?? colleges[0] ?? null,
-    [colleges, profile?.college_id],
+    () => {
+      const staff = profile?.role === 'admin' || profile?.role === 'super_admin'
+      return colleges.find(item => item.id === profile?.college_id)
+        ?? (staff ? null : (colleges[0] ?? null))
+    },
+    [colleges, profile?.college_id, profile?.role],
   )
+
+  /** 0043: staff = admin or super_admin — the platform identity tiers. */
+  const isStaff = profile?.role === 'admin' || profile?.role === 'super_admin'
 
   /* Apply saved blocks/mutes to the local feed for a signed-in member. */
   useEffect(() => {
@@ -1008,7 +1017,7 @@ function CAMPUSApp() {
     setPublishing(true)
     try {
       // Admins post platform-wide (no college scope) — see publishPostCore.
-      const collegeRow = profile?.role === 'admin'
+      const collegeRow = isStaff
         ? null
         : (colleges.find(c => c.id === profile?.college_id) ?? colleges[0])
       const options = pollOptions.map(value => value.trim()).filter(Boolean)
@@ -1454,9 +1463,9 @@ function CAMPUSApp() {
     onProgress?: (message: string) => void,
   ): Promise<'posted' | 'error'> => {
     const anonymous = kind === 'confession'
-    // College scope = the author's own college. Admins (platform-level, no
+    // College scope = the author's own college. Staff (platform-level, no
     // college per 0042) post platform-wide with no affiliation chip.
-    const collegeRow = profile?.role === 'admin'
+    const collegeRow = isStaff
       ? null
       : (colleges.find(c => c.id === profile?.college_id) ?? colleges[0])
     if (user && configured) {
@@ -1472,7 +1481,7 @@ function CAMPUSApp() {
           authorUsername: identity.username,
           mediaUrls,
         })
-        if (profile?.college_id == null && profile?.role !== 'admin') {
+        if (profile?.college_id == null && !isStaff) {
           flash('Posted — but pick your college in the onboarding step so your campus can find it.')
         }
         setPosts(current => [post, ...current])
@@ -1744,7 +1753,7 @@ function CAMPUSApp() {
         <button className="icon-button sidebar-close" aria-label="Close menu" onClick={() => setMobileMenu(false)}><X size={20}/></button>
         <button className="brand" onClick={() => navigate('Home')}><span className="brand-mark">C</span><span>CAMPUS</span></button>
         <div className="sidebar-campus-card">
-          <div className="sidebar-campus-art"><Building2 size={28}/><span>{activeCollege?.short_name ?? (profile?.role === 'admin' ? 'HQ' : 'SPPU')}</span></div>
+          <div className="sidebar-campus-art"><Building2 size={28}/><span>{activeCollege?.short_name ?? (isStaff ? 'HQ' : 'SPPU')}</span></div>
           <div className="sidebar-campus-info"><b>{activeCollege?.short_name ?? 'SPPU'}</b><small>{activeCollege?.name ?? 'Savitribai Phule Pune University'}</small></div>
           <button onClick={() => navigate('My College')}>Change college <ArrowLeft size={13}/></button>
         </div>
@@ -1754,7 +1763,7 @@ function CAMPUSApp() {
               <Icon size={21} strokeWidth={activeNav === label ? 2.4 : 2}/><span>{label}</span>
             </button>
           ))}
-          {profile?.role === 'admin' && (
+          {isStaff && (
             <button className={`nav-item ${activeNav === 'Advertising' ? 'active' : ''}`} onClick={() => navigate('Advertising')} title="Advertising">
               <Megaphone size={21} strokeWidth={activeNav === 'Advertising' ? 2.4 : 2}/><span>Advertising</span>
             </button>
@@ -1822,7 +1831,7 @@ function CAMPUSApp() {
           />
         ) : activeNav === 'Home' ? <>
           <div className="desktop-topbar"><div className="desktop-search-trigger" onClick={() => setSearchOpen(true)} role="button" tabIndex={0}><Search size={18}/><span>Search for people, posts, colleges, clubs...</span></div><div className="topbar-actions"><button className="icon-button" aria-label="Notifications" onClick={() => navigate('Notifications')}><Bell size={20}/>{unreadNotifs > 0 && <i className="notification-dot"/>}</button><button className="icon-button" aria-label="My profile" onClick={() => navigate('Profile')}><UserRound size={20}/></button></div></div>
-          <section className="campus-hero-banner"><div className="hero-copy"><span className="hero-eyebrow">YOUR PEOPLE. YOUR PLACE.</span><h2>Same Campus,<br/><em>Bigger Dreams.</em></h2><span className="hero-swish"/><p>Connect · Share · Grow</p></div><div className="hero-campus-art" aria-hidden="true"><div className="art-sun"/><div className="art-building"><span/><span/><span/><span/><b/></div><div className="art-hill"/></div><button className="college-pill" onClick={() => navigate('My College')}><span className="college-seal"><Building2 size={22}/></span><span><b>{activeCollege?.short_name ?? (profile?.role === 'admin' ? 'CAMPUS HQ' : 'SPPU')}</b><small>{activeCollege?.name ?? (profile?.role === 'admin' ? 'Platform team — all colleges' : 'Savitribai Phule Pune University')}</small></span><ChevronDown size={16}/></button></section>
+          <section className="campus-hero-banner"><div className="hero-copy"><span className="hero-eyebrow">YOUR PEOPLE. YOUR PLACE.</span><h2>Same Campus,<br/><em>Bigger Dreams.</em></h2><span className="hero-swish"/><p>Connect · Share · Grow</p></div><div className="hero-campus-art" aria-hidden="true"><div className="art-sun"/><div className="art-building"><span/><span/><span/><span/><b/></div><div className="art-hill"/></div><button className="college-pill" onClick={() => navigate('My College')}><span className="college-seal"><Building2 size={22}/></span><span><b>{activeCollege?.short_name ?? (isStaff ? 'CAMPUS HQ' : 'SPPU')}</b><small>{activeCollege?.name ?? (isStaff ? 'Platform team — all colleges' : 'Savitribai Phule Pune University')}</small></span><ChevronDown size={16}/></button></section>
           <div className="feed-tabs" role="tablist">
             {['For You','Following','My College','Trending','Latest'].map(tab => <button key={tab} role="tab" aria-selected={feedTab===tab} className={feedTab===tab?'selected':''} onClick={() => setFeedTab(tab)}>{tab}</button>)}
           </div>
@@ -2035,7 +2044,7 @@ function CAMPUSApp() {
                 : infoNav.includes(activeNav)
               ? <InfoPage name={activeNav}/>
               : activeNav === 'Advertising'
-                ? profile?.role === 'admin'
+                ? isStaff
                   ? <AdsAdmin flash={flash}/>
                   : <SectionPage name="Advertising" onCreate={openComposer} onSignIn={() => setAuthMode('signup')} isMember={status === 'member'} displayName={identity.name}/>
                 : <SectionPage name={activeNav} onCreate={openComposer} onSignIn={() => setAuthMode('signup')} isMember={status === 'member'} displayName={identity.name} />}
@@ -2101,7 +2110,7 @@ function CAMPUSApp() {
           )}
         </section>
 
-        <button className="advertise-panel" onClick={() => { if (profile?.role === 'admin') navigate('Advertising'); else flash('Advertising on CAMPUS is managed by the campus admin team.') }}><span><Megaphone size={17}/> Advertise on CAMPUS</span><small>{profile?.role === 'admin' ? 'Manage sponsored campaigns, college targeting and analytics.' : 'First-party sponsored posts, delivered by college targeting.'}</small></button>
+        <button className="advertise-panel" onClick={() => { if (isStaff) navigate('Advertising'); else flash('Advertising on CAMPUS is managed by the campus admin team.') }}><span><Megaphone size={17}/> Advertise on CAMPUS</span><small>{isStaff ? 'Manage sponsored campaigns, college targeting and analytics.' : 'First-party sponsored posts, delivered by college targeting.'}</small></button>
 
         <footer className="right-footer">
           <div className="footer-links">
