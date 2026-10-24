@@ -102,52 +102,11 @@ create trigger tr_profiles_admin_no_college
   for each row execute function public.admin_profile_guard();
 
 -- ---------------------------------------------------------------------------
--- 2. staff_accounts — the platform identity of staff
--- ---------------------------------------------------------------------------
-create table if not exists public.staff_accounts (
-  user_id        uuid primary key references public.profiles(id) on delete cascade,
-  tier           text not null default 'admin' check (tier in ('super_admin', 'admin')),
-  scopes         text[] not null default '{}',
-  title          text,
-  is_active      boolean not null default true,
-  provisioned_by uuid references public.profiles(id),
-  provisioned_at timestamptz not null default now(),
-  revoked_at     timestamptz,
-  note           text
-);
-
-alter table public.staff_accounts enable row level security;
-
-drop policy if exists staff_accounts_read on public.staff_accounts;
-create policy staff_accounts_read on public.staff_accounts
-  for select using (public.is_staff());
--- no insert/update/delete policies: staff rows are managed exclusively by
--- trusted security-definer RPCs (which run as the table owner and bypass RLS).
-
--- ---------------------------------------------------------------------------
--- 3. staff_audit_log — every staff mutation, one row, trusted-writes only
--- ---------------------------------------------------------------------------
-create table if not exists public.staff_audit_log (
-  id          uuid primary key default gen_random_uuid(),
-  actor_id    uuid references public.profiles(id),
-  action      text not null,
-  target_type text,
-  target_id   uuid,
-  metadata    jsonb,
-  created_at  timestamptz not null default now()
-);
-
-alter table public.staff_audit_log enable row level security;
-
-drop policy if exists staff_audit_read on public.staff_audit_log;
-create policy staff_audit_read on public.staff_audit_log
-  for select using (public.is_staff());
--- no insert/update/delete policies — audit rows go in via log_staff_action()
--- inside trusted definer RPCs only. Nothing can forge or edit history.
-
--- ---------------------------------------------------------------------------
--- 4. helper functions (all SECURITY DEFINER so RLS on profiles can never
---    recurse; the ads round proved this pattern is required — 42P17)
+-- 2. helper functions (defined BEFORE the tables whose RLS uses them —
+--    Postgres validates function references at policy-creation time)
+--
+--    All SECURITY DEFINER so RLS on profiles can never recurse; the ads
+--    round proved this pattern is required — 42P17.
 -- ---------------------------------------------------------------------------
 
 -- is_staff(): admins AND the owner tier, by role. References profiles only —
@@ -289,6 +248,50 @@ begin
 end $$;
 
 revoke all on function public.log_staff_action(text, text, uuid, jsonb) from public;
+
+-- ---------------------------------------------------------------------------
+-- 3. staff_accounts — the platform identity of staff
+-- ---------------------------------------------------------------------------
+create table if not exists public.staff_accounts (
+  user_id        uuid primary key references public.profiles(id) on delete cascade,
+  tier           text not null default 'admin' check (tier in ('super_admin', 'admin')),
+  scopes         text[] not null default '{}',
+  title          text,
+  is_active      boolean not null default true,
+  provisioned_by uuid references public.profiles(id),
+  provisioned_at timestamptz not null default now(),
+  revoked_at     timestamptz,
+  note           text
+);
+
+alter table public.staff_accounts enable row level security;
+
+drop policy if exists staff_accounts_read on public.staff_accounts;
+create policy staff_accounts_read on public.staff_accounts
+  for select using (public.is_staff());
+-- no insert/update/delete policies: staff rows are managed exclusively by
+-- trusted security-definer RPCs (which run as the table owner and bypass RLS).
+
+-- ---------------------------------------------------------------------------
+-- 4. staff_audit_log — every staff mutation, one row, trusted-writes only
+-- ---------------------------------------------------------------------------
+create table if not exists public.staff_audit_log (
+  id          uuid primary key default gen_random_uuid(),
+  actor_id    uuid references public.profiles(id),
+  action      text not null,
+  target_type text,
+  target_id   uuid,
+  metadata    jsonb,
+  created_at  timestamptz not null default now()
+);
+
+alter table public.staff_audit_log enable row level security;
+
+drop policy if exists staff_audit_read on public.staff_audit_log;
+create policy staff_audit_read on public.staff_audit_log
+  for select using (public.is_staff());
+-- no insert/update/delete policies — audit rows go in via log_staff_action()
+-- inside trusted definer RPCs only. Nothing can forge or edit history.
 
 -- ---------------------------------------------------------------------------
 -- 5. trusted role-change token
