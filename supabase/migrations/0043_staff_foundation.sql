@@ -504,7 +504,7 @@ begin
   return 'revoked';
 end $$;
 
--- roster read
+-- roster read — gated: members get zero rows, staff see the roster
 create or replace function public.staff_list()
 returns table (
   user_id        uuid,
@@ -530,6 +530,7 @@ as $$
     s.provisioned_at, s.revoked_at
   from public.staff_accounts s
   join public.profiles p on p.id = s.user_id
+  where public.is_staff()
   order by s.is_active desc, s.tier, p.username nulls last
 $$;
 
@@ -900,16 +901,26 @@ update public.profiles
  where role = 'member'
    and id in (select id from auth.users where email = 'sarthakmulik16@gmail.com');
 
+-- register additional admin-tier accounts. NOTE: the @campus owner account may
+-- be addressed by the same email in some setups — the guard below makes this
+-- upsert NEVER demote an existing super_admin staff row.
 insert into public.staff_accounts
   (user_id, tier, scopes, title, is_active, provisioned_at, revoked_at)
 select u.id, 'admin', public.staff_default_scopes('admin'), 'Campus Admin', true, now(), null
   from auth.users u
  where u.email = 'sarthakmulik16@gmail.com'
+   and not exists (
+     select 1 from public.profiles p
+      where p.id = u.id
+        and p.role = 'super_admin'
+   )
 on conflict (user_id) do update
-  set tier = 'admin',
-      scopes = public.staff_default_scopes('admin'),
-      is_active = true,
-      revoked_at = null;
+  set is_active = true,
+      revoked_at = null,
+      tier   = case when staff_accounts.tier = 'super_admin'
+                    then 'super_admin' else excluded.tier end,
+      scopes = case when staff_accounts.tier = 'super_admin'
+                    then staff_accounts.scopes else excluded.scopes end;
 
 insert into public.staff_audit_log (actor_id, action, target_type, target_id, metadata)
 select p.id, 'staff.bootstrap', 'profile', p.id, jsonb_build_object('tier', p.role)
