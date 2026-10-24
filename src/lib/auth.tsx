@@ -135,7 +135,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Without the migration columns the completion flag only lives on this
     // device, so a cleared/new device would replay the wizard. Fall back to
     // "this profile already declared its identity" (username + college).
-    const identityReady = Boolean(row?.username && row?.college_id)
+    // Admins are platform-level and carry no college (0042), so for them a
+    // username alone is a complete identity.
+    const identityReady = row?.role === 'admin'
+      ? Boolean(row?.username)
+      : Boolean(row?.username && row?.college_id)
     const done = row?.onboarding_completed_at != null
       || (!currentCaps.profileExtras && (local.done || identityReady))
     const nextStep = currentCaps.profileExtras ? Number(row?.onboarding_step ?? 0) : local.step
