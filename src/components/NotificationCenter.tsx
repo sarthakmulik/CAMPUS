@@ -144,6 +144,11 @@ function rowText(
       return { title: 'Your listing was removed', detail: entityTitle ?? null }
     case 'listing_restored':
       return { title: 'Your listing is live again', detail: entityTitle ?? null }
+    case 'staff_warning':
+      return {
+        title: 'A warning from CAMPUS staff',
+        detail: (item.metadata.note as string) ?? null,
+      }
     default:
       return { title: 'Important update about your account', detail: entityTitle ?? null }
   }

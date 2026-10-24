@@ -4,11 +4,13 @@ import { supabase } from '../lib/supabase'
 import {
   ShieldCheck, LayoutDashboard, Users, Building2, Megaphone, ScrollText,
   Ban, RotateCcw, Crown, Search, UserCog, AlertCircle, Clock,
+  Flag, AlertTriangle, EyeOff, Eye, Check, X,
 } from 'lucide-react'
 import { AdsAdmin } from './AdsAdmin'
 import {
-  StaffAccountRow, StaffAuditRow, Profile,
+  StaffAccountRow, StaffAuditRow, Profile, ModerationReportRow,
   loadStaffRoster, loadStaffAudit, loadColleges, findStaffTargets, staffRpc,
+  loadStaffReports, loadStaffReportCounts,
 } from '../lib/db'
 
 /**
@@ -23,6 +25,7 @@ import {
 const TABS = [
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { key: 'people', label: 'People', icon: Users },
+  { key: 'moderation', label: 'Moderation', icon: Flag },
   { key: 'advertising', label: 'Advertising', icon: Megaphone },
   { key: 'colleges', label: 'Colleges', icon: Building2 },
   { key: 'staff', label: 'Staff & Audit', icon: ScrollText },
@@ -48,11 +51,13 @@ function initialsFor(name: string | null, fallback: string): string {
   return fallback.slice(0, 2).toUpperCase() || 'CM'
 }
 
+type StaffOps = { ads: boolean; suspend: boolean; provision: boolean; warn: boolean; act: boolean }
+
 export function StaffConsole({ flash }: { flash: (message: string) => void }) {
   const [tab, setTab] = useState<TabKey>('dashboard')
   const [roster, setRoster] = useState<StaffAccountRow[] | null>(null)
   const [audit, setAudit] = useState<StaffAuditRow[] | null>(null)
-  const [ops, setOps] = useState<{ ads: boolean; suspend: boolean; provision: boolean } | null>(null)
+  const [ops, setOps] = useState<StaffOps | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [refreshTick, setRefreshTick] = useState(0)
@@ -65,17 +70,19 @@ export function StaffConsole({ flash }: { flash: (message: string) => void }) {
     const run = async () => {
       setError(null)
       try {
-        const [rosterRows, auditRows, adsOp, suspendOp, provisionOp] = await Promise.all([
+        const [rosterRows, auditRows, adsOp, suspendOp, provisionOp, warnOp, actOp] = await Promise.all([
           loadStaffRoster(),
           loadStaffAudit(80),
           staffRpc('has_op', { p_op: 'ads.view' }),
           staffRpc('has_op', { p_op: 'moderation.suspend' }),
           staffRpc('has_op', { p_op: 'staff.provision' }),
+          staffRpc('has_op', { p_op: 'moderation.warn' }),
+          staffRpc('has_op', { p_op: 'moderation.act' }),
         ])
         if (cancelled) return
         setRoster(rosterRows)
         setAudit(auditRows)
-        setOps({ ads: adsOp === true, suspend: suspendOp === true, provision: provisionOp === true })
+        setOps({ ads: adsOp === true, suspend: suspendOp === true, provision: provisionOp === true, warn: warnOp === true, act: actOp === true })
       } catch (err) {
         if (cancelled) return
         setError(err instanceof Error ? err.message : 'Staff console data failed to load.')
@@ -117,6 +124,9 @@ export function StaffConsole({ flash }: { flash: (message: string) => void }) {
       )}
       {tab === 'people' && (
         <PeopleTab ops={ops} busy={busy} setBusy={setBusy} flash={flash} bump={() => setRefreshTick(t => t + 1)}/>
+      )}
+      {tab === 'moderation' && (
+        <ModerationTab ops={ops} busy={busy} setBusy={setBusy} flash={flash} bump={() => setRefreshTick(t => t + 1)}/>
       )}
       {tab === 'advertising' && (ops?.ads
         ? <div className="staff-embed"><AdsAdmin flash={flash}/></div>
@@ -183,7 +193,7 @@ function DashboardTab({ roster, audit }: { roster: StaffAccountRow[] | null; aud
       <div className="staff-card">
         <small>REPORTS ON FILE</small>
         <b>{opens === null ? '…' : opens < 0 ? 'n/a' : opens}</b>
-        <p>The Moderation Center queue works these in 0044.</p>
+        <p>Work the queue in the Moderation tab.</p>
       </div>
       <div className="staff-card wide">
         <small>LATEST STAFF ACTIONS</small>
@@ -201,7 +211,7 @@ function DashboardTab({ roster, audit }: { roster: StaffAccountRow[] | null; aud
       <div className="staff-card wide">
         <small>SHIPPING NEXT</small>
         <p className="staff-muted">
-          Moderation Center queue UI (0044) · colleges manager + platform settings (0045).
+          Colleges manager + platform settings (0045) · ads gates migrate from is_admin() to ads.* ops.
         </p>
       </div>
     </div>
@@ -301,6 +311,272 @@ function PeopleTab({ ops, busy, setBusy, flash, bump }: {
       )}
     </div>
   )
+}
+
+/* ---- moderation (0044) ---------------------------------------------------- */
+
+const REPORT_FILTERS = [
+  { key: 'open', label: 'Open' },
+  { key: 'reviewing', label: 'Reviewing' },
+  { key: 'resolved', label: 'Resolved' },
+  { key: 'dismissed', label: 'Dismissed' },
+  { key: 'all', label: 'All' },
+] as const
+
+const SUBJECT_LABEL: Record<string, string> = {
+  'post': 'POST',
+  'person': 'PERSON',
+  'post+person': 'POST + PERSON',
+}
+
+function ModerationTab({ ops, busy, setBusy, flash, bump }: {
+  ops: StaffOps | null
+  busy: boolean
+  setBusy: (b: boolean) => void
+  flash: (message: string) => void
+  bump: () => void
+}) {
+  const [filter, setFilter] = useState<(typeof REPORT_FILTERS)[number]['key']>('open')
+  const [counts, setCounts] = useState<Record<string, number> | null>(null)
+  const [rows, setRows] = useState<ModerationReportRow[] | null>(null)
+  const [rowsError, setRowsError] = useState<string | null>(null)
+  const [note, setNote] = useState('')
+  const [tick, setTick] = useState(0)
+  const [target, setTarget] = useState<
+    { kind: 'warn' | 'suspend'; row: ModerationReportRow } | null
+  >(null)
+  const [warnNote, setWarnNote] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      setRows(null)
+      setRowsError(null)
+      try {
+        const result = await Promise.allSettled([
+          loadStaffReportCounts(),
+          loadStaffReports(filter),
+        ])
+        if (cancelled) return
+        const c = result[0].status === 'fulfilled' ? result[0].value : null
+        if (result[0].status === 'rejected') setRowsError(errText(result[0].reason))
+        else setCounts(c as Record<string, number>)
+        const r = result[1].status === 'fulfilled' ? result[1].value : null
+        if (result[1].status === 'rejected') setRowsError(errText(result[1].reason))
+        else setRows(r as ModerationReportRow[])
+      } catch {
+        if (!cancelled) { setRows([]); setCounts(null) }
+      }
+    })()
+    return () => { cancelled = true }
+  }, [filter, tick])
+
+  const personOf = (row: ModerationReportRow) => row.reported_user_id ?? row.post_author_id
+
+  const review = async (row: ModerationReportRow, status: string) => {
+    if (!ops?.act) { flash('Your scopes do not include moderation.act.'); return }
+    setBusy(true)
+    try {
+      await staffRpc('staff_report_review', {
+        p_report: row.report_id, p_status: status, p_note: note || null,
+      })
+      flash(`Report filed as ${status} — audited.`)
+      setNote('')
+      setTick(t => t + 1)
+      bump()
+    } catch (err) {
+      flash(errText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const moderatePost = async (row: ModerationReportRow, unpublish: boolean) => {
+    if (!ops?.act) { flash('Your scopes do not include moderation.act.'); return }
+    setBusy(true)
+    try {
+      const state = await staffRpc('staff_moderate_post', {
+        p_post: row.post_id, p_unpublish: unpublish, p_note: note || null,
+      })
+      flash(`Post is now ${String(state)} — audited.`)
+      setNote('')
+      setTick(t => t + 1)
+      bump()
+    } catch (err) {
+      flash(errText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const confirmWarn = async () => {
+    if (!target || target.kind !== 'warn') return
+    if (!warnNote.trim()) { flash('A warning needs a note — tell the member why.'); return }
+    setBusy(true)
+    try {
+      await staffRpc('staff_warn_user', { p_user: personOf(target.row), p_note: warnNote.trim() })
+      flash(`Warning delivered to @${target.row.reported_username ?? target.row.post_author_username ?? 'member'} — audited.`)
+      setWarnNote('')
+      setTarget(null)
+      setTick(t => t + 1)
+      bump()
+    } catch (err) {
+      flash(errText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const confirmSuspend = async () => {
+    if (!target || target.kind !== 'suspend') return
+    setBusy(true)
+    try {
+      await staffRpc('member_suspend', { p_user: personOf(target.row), p_reason: note || null })
+      flash('Member suspended — their writes are now database-blocked.')
+      setNote('')
+      setTarget(null)
+      setTick(t => t + 1)
+      bump()
+    } catch (err) {
+      flash(errText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const open = filter === 'open' || filter === 'reviewing'
+
+  return (
+    <div className="staff-mod">
+      <div className="staff-filterrow" role="tablist">
+        {REPORT_FILTERS.map(f => (
+          <button key={f.key} className={`staff-chip clickable ${filter === f.key ? 'selected' : ''}`}
+            onClick={() => setFilter(f.key)}>
+            {f.label}{counts?.[f.key] !== undefined ? ` · ${counts[f.key]}` : ''}
+          </button>
+        ))}
+      </div>
+      <label className="staff-reason">
+        <span>Reviewer note (optional, recorded in the audit log):</span>
+        <input value={note} onChange={e => setNote(e.target.value)} placeholder="context for the next reviewer…"/>
+      </label>
+
+      {rowsError && <div className="staff-error"><AlertCircle size={16}/><span>{rowsError}</span></div>}
+
+      {rows === null ? <p className="staff-muted">Loading queue…</p>
+        : rows.length === 0
+          ? <div className="staff-empty">Nothing in the {filter} bucket{filter !== 'all' && counts?.[filter] === 0 ? ' — quiet in here' : ''}.</div>
+          : <div className="staff-mod-list">
+              {rows.map(row => {
+                const personName = row.reported_username ?? row.post_author_username
+                const personId = personOf(row)
+                return (
+                  <div key={row.report_id} className="staff-mod-card">
+                    <div className="staff-mod-head">
+                      <span className={`staff-subject ${row.subject_kind === 'person' ? 'soft' : ''}`}>{SUBJECT_LABEL[row.subject_kind]}</span>
+                      <span className={`staff-status-pill s-${row.status}`}>{row.status}</span>
+                      <small>{row.reporter_username ? `@${row.reporter_username}` : 'reporter gone'} · {timeAgo(row.created_at)}</small>
+                    </div>
+                    <b className="staff-mod-reason">{row.reason}</b>
+                    {row.details ? <p className="staff-mod-details">“{row.details}”</p> : null}
+                    {row.post_id && (
+                      <div className="staff-mod-post">
+                        <code>{row.post_excerpt}</code>
+                        <small>
+                          by {row.post_author_username ? `@${row.post_author_username}` : 'unknown author'}
+                          {row.post_author_username ? ' · ' : ''}
+                          {row.post_is_published ? 'live' : 'hidden'} · {timeAgo(row.post_created_at ?? row.created_at)}
+                        </small>
+                      </div>
+                    )}
+                    {row.reported_user_id && (
+                      <small className="staff-mod-person">
+                        {row.reported_name?.trim() || '@' + row.reported_username}
+                        {row.reported_username ? ` (@${row.reported_username})` : ''}
+                        {' · '}{row.reported_role}
+                        {row.reported_account_status === 'suspended' ? ' · SUSPENDED' : ''}
+                      </small>
+                    )}
+                    {row.reviewed_at && (
+                      <small className="staff-mod-reviewed">
+                        reviewed {timeAgo(row.reviewed_at)}{row.reviewed_by_username ? ` by @${row.reviewed_by_username}` : ''}
+                      </small>
+                    )}
+                    <div className="staff-mod-actions">
+                      {open ? (
+                        <>
+                          {ops?.act && (
+                            <>
+                              <button className="staff-btn" disabled={busy} onClick={() => void review(row, 'dismissed')}>
+                                <X size={14}/> Dismiss
+                              </button>
+                              <button className="staff-btn" disabled={busy} onClick={() => void review(row, 'resolved')}>
+                                <Check size={14}/> Resolve
+                              </button>
+                              <button className="staff-btn warning" disabled={busy} onClick={() => { setTarget({ kind: 'warn', row }); setWarnNote(note) }}>
+                                <AlertTriangle size={14}/> Warn
+                              </button>
+                            </>
+                          )}
+                          {ops?.suspend && personId && (
+                            <button className="staff-btn danger" disabled={busy} onClick={() => setTarget({ kind: 'suspend', row })}>
+                              <Ban size={14}/> Suspend person
+                            </button>
+                          )}
+                          {ops?.act && row.post_id && (
+                            row.post_is_published
+                              ? <button className="staff-btn warning" disabled={busy} onClick={() => void moderatePost(row, true)}>
+                                  <EyeOff size={14}/> Hide post
+                                </button>
+                              : <button className="staff-btn" disabled={busy} onClick={() => void moderatePost(row, false)}>
+                                  <Eye size={14}/> Restore post
+                                </button>
+                          )}
+                        </>
+                      ) : (
+                        ops?.act && (
+                          <button className="staff-btn" disabled={busy} onClick={() => void review(row, 'open')}>
+                            <RotateCcw size={14}/> Re-open
+                          </button>
+                        )
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>}
+
+      {target?.kind === 'warn' && (
+        <div className="staff-confirm">
+          <b>Warn @{target.row.reported_username ?? target.row.post_author_username}?</b>
+          <p>A ‘staff_warning’ notification lands in their inbox with your note — nobody else sees the copy.</p>
+          <label className="staff-warn-note">
+            <span>Warning note (required):</span>
+            <input value={warnNote} onChange={e => setWarnNote(e.target.value)} placeholder="what the member must change…"/>
+          </label>
+          <div>
+            <button className="staff-btn warning" disabled={busy} onClick={() => void confirmWarn()}>Send warning</button>
+            <button className="staff-btn" onClick={() => setTarget(null)}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {target?.kind === 'suspend' && (
+        <div className="staff-confirm">
+          <b>Suspend @{target.row.reported_username ?? target.row.post_author_username}?</b>
+          <p>Writes (posts, comments, follows, chats, listings) become database-blocked. Reversible from the People tab.</p>
+          <div>
+            <button className="staff-btn danger" disabled={busy} onClick={() => void confirmSuspend()}>Confirm suspend</button>
+            <button className="staff-btn" onClick={() => setTarget(null)}>Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function errText(err: unknown): string {
+  return err instanceof Error ? err.message : 'The request failed.'
 }
 
 /* ---- colleges ------------------------------------------------------------ */

@@ -496,6 +496,43 @@ export async function findStaffTargets(query: string): Promise<Profile[]> {
   return (data ?? []) as Profile[]
 }
 
+/* Moderation Center (0044)                                                    */
+/* -------------------------------------------------------------------------- */
+/* The reports table is member-RLS'd (read own only), so the staff queue lives  */
+/* behind the 0044 security-definer RPCs — errors surface verbatim.             */
+
+export type ModerationReportRow = {
+  report_id: string
+  status: string
+  reason: string
+  details: string | null
+  created_at: string
+  subject_kind: 'post' | 'person' | 'post+person'
+  reporter_username: string | null
+  reporter_name: string | null
+  post_id: string | null
+  post_excerpt: string | null
+  post_author_id: string | null
+  post_author_username: string | null
+  post_is_published: boolean | null
+  post_created_at: string | null
+  reported_user_id: string | null
+  reported_username: string | null
+  reported_name: string | null
+  reported_role: string | null
+  reported_account_status: string | null
+  reviewed_by_username: string | null
+  reviewed_at: string | null
+}
+
+export function loadStaffReports(status: string, limit = 60): Promise<ModerationReportRow[]> {
+  return staffRpc('staff_list_reports', { p_status: status, p_limit: limit }) as Promise<ModerationReportRow[]>
+}
+
+export function loadStaffReportCounts(): Promise<{ open: number; reviewing: number; resolved: number; dismissed: number }> {
+  return staffRpc('staff_report_counts') as Promise<{ open: number; reviewing: number; resolved: number; dismissed: number }>
+}
+
 /* College suggestions                                                         */
 /* -------------------------------------------------------------------------- */
 
