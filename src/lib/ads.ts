@@ -173,12 +173,11 @@ export function adMediaUrl(path: string | null | undefined): string | null {
   return `${SITE_URL}/storage/v1/object/public/ad-media/${path}`
 }
 
-function rpc<T>(name: string, args: Record<string, unknown>, fallbackError: string): Promise<T> {
-  if (!supabase) return Promise.reject(new Error('CAMPUS is not connected. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env.'))
-  return supabase.rpc(name, args).then(({ data, error }: { data: unknown; error: { message: string } | null }) => {
-    if (error) throw new Error(friendlyMessage(error) || fallbackError)
-    return data as T
-  })
+async function rpc<T>(name: string, args: Record<string, unknown>, fallbackError: string): Promise<T> {
+  if (!supabase) throw new Error('CAMPUS is not connected. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env.')
+  const { data, error } = (await supabase.rpc(name, args)) as { data: unknown; error: { message: string } | null }
+  if (error) throw new Error(friendlyMessage(error) || fallbackError)
+  return data as T
 }
 
 /* ================================================================ DELIVERY */
