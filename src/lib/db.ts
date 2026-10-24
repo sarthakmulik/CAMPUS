@@ -38,6 +38,8 @@ export type Profile = {
   is_verified: boolean
   is_private: boolean
   role: string
+  /** 0043: 'active' | 'suspended' — present when the caller selects it */
+  account_status?: string
   onboarding_step: number | null
   onboarding_completed_at: string | null
   /** 0009: last time the username changed — null until the first change */
@@ -379,6 +381,121 @@ export async function saveInterests(userId: string, topicIds: string[], caps: Ca
 }
 
 /* -------------------------------------------------------------------------- */
+/* Staff console data loaders (0043)                                          */
+/* -------------------------------------------------------------------------- */
+/* staff_accounts is staff-RLS protected: members simply see nothing and these */
+/* throw honest errors rendered as "staff only" states in the console.        */
+
+export type StaffAccountRow = {
+  user_id: string
+  username: string | null
+  display_name: string | null
+  avatar_url: string | null
+  tier: string
+  scopes: string[]
+  title: string | null
+  is_active: boolean
+  account_status: string
+  provisioned_at: string
+  revoked_at: string | null
+}
+
+export type StaffAuditRow = {
+  id: string
+  created_at: string
+  action: string
+  actor_name: string | null
+  actor_username: string | null
+  target_id: string | null
+  metadata: Record<string, unknown> | null
+}
+
+export async function loadStaffRoster(): Promise<StaffAccountRow[]> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase
+    .from('staff_accounts')
+    .select('user_id, tier, scopes, title, is_active, provisioned_at, revoked_at, profile:profiles!staff_accounts_user_id_fkey(username, display_name, avatar_url, account_status)')
+    .order('is_active', { ascending: false })
+    .order('tier')
+    .limit(100)
+  if (error) throw new Error(friendlyMessage(error))
+  return ((data ?? []) as Array<Record<string, unknown>>).map(row => ({
+    user_id: row.user_id as string,
+    username: ((row.profile as Record<string, unknown>)?.username as string) ?? null,
+    display_name: ((row.profile as Record<string, unknown>)?.display_name as string) ?? null,
+    avatar_url: ((row.profile as Record<string, unknown>)?.avatar_url as string) ?? null,
+    tier: row.tier as string,
+    scopes: (row.scopes as string[]) ?? [],
+    title: (row.title as string) ?? null,
+    is_active: Boolean(row.is_active),
+    account_status: (((row.profile as Record<string, unknown>)?.account_status as string) ?? 'active'),
+    provisioned_at: row.provisioned_at as string,
+    revoked_at: (row.revoked_at as string) ?? null,
+  }))
+}
+
+export async function loadStaffAudit(limit = 80): Promise<StaffAuditRow[]> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase
+    .from('staff_audit_log')
+    .select('id, created_at, action, actor_id, target_id, metadata')
+    .order('created_at', { ascending: false })
+    .limit(limit)
+  if (error) throw new Error(friendlyMessage(error))
+  const rows = ((data ?? []) as Array<Record<string, unknown>>)
+  const actorIds = [...new Set(rows.map(r => r.actor_id).filter(Boolean))] as string[]
+  const nameMap = new Map<string, { name: string | null; username: string | null }>()
+  if (actorIds.length) {
+    const people = await supabase
+      .from('profiles')
+      .select('id, username, display_name')
+      .in('id', actorIds)
+    for (const p of ((people.data ?? []) as Array<Record<string, unknown>>)) {
+      nameMap.set(p.id as string, {
+        name: (p.display_name as string) ?? null,
+        username: (p.username as string) ?? null,
+      })
+    }
+  }
+  return rows.map(row => {
+    const actor = nameMap.get(row.actor_id as string)
+    return {
+      id: row.id as string,
+      created_at: row.created_at as string,
+      action: row.action as string,
+      actor_name: actor?.name ?? null,
+      actor_username: actor?.username ?? null,
+      target_id: (row.target_id as string) ?? null,
+      metadata: (row.metadata as Record<string, unknown>) ?? null,
+    }
+  })
+}
+
+/** Trusted staff RPC passthrough — errors surface verbatim (they are the UX). */
+export async function staffRpc(name: string, args: Record<string, unknown> = {}): Promise<unknown> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  // Dynamic RPC names arrive from the console; tiers + ops are enforced inside
+  // the database functions themselves.
+  const { data, error } = await supabase.rpc(name, args)
+  if (error) throw new Error(friendlyMessage(error))
+  return data
+}
+
+/** Console People search: thin directory lookup (member-visible profiles). */
+export async function findStaffTargets(query: string): Promise<Profile[]> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const q = query.trim().replace(/^@/, '')
+  if (q.length < 2) return []
+  const { data, error } = await supabase
+    .from('profiles')
+    .select(`${PROFILE_BASE_COLUMNS}, role, account_status`)
+    .or(`username.ilike.%${q}%,display_name.ilike.%${q}%`)
+    .order('username')
+    .limit(6)
+  if (error) throw new Error(friendlyMessage(error))
+  return (data ?? []) as Profile[]
+}
+
 /* College suggestions                                                         */
 /* -------------------------------------------------------------------------- */
 

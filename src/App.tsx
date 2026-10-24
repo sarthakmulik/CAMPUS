@@ -7,9 +7,10 @@ import {
   Repeat2, Share2, Flag, MoreHorizontal, X, Send, ChevronDown, TrendingUp,
   Settings, LogOut, UserRound, Check, Hash, Menu, ArrowLeft, CircleHelp,
   GraduationCap, Megaphone, SlidersHorizontal, EyeOff, VolumeX, AlertCircle,
-  Pencil, Trash2, BadgeCheck
+  Pencil, Trash2, BadgeCheck, ShieldCheck
 } from 'lucide-react'
 import { AuthProvider, hasSeenWelcome, markWelcomeSeen, useAuth } from './lib/auth'
+import { StaffConsole } from './components/StaffConsole'
 import { reconcilePush } from './lib/webPush'
 import * as navHistory from './lib/navHistory'
 import * as db from './lib/db'
@@ -441,6 +442,17 @@ function CAMPUSApp() {
       setPendingNav(null)
     }
   }, [status, pendingNav])
+
+  // 0043: platform staff land in their back-office, not the social feed. The
+  // feed stays one tap away for @campus announcements. Fires once at boot.
+  const didStaffLandingRef = useRef(false)
+  useEffect(() => {
+    if (didStaffLandingRef.current) return
+    if (status !== 'member' || pendingNav) return
+    if (profile?.role !== 'admin' && profile?.role !== 'super_admin') return
+    didStaffLandingRef.current = true
+    setActiveNav('Staff Console')
+  }, [status, pendingNav, profile?.role])
 
   /* ---- feed ------------------------------------------------------------ */
 
@@ -1764,9 +1776,14 @@ function CAMPUSApp() {
             </button>
           ))}
           {isStaff && (
-            <button className={`nav-item ${activeNav === 'Advertising' ? 'active' : ''}`} onClick={() => navigate('Advertising')} title="Advertising">
-              <Megaphone size={21} strokeWidth={activeNav === 'Advertising' ? 2.4 : 2}/><span>Advertising</span>
-            </button>
+            <>
+              <button className={`nav-item ${activeNav === 'Staff Console' ? 'active' : ''}`} onClick={() => navigate('Staff Console')} title="Staff Console">
+                <ShieldCheck size={21} strokeWidth={activeNav === 'Staff Console' ? 2.4 : 2}/><span>Staff Console</span>
+              </button>
+              <button className={`nav-item ${activeNav === 'Advertising' ? 'active' : ''}`} onClick={() => navigate('Advertising')} title="Advertising">
+                <Megaphone size={21} strokeWidth={activeNav === 'Advertising' ? 2.4 : 2}/><span>Advertising</span>
+              </button>
+            </>
           )}
         </nav>
         <div className="drawer-footer">
@@ -2043,6 +2060,10 @@ function CAMPUSApp() {
                     />
                 : infoNav.includes(activeNav)
               ? <InfoPage name={activeNav}/>
+              : activeNav === 'Staff Console'
+                ? isStaff
+                  ? <StaffConsole flash={flash}/>
+                  : <SectionPage name="Staff Console" onCreate={openComposer} onSignIn={() => setAuthMode('signup')} isMember={status === 'member'} displayName={identity.name}/>
               : activeNav === 'Advertising'
                 ? isStaff
                   ? <AdsAdmin flash={flash}/>
