@@ -277,6 +277,14 @@ async function main() {
   check('11.1 matrix posts cleaned up', del0.status === 204 && del1.status === 204 && left === 0,
     `HTTP ${del0.status}/${del1.status}, ${left} left`)
 
+  // 11.2 the provision round-trip strips college_id (0042 guard fires when the
+  // probe held the admin tier). Restore it so ads targeting stays intact.
+  const COLLEGE = '1fba2225-352e-4abc-afd2-a628e7e2474a'
+  const restCol = await rest('PATCH', `profiles?id=eq.${PROBE_UID}`, probeH, { college_id: COLLEGE })
+  const colNow = firstRow(restCol.json)?.college_id
+  check('11.2 probe college affiliation restored (ads targeting intact)',
+    restCol.status === 200 && colNow === COLLEGE, `HTTP ${restCol.status}`)
+
   // -------------------------------------------------------------------------
   console.log(`\n${passed} PASS / ${failed} FAIL`)
   if (failed > 0) process.exitCode = 1
