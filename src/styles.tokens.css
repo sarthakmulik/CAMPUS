@@ -1,0 +1,147 @@
+/* ============================================================================
+   CAMPUS design tokens — UI-1 (single source of truth)
+
+   One layer. Every color, type size, spacing step, radius and motion duration
+   is named here by ROLE, not by appearance, and carries measured contrast
+   against its paired surface (WCAG 4.5:1 minimum for text below 17px).
+
+   Roles follow the app's own identity: a warm cream campus light, ink navy
+   type, and the indigo-violet-pink "campus light" gradient reserved for the
+   brand mark, primary CTAs and one hero moment.
+
+   Dark variants are defined here now (prefers-color-scheme) and are applied
+   component-by-component as the hard-coded hex sweeps land in later UI rounds.
+
+   All values measured with the relative-luminance contrast formula.
+   ========================================================================== */
+
+:root {
+  /* ---- surfaces ------------------------------------------------------------ */
+  /* page cream (light) / raised white; dark: near-black with a violet cast    */
+  --soft: #fbf8f3;            /* page background          · ink 13.7:1         */
+  --surface: #ffffff;         /* cards, sheets, bars      · ink 15.1:1         */
+  --surface-raised: #ffffff;  /* popovers, toasts         · ink 15.1:1         */
+
+  /* ---- ink (text) ---------------------------------------------------------- */
+  --ink: #17284c;             /* primary text             · 13.72:1 on cream   */
+  --ink-strong: #0f1d3d;      /* headings, dense numbers  · 15.69:1 on cream   */
+  --ink-secondary: #5d6d94;   /* secondary text           · 4.86:1 on cream    */
+                              /* (replaces #7d8eae, which measured 3.12:1 — */
+                              /*  below the 4.5:1 minimum for small text)   */
+  --ink-faint: #7d8eae;       /* decorative only — never readable text        */
+  --muted: var(--ink-secondary); /* legacy alias consumed across older CSS    */
+
+  /* ---- lines ---------------------------------------------------------------- */
+  --line: #e8e8f0;            /* hairlines, dividers                           */
+  --line-strong: #d6dbea;     /* separations that must read as structure       */
+
+  /* ---- brand: the campus light gradient ------------------------------------- */
+  /* Reserved for: brand mark, primary CTA, one hero accent. Nothing else.      */
+  --brand: #6654f5;           /* interactive accent      · 5.06:1 on white     */
+  --brand-dark: #5140df;      /* pressed state                                 */
+  --brand-soft: #f6f4ff;      /* tinted chip/panel fill  · 5.1:1 accent text   */
+  --brand-line: #e5e0f5;      /* tinted borders                                */
+  --brand-ink: #5143d8;       /* accent text on brand-soft · 6.14:1           */
+  --on-brand: #ffffff;        /* text on brand/gradient  · 5.06:1 on --brand   */
+  --violet: #8d5cf6;
+  --pink: #f04f9b;
+
+  /* ---- status ---------------------------------------------------------------- */
+  --danger: #be123c;          /* destructive text         · 5.72:1 on #fff1f2  */
+  --danger-bg: #fff1f2;
+  --danger-line: #fecdd3;
+  --warn: #b45309;            /* caution text             · 4.84:1 on #fffbeb  */
+  --warn-bg: #fffbeb;
+  --warn-line: #fde68a;
+  --good: #047857;
+  --good-bg: #ecfdf5;
+  --good-line: #bbf7d0;
+
+  /* ---- type scale ------------------------------------------------------------- */
+  /* Floors: nothing below 11px on mobile. Hierarchy via weight + size, never   */
+  /* by shrinking past the floor.                                               */
+  --fs-micro: 11px;           /* eyebrows, chips, timestamps (floor)           */
+  --fs-small: 12.5px;         /* secondary copy, meta                          */
+  --fs-body: 14px;            /* reading text                                  */
+  --fs-title: 17px;           /* section/card titles                           */
+  --fs-display: 26px;         /* page/hero display (desktop up to 30)          */
+  --fw-semibold: 650;
+  --fw-bold: 750;
+
+  /* ---- spacing (4pt grid) ----------------------------------------------------- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* ---- shape ------------------------------------------------------------------- */
+  --r-sm: 10px;               /* inputs, small chips                           */
+  --r-md: 14px;               /* cards, list rows                              */
+  --r-lg: 18px;               /* sheets, feature cards                         */
+  --r-xl: 22px;               /* hero, brand surfaces                          */
+  --r-full: 999px;            /* pills, avatars                                */
+
+  /* ---- elevation (cream-compatible, violet-tinted shadows) ---------------------- */
+  --elev-1: 0 2px 8px #2e355d0f;
+  --elev-2: 0 4px 15px #2e355d08;
+  --elev-3: 0 8px 22px #2e355d14;
+
+  /* ---- motion -------------------------------------------------------------------- */
+  --dur-fast: 140ms;
+  --dur-med: 240ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* focus ring — visible on every interactive element */
+  --focus-ring: 0 0 0 3px #6654f544;
+}
+
+/* ---- dark token variants ---------------------------------------------------------
+   Applied components consume these as the hard-coded sweeps land (UI-4/UI-5).
+   Until then this block changes nothing visually — tokens only.                  */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --soft: #131318;          /* page background         · ink 13.9:1          */
+    --surface: #171722;       /* cards                   · ink 14.97:1         */
+    --surface-raised: #1e1e2b;
+    --ink: #edeaf6;           /* primary text            · 14.97:1 on surface  */
+    --ink-strong: #f8f6ff;
+    --ink-secondary: #a2adc7; /* secondary text          · 7.9:1 on surface    */
+    --ink-faint: #6c7292;     /* decorative only                               */
+    --line: #26263a;
+    --line-strong: #33334b;
+    --brand: #8f7bff;         /* interactive accent on dark · 5.45:1 on surface */
+    --brand-dark: #5b49e0;
+    --brand-soft: #221f36;
+    --brand-line: #34305a;
+    --brand-ink: #b3a6ff;     /* accent text on dark soft · 7.45:1             */
+    --on-brand: #ffffff;      /* 6.04:1 on --brand-dark CTA fills              */
+    --violet: #a78bfa;
+    --pink: #f472b6;
+    --danger: #fda4af;
+    --danger-bg: #2b1218;
+    --danger-line: #58202c;
+    --warn: #fcd34d;
+    --warn-bg: #271d0a;
+    --warn-line: #4d3b12;
+    --good: #6ee7b7;
+    --good-bg: #0b2118;
+    --good-line: #1d4633;
+    --elev-1: 0 2px 8px #0000004d;
+    --elev-2: 0 4px 15px #00000047;
+    --elev-3: 0 8px 22px #00000059;
+  }
+}
+
+/* ---- motion is optional (a11y) ----------------------------------------------------
+   Anyone running reduced motion gets instant UI; nothing loses meaning.          */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
