@@ -657,3 +657,49 @@ body { background: var(--soft) }
 
 
 
+
+
+/* ---- M15 self-loop phase 2 (deep interactive surfaces: post menu, comments extras, events manage, wizard, search page, new-group, chat composer) ----
+   Auditor round 2 crawled: post menu contents, comments-sheet poll controls, event-card
+   manage chips, create-event wizard fields, Search page, Chats new-group dialog, open-chat
+   composer. Findings, all geometry/material only (no hex theme changes):
+   - .post-menu painted the SAME disease as .coming-note: literal background:"white" and
+     button ink #475569 with no dark pair anywhere (verified live in forced dark: menu stays
+     rgb(255,255,255)). Light keeps its exact look: --surface-raised IS #ffffff in light and
+     the button fill becomes transparent over it (identical paint); the dark pair swaps both
+     to surfaces. Three of five items measured 35px tall -> 44 floor.
+   - comments-sheet: .poll-submit/.poll-change 40 -> 44 (M11c re-run missed the poll row).
+   - event-card manage .mini-action chips (Edit / Unpublish / Cancel event / Delete) rode at
+     22px tall - destructive targets -> 44.
+   - create-event wizard (.overlay > .wizard): class-less form inputs 36 -> 44, close gear
+     .icon-button 34 -> 44.
+   - Search page: .search-bar pill measured 43 (1px shy) -> 44; its "Close search" button
+     rode 30x24 inside the pill -> 44 (the input itself keeps the pill-as-hit-area pattern).
+   - Chats new-group: .text-button (Add/Cancel) 17px tall -> 44; .group-create-button
+     height:36 -> 44 (gradient/pill look untouched).
+   - Chat thread: composer input and .chat-send rode 42 -> 44; chats-global-search input 36
+     -> 44; chats-filter-input 30 -> 44.
+   Crawl-limited (documented, not skipped silently): the auth modal needs a logged-out session
+   to mount, so it was audited by CSS text only - no dark-unsafe literals found in it. */
+@media (max-width: 650px) {
+  .post-menu button { min-height: 44px }
+  .poll-submit, .poll-change { min-height: 44px }
+  .mini-action { min-height: 44px }
+  .wizard .form-field input, .wizard .form-field textarea { min-height: 44px }
+  .wizard .icon-button { width: 44px; height: 44px }
+  .search-bar { min-height: 44px }
+  .search-bar button { min-width: 44px; min-height: 44px; margin-top: -10px; margin-bottom: -10px; display: inline-flex; align-items: center; justify-content: center }
+  .text-button { min-height: 44px }
+  .group-create-button { height: 44px }
+  .chat-compose input { min-height: 44px }
+  .chat-send { min-width: 44px; min-height: 44px }
+  .chats-global-search input { min-height: 44px }
+  .chats-filter-input { min-height: 44px }
+}
+/* post-menu material: light layer must paint EXACTLY as before (literal white <-> #ffffff
+   token), so the override must not be viewport-gated; the dark swap rides the media. */
+.post-menu { background: var(--surface-raised) }
+.post-menu button { background: transparent }
+@media (prefers-color-scheme: dark) {
+  .post-menu button { color: var(--ink-secondary) }
+}
