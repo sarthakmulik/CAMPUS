@@ -41,6 +41,11 @@ const main = async () => {
   const probeCollege = profs.find(p => p.id === probe.user.id)?.college_id
   ok('probe has a college affiliation (targeting subject)', !!probeCollege, JSON.stringify(profs))
 
+  // snapshot the estate BEFORE the run: overview counters are global, so the
+  // two counter assertions compare deltas, not absolutes (live campaigns like
+  // "Cafe katta" legitimately contribute impressions/total)
+  const base = JSON.parse((await rpc(admin.access_token, 'ad_overview_metrics')).body)
+
   /* -------- student negatives (post-0037) -------- */
   const promote = await fetch(`${u}/rest/v1/profiles?id=eq.${probe.user.id}`, { method: 'PATCH', headers: P, body: JSON.stringify({ role: 'admin' }) })
   ok('student cannot PATCH role → blocked', promote.status >= 400, `${promote.status}`)
@@ -223,7 +228,7 @@ const main = async () => {
 
   /* -------- overview + counters -------- */
   const cc = JSON.parse((await rpc(admin.access_token, 'ad_overview_metrics')).body)
-  ok('overview totals real (total>=4, impressions=1, clicks=1)', cc.total >= 4 && cc.impressions === 1 && cc.clicks === 1, JSON.stringify(cc).slice(0, 220))
+  ok('overview totals real (Δ vs pre-run: ≥5 created, +1 impression, +1 click)', cc.total >= base.total + 5 && cc.impressions === base.impressions + 1 && cc.clicks === base.clicks + 1, JSON.stringify({ base, now: cc }).slice(0, 240))
 
   /* -------- cleanup -------- */
   // deletes retry up to 3 passes (same API-hiccup resilience as above)
@@ -237,21 +242,25 @@ const main = async () => {
   }
   const after = await (await fetch(`${u}/rest/v1/ad_campaigns?id=in.(${campA},${campB},${campC},${campS},${campD})&select=id`, { headers: A })).json()
   ok('cleanup removed test campaigns', Array.isArray(after) && after.length === 0, after)
-  // storage: recursively delete every file under campaigns/ (folder-aware);
-  // DELETE must be body-less (a body-less POST/DELETE with Content-Type json 400s)
+  // storage: delete ONLY the matrix's own campaign folders — the bucket may
+  // hold live creatives (e.g. "Cafe katta"), which must survive a QA run
+  const ownIds = [campA, campB, campC, campS, campD]
   const delA = { apikey: anon, Authorization: `Bearer ${admin.access_token}` }
   const listA = { apikey: anon, Authorization: `Bearer ${admin.access_token}`, 'Content-Type': 'application/json' }
-  const folders = (await (await fetch(`${u}/storage/v1/object/list/ad-media`, { method: 'POST', headers: listA, body: JSON.stringify({ prefix: 'campaigns/', limit: 1000 }) })).json()).filter(o => o.id === null)
-  for (const f of folders) {
-    const files = await (await fetch(`${u}/storage/v1/object/list/ad-media`, { method: 'POST', headers: listA, body: JSON.stringify({ prefix: `campaigns/${f.name}/`, limit: 1000 }) })).json()
-    for (const file of files) {
-      await fetch(`${u}/storage/v1/object/ad-media/campaigns/${f.name}/${file.name}`, { method: 'DELETE', headers: delA })
+  for (const cid of ownIds) {
+    const files = await (await fetch(`${u}/storage/v1/object/list/ad-media`, { method: 'POST', headers: listA, body: JSON.stringify({ prefix: `campaigns/${cid}/`, limit: 1000 }) })).json()
+    for (const file of Array.isArray(files) ? files : []) {
+      await fetch(`${u}/storage/v1/object/ad-media/campaigns/${cid}/${file.name}`, { method: 'DELETE', headers: delA })
     }
   }
-  const storageLeft = await (await fetch(`${u}/storage/v1/object/list/ad-media`, { method: 'POST', headers: listA, body: JSON.stringify({ prefix: 'campaigns/', limit: 1000, recursive: true }) })).json()
-  ok('cleanup: storage cleared (no files under campaigns/)', Array.isArray(storageLeft) && storageLeft.every(o => o.id === null), JSON.stringify(storageLeft))
+  const ownLeft = []
+  for (const cid of ownIds) {
+    const left = await (await fetch(`${u}/storage/v1/object/list/ad-media`, { method: 'POST', headers: listA, body: JSON.stringify({ prefix: `campaigns/${cid}/`, limit: 1000 }) })).json()
+    ownLeft.push(...left)
+  }
+  ok('cleanup: matrix storage cleared (own folders empty)', Array.isArray(ownLeft) && ownLeft.length === 0, JSON.stringify(ownLeft))
   const cc2 = JSON.parse((await rpc(admin.access_token, 'ad_overview_metrics')).body)
-  ok('counters consistent post-cleanup (0/0/0)', cc2.total === 0 && cc2.impressions === 0 && cc2.clicks === 0, JSON.stringify(cc2).slice(0, 200))
+  ok('counters restored to pre-run estate', cc2.total === base.total && cc2.impressions === base.impressions && cc2.clicks === base.clicks, JSON.stringify({ base, now: cc2 }).slice(0, 220))
 
   console.log(`\n=== ${pass} passed / ${fail} failed ===`)
   if (fail > 0) process.exit(2)
