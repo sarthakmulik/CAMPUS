@@ -444,5 +444,20 @@ body { background: var(--soft) }
   transition: color var(--motion-fast) ease, font-weight var(--motion-fast) linear, background-color var(--motion-fast) ease, border-color var(--motion-fast) ease;
 }
 
+/* ---- M10 dark mobile audit — the one chrome literal that survived the pairing sweep -------------
+   Method: the <650 media blocks of styles.css (both theme copies) and onboarding were swept for
+   literal fills without a later token override. Everything already pairs through ui4's import
+   order (body --soft, .main-column --surface, header/nav --surface-glass, feed tabs --surface,
+   every chat matte restyled by the M5 dark block in ui4). One rule outranked all of it:
+   styles.css's mobile drawer paints `.left-sidebar.mobile-open` background:white at TWO-class
+   specificity — ui4's one-class `.left-sidebar` can never beat it, so the drawer stayed a white
+   sheet in dark while --ink flipped light: menu text measured 1.19:1 (probe, forced tokens:
+   rgb(237,234,246) on rgb(255,255,255)). Paired inside a combined mobile+dark block so it
+   can't touch desktop or light — the light drawer keeps its original white. Everything inside the drawer (items, footer links, close ✕)
+   is token-driven, so it corrects itself with the sheet.                               */
+@media (max-width: 650px) and (prefers-color-scheme: dark) {
+  .left-sidebar.mobile-open { background: var(--surface) }
+}
+
 
 
