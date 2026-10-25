@@ -1,7 +1,7 @@
-/* ============================================================================
-   CAMPUS Staff Console — styles.staff (mobile-first)
+﻿/* ============================================================================
+   CAMPUS Staff Console â€” styles.staff (mobile-first)
    Reuses the design tokens from styles.css
-   (--brand #6654f5 · --violet · --pink · --ink --muted --line --soft).
+   (--brand #6654f5 Â· --violet Â· --pink Â· --ink --muted --line --soft).
    Back-office tone: quieter cards, indigo header seal, data-first typography.
    ========================================================================== */
 
@@ -23,7 +23,7 @@
 }
 .staff-hero-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .staff-hero-copy b { font-size: 14.5px; letter-spacing: -0.2px; }
-.staff-hero-copy small { color: var(--muted); font-size: 10.5px; }
+.staff-hero-copy small { color: var(--muted); font-size:11px; }
 .staff-ghost {
   border: 1px solid #e5e0f5; background: #fff; color: var(--brand);
   border-radius: 16px; padding: 7px 12px; font-size: 11px; font-weight: 700;
@@ -70,9 +70,9 @@
   padding: 13px 13px 11px;
   display: flex; flex-direction: column; gap: 3px;
 }
-.staff-card small { font-size: 9px; letter-spacing: 1.6px; font-weight: 800; color: var(--muted); }
+.staff-card small { font-size:11px; letter-spacing: 1.6px; font-weight: 800; color: var(--muted); }
 .staff-card b { font-size: 22px; letter-spacing: -0.4px; }
-.staff-card p { margin: 0; font-size: 10.5px; color: var(--muted); line-height: 1.45; }
+.staff-card p { margin: 0; font-size:11px; color: var(--muted); line-height: 1.45; }
 .staff-card.wide { grid-column: 1 / -1; }
 .staff-mini-audit { margin: 6px 0 0; padding: 0; list-style: none; }
 .staff-mini-audit li {
@@ -97,7 +97,7 @@
 }
 .staff-btn.danger { background: #fff1f2; border-color: #fecdd3; color: #be123c; }
 .staff-btn:disabled { opacity: .5; }
-.staff-reason { display: flex; flex-direction: column; gap: 5px; margin: 10px 0 12px; font-size: 10.5px; color: var(--muted); }
+.staff-reason { display: flex; flex-direction: column; gap: 5px; margin: 10px 0 12px; font-size:11px; color: var(--muted); }
 .staff-reason input {
   border: 1px solid var(--line); border-radius: 12px; padding: 9px 12px;
   font: inherit; font-size: 12.5px; outline: none; background: #fff;
@@ -113,7 +113,7 @@
 .staff-person.revoked { opacity: .65; }
 .staff-person-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .staff-person-copy b { font-size: 12.5px; display: flex; align-items: center; gap: 4px; }
-.staff-person-copy small { color: var(--muted); font-size: 10.5px; }
+.staff-person-copy small { color: var(--muted); font-size:11px; }
 .staff-person-actions { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
 .staff-person-actions input {
   width: 100%; max-width: 220px;
@@ -122,7 +122,7 @@
 }
 .staff-scopes { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .staff-chip {
-  font-size: 9.5px; font-weight: 700; color: #5143d8;
+  font-size:11px; font-weight: 700; color: #5143d8;
   background: #f6f4ff; border: 1px solid #e5e0f5; border-radius: 8px;
   padding: 2px 7px;
 }
@@ -142,7 +142,7 @@
   padding: 11px 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 9px;
 }
 .staff-provision-form p { grid-column: 1 / -1; margin: 0; }
-.staff-provision-form label { display: flex; flex-direction: column; gap: 4px; font-size: 10px; color: var(--muted); font-weight: 700; }
+.staff-provision-form label { display: flex; flex-direction: column; gap: 4px; font-size:11px; color: var(--muted); font-weight: 700; }
 .staff-provision-form input, .staff-provision-form select {
   border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px;
   font: inherit; font-size: 12px; background: #fff; outline: none;
@@ -159,14 +159,14 @@
   padding: 12px 13px; display: flex; flex-direction: column; gap: 7px;
 }
 .staff-mod-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.staff-mod-head small { margin-left: auto; color: var(--muted); font-size: 10px; }
+.staff-mod-head small { margin-left: auto; color: var(--muted); font-size:11px; }
 .staff-subject {
-  font-size: 9px; font-weight: 800; letter-spacing: .6px; color: #7b2ea8;
+  font-size:11px; font-weight: 800; letter-spacing: .6px; color: #7b2ea8;
   background: #faf1ff; border: 1px solid #edd8fb; border-radius: 8px; padding: 3px 8px;
 }
 .staff-subject.soft { color: #0f766e; background: #effcf9; border-color: #ccf1e8; }
 .staff-status-pill {
-  font-size: 9px; font-weight: 800; letter-spacing: .6px;
+  font-size:11px; font-weight: 800; letter-spacing: .6px;
   border-radius: 8px; padding: 3px 8px; border: 1px solid transparent;
 }
 .staff-status-pill.s-open { color: #b45309; background: #fffbeb; border-color: #fde68a; }
@@ -180,12 +180,12 @@
   padding: 8px 10px; display: flex; flex-direction: column; gap: 4px;
 }
 .staff-mod-post code { font-size: 11px; line-height: 1.5; word-break: break-word; color: var(--ink); font-family: inherit; }
-.staff-mod-post small { color: var(--muted); font-size: 10px; }
-.staff-mod-person { color: var(--muted); font-size: 10.5px; }
-.staff-mod-reviewed { color: var(--muted); font-size: 10px; font-style: italic; }
+.staff-mod-post small { color: var(--muted); font-size:11px; }
+.staff-mod-person { color: var(--muted); font-size:11px; }
+.staff-mod-reviewed { color: var(--muted); font-size:11px; font-style: italic; }
 .staff-mod-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 2px; }
 .staff-btn.warning { background: #fffbeb; border-color: #fde68a; color: #b45309; }
-.staff-warn-note { display: flex; flex-direction: column; gap: 5px; font-size: 10.5px; color: var(--muted); }
+.staff-warn-note { display: flex; flex-direction: column; gap: 5px; font-size:11px; color: var(--muted); }
 .staff-warn-note input {
   border: 1px solid #fde68a; border-radius: 10px; padding: 9px 11px;
   font: inherit; font-size: 12.5px; outline: none; background: #fff;
@@ -193,7 +193,7 @@
 
 /* ---- audit ----------------------------------------------------------------- */
 .staff-audit { margin: 18px 17px 0; }
-.staff-audit > small { font-size: 9px; letter-spacing: 1.6px; font-weight: 800; color: var(--muted); }
+.staff-audit > small { font-size:11px; letter-spacing: 1.6px; font-weight: 800; color: var(--muted); }
 .staff-audit ul { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
 .staff-audit li {
   display: flex; align-items: flex-start; gap: 9px;
@@ -201,14 +201,14 @@
   padding: 9px 11px;
 }
 .staff-audit-badge {
-  font-size: 9px; font-weight: 800; letter-spacing: .4px; color: #5143d8;
+  font-size:11px; font-weight: 800; letter-spacing: .4px; color: #5143d8;
   background: #f6f4ff; border: 1px solid #e5e0f5; border-radius: 8px; padding: 3px 8px;
   flex: 0 0 auto; margin-top: 1px;
 }
 .staff-audit-copy { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 11px; }
-.staff-audit-copy code { font-size: 10px; color: var(--muted); background: var(--soft); padding: 2px 6px; border-radius: 6px; }
-.staff-audit-note { color: var(--muted); font-size: 10.5px; }
-.staff-clock { display: flex; align-items: center; gap: 5px; margin-top: 10px; font-size: 10px; }
+.staff-audit-copy code { font-size:11px; color: var(--muted); background: var(--soft); padding: 2px 6px; border-radius: 6px; }
+.staff-audit-note { color: var(--muted); font-size:11px; }
+.staff-clock { display: flex; align-items: center; gap: 5px; margin-top: 10px; font-size:11px; }
 
 .staff-embed { padding: 0 17px; }
 .staff-embed > div:first-child { margin: 0; }
@@ -221,4 +221,10 @@
   .staff-people, .staff-colleges, .staff-manage, .staff-audit { margin-inline: 22px; }
   .staff-person-actions { flex-direction: row; }
   .staff-person-actions input { width: 260px; }
+}
+
+/* touch hit targets — 44px minimum on coarse pointers (HIG accessibility);
+   the desktop console stays dense by design (precise pointer input). */
+@media (pointer: coarse) {
+  .staff-btn, .staff-tab, .staff-ghost { min-height: 44px; }
 }
