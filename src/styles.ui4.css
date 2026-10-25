@@ -459,5 +459,28 @@ body { background: var(--soft) }
   .left-sidebar.mobile-open { background: var(--surface) }
 }
 
+/* ---- M9 glass ceiling restoration + Home tap-floor completion ------------------------------------
+   The whole-page sweep at 390px (candidate for hero-glass, all sections probed) — found:
+   1. FOUR glass elements on the Home feed — mobile-header, mobile-bottom-nav, the college
+      pill AND .feed-tabs. But the tabs' blur is invisible: their fill is opaque var(--surface)
+      in both modes (ui4 set it last), so the 10px blur renders nothing and costs only GPU
+      time. Killing the dead backdrop-filter restores the recipe's 3-element ceiling
+      (header + bottom nav + college pill) with also a zero visual difference.
+   2. Post action row: like/comment/repost carry 44px min-height (inline) but the icon-only
+      Share/Save/Report buttons measure 32×44 — under the 44pt floor in width.
+   3. .post-card .icon-button (the ⋯ menu) rode the old 34px circle — M3 grew the header
+      pair, the card one was missed (M6 grew the chat-thread-head one).
+   4. The composer prompt button (opens the composer sheet) measures 300×28 — the biggest
+      text target on the feed, under the floor in height.
+   5. .brand-mini in the mobile header is 29px tall — below the floor.                                      */
+.feed-tabs {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.post-actions button { min-width: 44px; justify-content: center }
+.post-card .icon-button { width: 44px; height: 44px }
+.composer-prompt { min-height: 44px; display: flex; align-items: center }
+.mobile-header .brand-mini { min-height: 44px }
+
 
 
