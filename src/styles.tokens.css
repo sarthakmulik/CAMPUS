@@ -105,6 +105,15 @@
   --dur-fast: 140ms;
   --dur-med: 240ms;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  /* R3 motion tokens (fluid-functionalism discipline, translated to CSS):
+     three speeds by element size — fast for petite pops, moderate for
+     cards/tiles, slow for chrome — plus a spring curve for plain entrance
+     tweens. Keyframe choreographies (check-pop, heart-pop, kind-pop) keep
+     --ease-out because their overshoot is already baked into the frames.  */
+  --motion-fast: 120ms;
+  --motion-moderate: 180ms;
+  --motion-slow: 300ms;
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 
   /* focus ring — visible on every interactive element */
   --focus-ring: 0 0 0 3px #6654f544;

@@ -225,12 +225,12 @@ body { background: var(--soft) }
    retired too (its failing stops are not reused).                          */
 .leaderboard { background: linear-gradient(120deg, #6654f5, #5140df) }
 .confessions { background: linear-gradient(120deg, #c4278f, #9f2069) }
-.feature-card { transition: transform .16s var(--ease-out), box-shadow .16s var(--ease-out) }
+.feature-card { transition: transform var(--motion-moderate) var(--ease-out), box-shadow var(--motion-moderate) var(--ease-out) }
 .feature-card:active { transform: scale(.98) }
 
 /* dark toast readable: the ink bubble inverts to a pale chip in dark mode,
    then the publish moment: bubble rises with a spring, check pops once         */
-.toast { background: var(--ink); color: var(--soft); animation: toast-rise .34s var(--ease-out) }
+.toast { background: var(--ink); color: var(--soft); animation: toast-rise var(--motion-slow) var(--ease-spring) }
 @keyframes toast-rise {
   from { transform: translateX(-50%) translateY(14px) scale(.97); opacity: 0 }
   to   { transform: translateX(-50%); opacity: 1 }
@@ -241,7 +241,7 @@ body { background: var(--soft) }
 }
 
 /* like: the heart answers with one small pop — the standard feedback beat      */
-.post-actions button { transition: color .15s ease, background-color .15s ease, transform .12s ease }
+.post-actions button { transition: color var(--motion-fast) ease, background-color var(--motion-fast) ease, transform var(--motion-fast) ease }
 .post-actions button:active { transform: scale(.9) }
 .post-actions button.liked svg { animation: heart-pop .34s var(--ease-out) }
 @keyframes heart-pop {
@@ -249,7 +249,7 @@ body { background: var(--soft) }
 }
 
 /* composer kind tiles: a pick gets one confirming pop                          */
-.kind-option { transition: transform .16s var(--ease-out), background-color .16s ease, border-color .16s ease }
+.kind-option { transition: transform var(--motion-moderate) var(--ease-out), background-color var(--motion-moderate) ease, border-color var(--motion-moderate) ease }
 .kind-option:active { transform: scale(.96) }
 .kind-option.chosen { animation: kind-pop .26s var(--ease-out) }
 @keyframes kind-pop {
@@ -257,9 +257,9 @@ body { background: var(--soft) }
 }
 
 /* nav: idle-inplace calm, a quick press on tap                                  */
-.nav-item { transition: background-color .16s ease, color .16s ease, transform .12s ease }
+.nav-item { transition: background-color var(--motion-moderate) ease, color var(--motion-moderate) ease, transform var(--motion-fast) ease }
 .nav-item:active { transform: scale(.97) }
-.compose-sidebar { transition: transform .14s var(--ease-out) }
+.compose-sidebar { transition: transform var(--motion-fast) var(--ease-out) }
 .compose-sidebar:active { transform: scale(.97) }
 
 /* hero: the campus keeps one living detail — the sun breathes slowly.
@@ -269,3 +269,30 @@ body { background: var(--soft) }
   from { transform: translateY(0); box-shadow: 0 0 40px #ffd6a680 }
   to   { transform: translateY(5px); box-shadow: 0 0 58px #ffd6a6b3 }
 }
+
+/* ---- R3 gliding hover --------------------------------------------------------------------------
+   fluid-functionalism discipline: ONE highlight per list. A single pill travels
+   to the item nearest the cursor (transform-only — compositor, kill-switch free)
+   instead of every row lighting up on :hover. The pill sits under the items
+   (z 0 vs items z 1), so the active item's own fill always wins when the cursor
+   rests on it. Attached by App.tsx glideNavRef only for fine pointers without
+   reduced motion — everyone else keeps the plain per-item :hover rules below.  */
+.primary-nav { position: relative }
+.primary-nav .nav-item { position: relative; z-index: 1 }
+.primary-nav.glide-on .nav-item:hover { background: transparent }
+.nav-glide {
+  position: absolute; left: 0; right: 0; top: 0; height: 42px;
+  border-radius: 13px;
+  background: var(--brand-soft);              /* light #f6f4ff ≈ the old hover tint · dark #221f36 */
+  opacity: 0; z-index: 0; pointer-events: none;
+  transition: transform var(--motion-fast) var(--ease-spring), opacity var(--motion-moderate) ease;
+}
+.primary-nav.no-glide .nav-glide { display: none }
+
+/* the fallback :hover itself never had a dark value (base #f5efff is light-only
+   ivory) — while the glide is attached it is suppressed above; for reduced-motion
+   / coarse-pointer users in dark this now paints a compliant tint on dark       */
+@media (prefers-color-scheme: dark) {
+  .primary-nav:not(.glide-on) .nav-item:hover { background: var(--brand-soft) }
+}
+

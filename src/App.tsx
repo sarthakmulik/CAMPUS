@@ -67,6 +67,59 @@ const navItems = [
 const restrictedNav = ['Chats', 'Notifications', 'Bookmarks']
 const allNav = [...navItems.map(item => item.label), 'Profile']
 
+/* R3 motion: the nav's ONE gliding hover highlight — a single pill travels to the
+   item nearest the cursor (fluid-functionalism discipline: one highlight per list,
+   transform-only so it rides the compositor and dies under the UI-1 reduced-motion
+   kill-switch). Attached only for fine pointers without reduced motion; everyone
+   else keeps the plain per-item :hover rules (which now have a dark-mode value). */
+const glideNavRef = (navEl: HTMLElement | null) => {
+  if (!navEl) return
+  navEl.querySelector('.nav-glide')?.remove()
+  if (
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches ||
+    !window.matchMedia('(hover: hover) and (pointer: fine)').matches
+  ) return
+  navEl.classList.add('glide-on')
+  const pill = document.createElement('div')
+  pill.className = 'nav-glide'
+  pill.setAttribute('aria-hidden', 'true')
+  navEl.prepend(pill)
+  let shown = false
+  const pick = (e: PointerEvent) => {
+    const rect = navEl.getBoundingClientRect()
+    let best: HTMLElement | null = null
+    let bestD = Infinity
+    for (const it of navEl.querySelectorAll<HTMLElement>('.nav-item')) {
+      const r = it.getBoundingClientRect()
+      if (r.width === 0) continue
+      const px = Math.max(r.left, Math.min(e.clientX, r.right))
+      const py = Math.max(r.top, Math.min(e.clientY, r.bottom))
+      const d = (px - e.clientX) ** 2 + (py - e.clientY) ** 2
+      if (d < bestD) { bestD = d; best = it }
+    }
+    if (!best) return
+    const r = best.getBoundingClientRect()
+    const y = r.top - rect.top
+    if (!shown) {
+      shown = true
+      pill.style.transition = 'none'          // arrive, don't fly across the list
+      pill.style.transform = `translateY(${y}px)`
+      pill.style.height = `${r.height}px`
+      void pill.offsetHeight
+      pill.style.transition = ''              // hand back to the stylesheet
+      pill.style.opacity = '1'
+    } else {
+      pill.style.transform = `translateY(${y}px)`
+      pill.style.height = `${r.height}px`
+    }
+  }
+  const hide = () => { shown = false; pill.style.opacity = '0' }
+  navEl.addEventListener('pointermove', pick)
+  navEl.addEventListener('pointerenter', pick)
+  navEl.addEventListener('pointerleave', hide)
+}
+
+
 /** System info pages, reachable from the footer. */
 const infoNav = ['About', 'Guidelines', 'Privacy', 'Help']
 
@@ -1795,7 +1848,7 @@ function CAMPUSApp() {
           <div className="sidebar-campus-info"><b>{activeCollege?.short_name ?? 'SPPU'}</b><small>{activeCollege?.name ?? 'Savitribai Phule Pune University'}</small></div>
           <button onClick={() => navigate('My College')}>Change college <ArrowLeft size={13}/></button>
         </div>
-        <nav className="primary-nav">
+        <nav className="primary-nav" ref={glideNavRef}>
           {navItems.map(({label, icon: Icon}) => (
             <button key={label} className={`nav-item ${activeNav === label ? 'active' : ''} ${label === 'My College' ? 'nav-labelled' : ''} ${navOnMainUi.includes(label) ? 'nav-on-main-ui' : ''}`} onClick={() => navigate(label)} title={label}>
               <Icon size={21} strokeWidth={activeNav === label ? 2.4 : 2}/><span>{label}</span>
