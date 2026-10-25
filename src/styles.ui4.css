@@ -339,3 +339,20 @@ body { background: var(--soft) }
   .primary-nav:not(.glide-on) .nav-item:hover { background: var(--brand-soft) }
 }
 
+/* ---- M3 touch ergonomics (apple-design / HIG: 44×44 pt minimum target) ---------- */
+/* The mobile hit areas below the floor, grown without moving their visuals — same
+   icons, same layout, larger silent zones around them:
+   · header Menu/Search/Bell + drawer Close rode the desktop 34px .icon-button
+   · composer tool chips were padding:6px around a 14px icon ≈ 26px (!)
+   · feed tabs had padding:0 6px; vertical is already the 42px flex-stretch row   */
+.mobile-header .icon-button { width: 44px; height: 44px }
+.sidebar-close { width: 44px; height: 44px }
+@media (max-width: 650px) {
+  .composer-tools button:not(.post-button) {
+    min-width: 44px; min-height: 44px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .feed-tabs button { padding: 0 10px }
+}
+
+
