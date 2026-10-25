@@ -352,6 +352,21 @@ body { background: var(--soft) }
     min-width: 44px; min-height: 44px;
     display: inline-flex; align-items: center; justify-content: center;
   }
+  /* M3 completion: the Post CTA itself measured 29px tall at mobile width
+     ((found in the 387px emulated probe) — below the 44pt floor            */
+  .composer-tools .post-button { min-height: 44px }
+  /* M6 — emulated-device tap sweep, every remaining sub-floor control:
+     per-row 3-dot menus (26px), per-bubble action clusters (22px), thread
+     back + head actions (34px), composer attach tool (38px), chat-list
+     "New group" (31px), drawer footer links (25px). Secondary filter chips
+     get 40px — a deliberate relaxation: a 4-chip row at 44px would crowd
+     the input they share the row with (also fixed: .composer &&
+     chat-send's transient voice states keep their compact 34px geometry). */
+  .chat-row-menu, .chat-msg-actions button { min-width: 44px; min-height: 44px }
+  .chat-tool, .chat-thread-head .icon-button { width: 44px; height: 44px }
+  .new-group-button { min-height: 44px }
+  .drawer-footer button { min-height: 44px }
+  .chats-filter-chip { min-height: 40px; display: inline-flex; align-items: center }
   .feed-tabs button { padding: 0 10px }
 }
 
@@ -361,7 +376,15 @@ body { background: var(--soft) }
    material. It is glass element #3 on a chats screen (mobile header, bottom nav, composer —
    the recipe's ceiling). --surface-glass carries both modes (dark #171722ee), so the beige
    var(--soft) fill it replaces never returns in dark either.                                    */
-.chat-thread-pane { position: relative } /* absolute anchor for the overlay; mobile pane is already absolute */
+/* The DM composer overlay needs the thread pane as its anchor on desktop,
+   where the pane is a static flex child. On mobile the onboarding sheet makes
+   the pane the absolute slide-over — this file imports later, so a plain
+   `.chat-thread-pane { position: relative }` would outrank it and demote the
+   slide-over into grid flow (caught in the 387px emulated probe: pane landed
+   mid-screen, head 59px, wrong geometry). Desktop gets the anchor by range. */
+@media (min-width: 651px) {
+  .chat-thread-pane { position: relative }
+}
 .chat-compose {
   position: absolute;
   left: 0; right: 0; bottom: 0;

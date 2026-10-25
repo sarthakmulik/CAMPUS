@@ -3434,11 +3434,13 @@
     /* M5: a definite height — height:100% resolves to auto here because the
        block parent (.main-column under the shell's block layout) has no
        definite height, so the absolute slide-over thread pane and its composer
-       could extend past the fold, below the fixed bottom nav. The available
-       space exactly equals the viewport minus both browser insets the shell
-       pads around. */
-    height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
-    height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+       could extend past the fold. The Chats route renders the shell in
+       .nav-hidden state (no bottom nav, padding-bottom 0 — verified in the
+       387px probe), so the only chrome above the page is the fixed header:
+       50px + the browser's top inset. An earlier -59px nav term here was
+       itself a bug (59px dead strip under the composer). */
+    height: calc(100vh - 50px - env(safe-area-inset-top, 0px));
+    height: calc(100dvh - 50px - env(safe-area-inset-top, 0px));
     min-height: 0;
   }
 
