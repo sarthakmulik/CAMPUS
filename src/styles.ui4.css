@@ -616,6 +616,40 @@ body { background: var(--soft) }
 }
 .community-card:hover { box-shadow: 0 6px 22px #1f29371a }
 .community-card:active { transform: scale(0.985) }
+
+/* ---- M14 whole-app crawl fixes, batch A (Events / Coming-soon pages / Notifications / Advertising / Settings) ----
+   The self-loop auditor (x-overflow, off-screen targets, sub-44 inventory, dead blur, glass
+   census, silent clipping, forced-dark fills) crawled the drawer routes:
+   · Events: the date chip rode blur(6px) over an OPAQUE var(--soft) fill — dead GPU work,
+     dropped. Floors: view toggles 27px, filter pill 36px, card titles 18px taps, the save
+     circle 34, secondary/ghost buttons 29/31 — all grown. The off-screen "Upcoming" tab is
+     an intended overflow-x:auto scroll row (not a bug); the 19px search INPUT sits inside
+     a 44px .community-searchbar (the pill is the hit area — exempt, documented).
+   · Coming-soon pages (Campus Pulse/Opportunities/Clubs/My College): .coming-note overrode
+     its token var(--soft) with a literal #f8f4ff LATER in the file — token-driven dark
+     never reached it. Pair added in dark; the light hex is preserved verbatim.
+   · Notifications: Mark-all/follow ride .secondary-button, suggestion person-rows 34 — floors.
+   · Advertising: create-campaign 37px, the Overview/Campaigns/Colleges pills 33px — floors.
+   · Settings: the .toggle switch measured 31px tall — grown (the knob keeps its size, the
+     track elongates; the settings-row stays the listed height).                   */
+.event-datechip { -webkit-backdrop-filter: none; backdrop-filter: none }
+@media (max-width: 650px) {
+  .secondary-button, .ghost-button { min-height: 44px }
+  .event-tabs button, .events-filter-toggle, .ads-create-button, .ads-tabs button { min-height: 44px }
+  /* detail-page tabs carry a three-class min-height:36 in onboarding — matched here */
+  .community-detail > .community-tabs.detail-tabs button { min-height: 44px }
+  .events-sheet-selects select { min-height: 44px }
+  .ghost-action { min-height: 44px }
+  .nc-head-actions .icon-button { width: 44px; height: 44px }
+  .ads-tabs button { display: inline-flex; align-items: center; justify-content: center }
+  .event-card-title { min-height: 44px; display: inline-flex; align-items: center }
+  .event-card .icon-button { width: 44px; height: 44px }
+  .nc-sugg-person { min-height: 44px }
+  .toggle { min-height: 44px }
+}
+@media (prefers-color-scheme: dark) {
+  .coming-note { background: var(--soft) }
+}
 @media (prefers-color-scheme: dark) {
   .community-card { box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35) }
   .community-card:hover { box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5) }
