@@ -50,12 +50,16 @@
   --danger: #be123c;          /* destructive text         · 5.72:1 on #fff1f2  */
   --danger-bg: #fff1f2;
   --danger-line: #fecdd3;
+  --danger-dark: #9f1239;     /* destructive press fill   · white 8.02:1       */
   --warn: #b45309;            /* caution text             · 4.84:1 on #fffbeb  */
   --warn-bg: #fffbeb;
   --warn-line: #fde68a;
   --good: #047857;
   --good-bg: #ecfdf5;
   --good-line: #bbf7d0;
+  --like: #d12b5e;            /* like/heart accent        · 4.98:1 on white    */
+  --pink-soft: #fff0f6;       /* confession chip fill                          */
+  --pink-ink: #b81f8c;        /* confession chip text     · 5.27:1 on fill     */
 
   /* ---- type scale ------------------------------------------------------------- */
   /* Floors: nothing below 11px on mobile. Hierarchy via weight + size, never   */
@@ -123,12 +127,16 @@
     --danger: #fda4af;
     --danger-bg: #2b1218;
     --danger-line: #58202c;
+    --danger-dark: #a11427;   /* white 7.94:1 — dark-mode destructive press fill */
     --warn: #fcd34d;
     --warn-bg: #271d0a;
     --warn-line: #4d3b12;
     --good: #6ee7b7;
     --good-bg: #0b2118;
     --good-line: #1d4633;
+    --like: #fb7185;          /* like/heart on dark      · 6.6:1 on surface    */
+    --pink-soft: #2a1420;
+    --pink-ink: #f472b6;      /* confession chip on dark · 6.5:1 on fill       */
     --elev-1: 0 2px 8px #0000004d;
     --elev-2: 0 4px 15px #00000047;
     --elev-3: 0 8px 22px #00000059;

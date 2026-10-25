@@ -6,6 +6,7 @@ import './styles.css'
 import './styles.onboarding.css'
 import './styles.ads.css'
 import './styles.staff.css'
+import './styles.ui4.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode><App /></React.StrictMode>,

@@ -1,0 +1,77 @@
+/* ============================================================================
+   CAMPUS component system polish — UI-4 (imports LAST: wins over every
+   earlier duplicate definition across the legacy stylesheets)
+
+   HIG-grounded fixes that apply to all interactive components:
+   · every custom button gets a press state (buttons.md › Best practices:
+     "Without a press state, a button can feel unresponsive")
+   · 44px hit regions on coarse pointers (buttons.md › "a button needs a hit
+     region of at least 44x44 pt")
+   · one measured color per role — badge pairs each measured ≥ 4.8:1
+   · focus rings on text entry surfaces (text-fields.md › focus guidance)
+   ========================================================================== */
+
+/* ---- buttons: press states + coarse-pointer hit region --------------------- */
+.primary-button,
+.secondary-button,
+.danger-button,
+.post-button,
+.icon-button,
+.attach-button {
+  transition: transform .12s ease, background-color .14s ease, background .14s ease, filter .14s ease;
+}
+.primary-button:active:not(:disabled) { background: var(--brand-dark); transform: scale(.98) }
+.secondary-button:active:not(:disabled) { background: #e2e7f0; transform: scale(.98) }
+.danger-button:active:not(:disabled) { background: var(--danger-dark); transform: scale(.98) }
+.icon-button:active { background: #e7ebf5 }
+.icon-button:active { transform: scale(.94) }
+
+/* composer Post = the primary CTA — gradient is the signature (docs: tokens) */
+.post-button {
+  background: linear-gradient(100deg, var(--brand), var(--pink));
+  color: #fff;
+}
+.post-button:hover { background: linear-gradient(100deg, var(--brand-dark), var(--pink)) }
+.post-button:active:not(:disabled) { transform: scale(.97) }
+.post-button:disabled { opacity: .6; cursor: progress }
+
+.danger-button { background: var(--danger) }
+.danger-button:hover { background: var(--danger-dark) }
+
+/* icon-only buttons wear a silent enlarged hit zone (34px visual → 44px hit) */
+.icon-button { position: relative }
+.icon-button::after { content: ""; position: absolute; inset: -5px }
+
+@media (pointer: coarse) {
+  .primary-button, .secondary-button, .danger-button, .post-button { min-height: 44px }
+}
+
+/* ---- text entry: consistent focus ring ------------------------------------- */
+.bottom-sheet textarea:focus,
+.bottom-sheet input:focus,
+.overlay textarea:focus,
+.overlay input:focus {
+  border-color: var(--brand);
+  box-shadow: var(--focus-ring);
+}
+
+/* ---- post cards: single color source ---------------------------------------- */
+.post-card { border-color: var(--line) }
+.post-author-line b { color: var(--ink) }
+.post-body { color: var(--ink) }
+@media (max-width: 650px) {
+  .post-card { background: var(--surface) }
+}
+
+/* ---- badges: one measured pair per role -------------------------------------- */
+/* trending → the brand tint pair (--brand-ink 6.14:1 on --brand-soft)         */
+.trending-badge { background: var(--brand-soft); color: var(--brand-ink) }
+/* confession → the measured pink pair (5.27:1 light / 6.5:1 dark)             */
+.confession-badge { background: var(--pink-soft); color: var(--pink-ink) }
+/* action states: like uses --like (4.98:1), repost --good (5.21:1)            */
+.post-actions button.liked,
+.post-actions button:first-child:not(.liked) { color: var(--like) }
+.post-actions button.reposted { color: var(--good) }
+
+/* ---- empty states ------------------------------------------------------------ */
+.empty-state b { color: var(--ink) }
