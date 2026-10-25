@@ -523,5 +523,46 @@ body { background: var(--soft) }
 .comments-sheet .comment-input { min-height: 44px }
 .comment-send { min-width: 44px; min-height: 44px }
 
+/* ---- M12 the full four-ingredient glass audit (glassmorphism recipe, both modes) -----------------
+   Recipe: FROST (blur + saturate) / TRANSLUCENCY / EDGE OF GLASS (rim brighter than the fill,
+   top highlight + bottom shade inset) / DEPTH (float drop). Chrome already carries all four
+   (header/nav/compose measured complete). Three surfaces were short:
+   · .college-pill — border rim only: no saturate, no inset highlights, no float shadow
+   · .bottom-sheet/.comments-sheet — solid paper with a drop but no top rim highlight
+   · the dark drawer — flat sheet, no rim, float not composited for the darker mode        */
+.college-pill {
+  -webkit-backdrop-filter: saturate(160%) blur(14px);
+  backdrop-filter: saturate(160%) blur(14px);
+  /* rim brighter than the navy fill + the reverse (dark) underside, and an ambient float
+     deep enough to lift it off the art — its 9.99:1 legibility keeps the 0.72 scrim      */
+  box-shadow: 0 10px 28px rgba(5, 15, 40, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.4), inset 0 -1px 0 rgba(0, 4, 18, 0.32);
+}
+@media (prefers-color-scheme: dark) {
+  .college-pill { box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 -1px 0 rgba(0, 0, 0, 0.45) }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .college-pill { background: rgba(27, 49, 87, 0.95); -webkit-backdrop-filter: none; backdrop-filter: none }
+}
+
+/* sheets: the iOS material finishes the rim the drop shadow started — a lit top edge on the
+   paper, composited per mode. (The sheet-rise entrance already animates; untouched.)        */
+.bottom-sheet, .comments-sheet {
+  box-shadow: 0 -10px 40px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+@media (prefers-color-scheme: dark) {
+  .bottom-sheet, .comments-sheet { box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.09) }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .bottom-sheet, .comments-sheet { box-shadow: 0 -10px 40px rgba(15, 23, 42, 0.16) }
+}
+
+/* the dark drawer (paired in M10): its sheet gets the same rim treatment, and its float
+   deepens for the darker mode so it doesn't read as a lighter panel floating on flatness   */
+@media (max-width: 650px) and (prefers-color-scheme: dark) {
+  .left-sidebar.mobile-open {
+    box-shadow: 0 20px 56px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  }
+}
+
 
 
