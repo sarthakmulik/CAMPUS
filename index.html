@@ -2,7 +2,19 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+    <!-- M4 installed-app layer (apple-web-app): iOS can open any Home Screen site as
+         a web app since iOS 26, so standalone behavior is not optional. The apple-
+         prefixed capable tag is what enables startup images (the unprefixed one
+         silently kills them); black-translucent is the one status-bar mode that is
+         transparent with a real inset - which is what makes M2's env(safe-area-inset-top)
+         header math visible instead of hidden behind an opaque bar. iOS is the
+         enforcement point for these; Chrome/Android get the keyboard's panel resize
+         from interactive-widget (iOS ignores it harmlessly). -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="CAMPUS" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="theme-color" content="#fbf8f3" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#131318" media="(prefers-color-scheme: dark)" />
     <meta name="description" content="CAMPUS — your college, your people, your space." />
