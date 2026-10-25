@@ -218,11 +218,13 @@ body { background: var(--soft) }
 /* ---- gradient reconciliation --------------------------------------------------
    leaderboard tile → the brand indigo, confessions tile → deep orchid. Fixed
    hexes on purpose: sign surfaces keep their hue in both modes (like the
-   brand mark does), and the values clear every floor — white text 5.06:1 /
-   5.21:1, block-vs-canvas ≥3.5:1 light and dark. The old orchid gradient
-   measured 3.61–3.68:1 with its white labels — this pass fixes that miss.    */
-.leaderboard { background: #6654f5 }
-.confessions { background: #c4278f }
+   brand mark does). R1 restored the vivid gradients with measured stops:
+   every interpolated point of both gradients clears white ≥5.06:1 /
+   ≥5.21:1 light (≥4.77:1 / ≥4.91:1 on cream) and ≥3.5:1 block-vs-canvas —
+   the old UI-6 full-flatten is retired; the old orchid 3.61:1 miss stays
+   retired too (its failing stops are not reused).                          */
+.leaderboard { background: linear-gradient(120deg, #6654f5, #5140df) }
+.confessions { background: linear-gradient(120deg, #c4278f, #9f2069) }
 .feature-card { transition: transform .16s var(--ease-out), box-shadow .16s var(--ease-out) }
 .feature-card:active { transform: scale(.98) }
 

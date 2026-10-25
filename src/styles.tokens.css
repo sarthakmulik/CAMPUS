@@ -27,9 +27,13 @@
   /* ---- ink (text) ---------------------------------------------------------- */
   --ink: #17284c;             /* primary text             · 13.72:1 on cream   */
   --ink-strong: #0f1d3d;      /* headings, dense numbers  · 15.69:1 on cream   */
-  --ink-secondary: #5d6d94;   /* secondary text           · 4.86:1 on cream    */
-                              /* (replaces #7d8eae, which measured 3.12:1 — */
-                              /*  below the 4.5:1 minimum for small text)   */
+  --ink-secondary: #627298;   /* secondary text           · 4.53:1 on cream   */
+                              /* (R1 halfway shade: softer than the UI-1   */
+                              /*  correction #5d6d94, yet ≥4.5:1 on every  */
+                              /*  light surface — cream 4.53, white 4.79,  */
+                              /*  sidebar 4.73; original #7d8eae measured  */
+                              /*  3.12:1, far below the 4.5:1 small-text   */
+                              /*  floor)                                    */
   --ink-faint: #7d8eae;       /* decorative only — never readable text        */
   --muted: var(--ink-secondary); /* legacy alias consumed across older CSS    */
 
