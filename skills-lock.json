@@ -7,11 +7,29 @@
       "skillPath": "skills/apple-design/SKILL.md",
       "computedHash": "f3f1d2cbc8f3e79ccddff05f4e42d34d995f057fb30ff670e4edf8c87d568b69"
     },
+    "apple-web-app": {
+      "source": "joe-bell/skills",
+      "sourceType": "github",
+      "skillPath": "skills/apple-web-app/SKILL.md",
+      "computedHash": "b3af36dbaf06db849c05edb099e8a07843f51b8e400c2f6440e6313ba9355386"
+    },
     "fluid-functionalism": {
       "source": "mickadesign/fluid-functionalism",
       "sourceType": "github",
       "skillPath": "skills/fluid-functionalism/SKILL.md",
       "computedHash": "f563c314fa6c3f33cb43bc48bb11f72da672dace3a633c0fc9eeed017b4fab72"
+    },
+    "glassmorphism": {
+      "source": "iart-ai/web-animation-skills",
+      "sourceType": "github",
+      "skillPath": "skills/glassmorphism/SKILL.md",
+      "computedHash": "c4324b3381b3252afb6644a4ad12facc2226d51a47778fa7f1bb6a1cb800cc2b"
+    },
+    "improve-ui": {
+      "source": "ibelick/ui-skills",
+      "sourceType": "github",
+      "skillPath": "skills/improve-ui/SKILL.md",
+      "computedHash": "31c09b79a1c196adccb1637a225cef54f537da87430fda0ba309ef83e78f10e5"
     }
   }
 }
