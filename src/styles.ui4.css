@@ -21,9 +21,9 @@
   transition: transform .12s ease, background-color .14s ease, background .14s ease, filter .14s ease;
 }
 .primary-button:active:not(:disabled) { background: var(--brand-dark); transform: scale(.98) }
-.secondary-button:active:not(:disabled) { background: #e2e7f0; transform: scale(.98) }
+.secondary-button:active:not(:disabled) { background: var(--line); transform: scale(.98) }
 .danger-button:active:not(:disabled) { background: var(--danger-dark); transform: scale(.98) }
-.icon-button:active { background: #e7ebf5 }
+.icon-button:active { background: var(--line) }
 .icon-button:active { transform: scale(.94) }
 
 /* composer Post = the primary CTA — gradient is the signature (docs: tokens) */
@@ -73,5 +73,133 @@
 .post-actions button:first-child:not(.liked) { color: var(--like) }
 .post-actions button.reposted { color: var(--good) }
 
+/* entry fields: the sheet's textarea keeps UA-default white otherwise — set
+   the role explicitly: raised-field fill, ink text, faded placeholder          */
+.composer-sheet textarea,
+.composer-sheet input { background: var(--surface); color: var(--ink) }
+.composer-sheet textarea::placeholder,
+.composer-sheet input::placeholder { color: var(--ink-faint) }
+
 /* ---- empty states ------------------------------------------------------------ */
 .empty-state b { color: var(--ink) }
+
+/* ============================================================================
+   UI-5 — OS dark mode, first pass: the shell, feed, composer, cards, sheets.
+   For OS-dark users every surface below now consumes the token layer, so the
+   media query in styles.tokens.css turns the whole app down together.
+
+   Light values are chosen to match what the hardcoded rules rendered (cream
+   shell, white paper, glass chrome), so light mode is pixel-stable.
+   Interiors deliberately deferred: staff console + ads css, onboarding rooms
+   (chat/settings/wizard) — those keep their light look for now, documented.
+   ========================================================================== */
+
+/* ---- the three-column shell -------------------------------------------------- */
+body { background: var(--soft) }
+.left-sidebar { background: var(--soft) }
+.main-column { background: var(--surface) }
+.desktop-topbar { background: var(--surface) }
+.right-sidebar { background: var(--soft) }
+
+/* search trigger: an inset field on the bar (HIG search-field treatment)       */
+.desktop-search-trigger { background: var(--soft) }
+.desktop-search-trigger svg { color: var(--ink-secondary) }
+
+/* ---- floating chrome: header + bottom nav share one glass token --------------- */
+.mobile-header { background: var(--surface-glass); border-bottom-color: var(--line) }
+.mobile-header.scrolled { border-bottom-color: var(--line-strong); box-shadow: var(--elev-2) }
+.mobile-bottom-nav { background: var(--surface-glass); border-top-color: var(--line) }
+.brand-mini { color: var(--ink) }
+
+/* ---- feed ---------------------------------------------------------------------- */
+.feed-tabs { background: var(--surface) }
+.feed-tabs button { color: var(--ink-secondary) }
+.feed-tabs button.selected { color: var(--ink) }
+
+/* ---- cards & composer ----------------------------------------------------------- */
+.post-card { background: var(--surface-raised) }
+.post-card:hover { background: var(--surface-raised) }
+.composer-inline { background: var(--surface-raised) }
+.campus-avatar { border-color: var(--brand-soft) }
+
+/* ---- sheets & modals: raised paper, tokened scrim --------------------------------- */
+.overlay { background: var(--scrim) }
+.bottom-sheet { background: var(--surface-raised) }
+.auth-modal { background: var(--surface-raised) }
+.sheet-handle { background: var(--line-strong) }
+.composer-sheet textarea:focus, .composer-sheet input:focus { border-color: var(--brand) }
+.kind-option { background: var(--surface) }
+.kind-option.chosen { background: var(--brand-soft); border-color: var(--brand-line) }
+
+/* ---- buttons & dots that stayed light ----------------------------------------------
+   · secondary-button: the "quiet" button — ink on cream in both modes
+   · icon-button: raised circle (white was already invisible-on-white in light)
+   · unread/notification dots use the like accent (engagement, not destruction)      */
+.secondary-button { background: var(--soft); color: var(--ink) }
+.secondary-button:hover { background: var(--line) }
+.icon-button { background: var(--surface); color: var(--ink-secondary) }
+.icon-button:hover { background: var(--soft) }
+.notification-dot, .unread-dot { background: var(--like); border-color: var(--surface) }
+
+/* two-class specificity needed: styles.css hardcodes this exact rule          */
+.topbar-actions .icon-button { background: var(--surface); color: var(--ink-secondary) }
+
+/* ---- sidebar profile chip (white card in styles.css 1051-rpx block) ---------- */
+.profile-chip { background: var(--surface); border-color: var(--line) }
+.profile-chip:hover { background: var(--soft) }
+.profile-chip-copy b { color: var(--ink) }
+
+/* ---- composer kind tools: alpha-tinted accent chips (0.13 alpha adapts to
+   the mode — over cream they land on the original pastels, over the dark
+   raised card on muted tinted circles; icons are decorative so ≥3:1 applies,
+   brand measured 6.83:1, pink 4.23:1) ----------------------------------------- */
+.composer-tools button:not(.post-button) { color: var(--brand); background: #6654f522 }
+.composer-tools button:nth-child(2) { color: var(--pink); background: #f04f9b22 }
+.composer-tools button:nth-child(3) { color: #f59e0b; background: #f59e0b22 }
+
+/* ---- feed badge roles: one token pair each -----------------------------------
+   college badge keeps its blue identity (--college pair, 5.08:1 light /
+   7.76:1 dark); poll chips use the status families they already belong to.     */
+.college-badge { background: var(--college-soft); color: var(--college-ink) }
+
+.poll-chip { background: var(--soft) }
+.poll-chip.multi { background: var(--brand-soft); color: var(--brand) }
+.poll-chip.time { background: var(--warn-bg); color: var(--warn) }
+.poll-chip.ended { background: var(--danger-bg); color: var(--danger) }
+.poll-chip.recorded { background: var(--good-bg); color: var(--good) }
+.poll-chip.results { background: var(--soft); color: var(--ink-secondary) }
+
+/* poll options: tappable rows read as inset paper                              */
+.poll-option { background: var(--surface); border-color: var(--line-strong); color: var(--ink) }
+.poll-option.pick:hover { border-color: var(--brand-line); background: var(--soft) }
+.poll-option.pick.checked { background: var(--brand-soft); border-color: var(--brand) }
+
+/* post meta line (onboarding.css renders the feed post header)                  */
+.post-namerow b, .post-idline b { color: var(--ink) }
+.post-idline { color: var(--ink-secondary) }
+.post-idline span, .post-idline .edited-marker { color: var(--ink-secondary) }
+
+/* post actions: the onboarding stylesheet hardcodes #54688a one file later
+   than styles.css — same-class-color override needed here too                   */
+/* post actions: the onboarding stylesheet hardcodes #54688a one file later
+   than styles.css — same-class-color override needed here too                    */
+.post-actions button { color: var(--ink-secondary) }
+.post-actions button:hover { background: var(--brand-soft) }
+
+/* poll results: bars fill in tinted violet (light: the original pastels;
+   dark: brand-line → brand-soft so the winning bar reads without glare)          */
+.poll-bar { background: linear-gradient(90deg, var(--brand-soft), var(--brand-line)) }
+.poll-option.result.mine .poll-bar { background: linear-gradient(90deg, var(--brand-line), var(--brand-soft)) }
+.poll-option.result { background: var(--surface); border-color: var(--line-strong) }
+.poll-option.result:hover { border-color: var(--line-strong) }
+.poll-option.result.mine { border-color: var(--brand) }
+.poll-option.result.mine .poll-option-label { color: var(--brand-ink) }
+.poll-option.result.mine .poll-figures { color: var(--brand-ink) }
+.poll-hint { color: var(--ink-secondary) }
+.poll-error { color: var(--danger) }
+
+/* ---- section pages (mobile interior containers, 650-block) -------------------- */
+.section-page { background: var(--surface) }
+.section-page h2 { color: var(--ink) }
+.section-hero-icon { background: var(--brand-soft); color: var(--brand) }
+.suggestion .avatar, .suggestion-copy b { color: var(--ink) }

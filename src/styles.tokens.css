@@ -21,6 +21,8 @@
   --soft: #fbf8f3;            /* page background          · ink 13.7:1         */
   --surface: #ffffff;         /* cards, sheets, bars      · ink 15.1:1         */
   --surface-raised: #ffffff;  /* popovers, toasts         · ink 15.1:1         */
+  --surface-glass: #ffffffed; /* floating chrome: header, bottom nav           */
+  --scrim: #0f172a70;         /* overlay behind sheets & modals               */
 
   /* ---- ink (text) ---------------------------------------------------------- */
   --ink: #17284c;             /* primary text             · 13.72:1 on cream   */
@@ -60,6 +62,8 @@
   --like: #d12b5e;            /* like/heart accent        · 4.98:1 on white    */
   --pink-soft: #fff0f6;       /* confession chip fill                          */
   --pink-ink: #b81f8c;        /* confession chip text     · 5.27:1 on fill     */
+  --college-soft: #eff3ff;    /* college badge fill                            */
+  --college-ink: #4a5fc4;     /* college badge text      · 5.08:1 on fill     */
 
   /* ---- type scale ------------------------------------------------------------- */
   /* Floors: nothing below 11px on mobile. Hierarchy via weight + size, never   */
@@ -110,6 +114,8 @@
     --soft: #131318;          /* page background         · ink 13.9:1          */
     --surface: #171722;       /* cards                   · ink 14.97:1         */
     --surface-raised: #1e1e2b;
+    --surface-glass: #171722ee; /* floating chrome over dark content            */
+    --scrim: #05050fd9;       /* overlay behind sheets & modals               */
     --ink: #edeaf6;           /* primary text            · 14.97:1 on surface  */
     --ink-strong: #f8f6ff;
     --ink-secondary: #a2adc7; /* secondary text          · 7.9:1 on surface    */
@@ -137,6 +143,8 @@
     --like: #fb7185;          /* like/heart on dark      · 6.6:1 on surface    */
     --pink-soft: #2a1420;
     --pink-ink: #f472b6;      /* confession chip on dark · 6.5:1 on fill       */
+    --college-soft: #1b2035;
+    --college-ink: #9fb0ff;   /* college badge on dark   · 7.76:1 on fill      */
     --elev-1: 0 2px 8px #0000004d;
     --elev-2: 0 4px 15px #00000047;
     --elev-3: 0 8px 22px #00000059;
