@@ -416,5 +416,20 @@ body { background: var(--soft) }
   .chat-compose { background: var(--surface-raised) }
 }
 
+/* ---- M7 drawer & bottom-nav motion (three-spring API) ------------------------------------------
+   The drawer already slides (open↔translateX(-105%)) and the scrim already fades — but on the
+   legacy one-off curve. Re-wiring to the tokens eases the feel without touching behavior, and
+   the transform-only drawer still dies under the UI-1 reduced-motion kill-switch. The finger
+   drag state (.swiping) must keep transition:none so the panel tracks the touch exactly.       */
+@media (max-width: 650px) {
+  .left-sidebar, .left-sidebar.mobile-open {
+    transition: transform var(--motion-moderate) var(--ease-spring), visibility 0s linear var(--motion-moderate);
+  }
+  .left-sidebar.swiping, .left-sidebar.swiping.mobile-open { transition: none }
+  .mobile-bottom-nav button { transition: transform var(--motion-fast) var(--ease-out) }
+  .mobile-bottom-nav button:active { transform: scale(0.94) }
+  .mobile-bottom-nav .mobile-create:active { transform: scale(0.9) }
+}
+
 
 
