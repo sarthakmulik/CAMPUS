@@ -105,11 +105,54 @@ body { background: var(--soft) }
 .desktop-search-trigger { background: var(--soft) }
 .desktop-search-trigger svg { color: var(--ink-secondary) }
 
-/* ---- floating chrome: header + bottom nav share one glass token --------------- */
-.mobile-header { background: var(--surface-glass); border-bottom-color: var(--line) }
-.mobile-header.scrolled { border-bottom-color: var(--line-strong); box-shadow: var(--elev-2) }
-.mobile-bottom-nav { background: var(--surface-glass); border-top-color: var(--line) }
+/* ---- M1 glass chrome ---------------------------------------------------------------------------
+   The four glass ingredients (glassmorphism skill): FROST (blur + saturate — saturate keeps
+   backdrop color vivid through the blur, which plain blur washes out), TRANSLUCENCY (the
+   --surface-glass alpha fill), EDGE OF GLASS (inset top highlight brighter than the fill, plus
+   the hairline border), DEPTH (layered drop + ambient shadow). Glass count on screen stays at
+   header + bottom nav (+ sheets transiently) — the recipe's sane ceiling. Animated properties
+   are the cheap ones (shadow/border); blur radii never animate on scroll. Safari pairs the
+   -webkit- prefix on every backdrop-filter.                                    */
+.mobile-header {
+  background: var(--surface-glass);
+  -webkit-backdrop-filter: saturate(160%) blur(12px);
+  backdrop-filter: saturate(160%) blur(12px);
+  border-bottom-color: var(--line);
+  box-shadow: 0 1px 0 #ffffff40 inset, 0 6px 18px #2e355d14;
+}
+.mobile-header.scrolled { border-bottom-color: var(--line-strong); box-shadow: 0 1px 0 #ffffff40 inset, var(--elev-2) }
+.mobile-bottom-nav {
+  background: var(--surface-glass);
+  -webkit-backdrop-filter: saturate(160%) blur(14px);
+  backdrop-filter: saturate(160%) blur(14px);
+  border-top-color: var(--line);
+  box-shadow: 0 -1px 0 #ffffff33 inset, 0 -8px 22px #2e355d12;
+}
 .brand-mini { color: var(--ink) }
+
+/* the bottom-nav active pill painted pale #efedff in both modes — in dark that put the
+   brand icon (3.05:1) on a nearly white chip; --brand-soft is the mode-correct pair       */
+.mobile-bottom-nav button.active:before { background: var(--brand-soft) }
+
+/* dark glass: same frost, dimmer lit edge, deeper float                                  */
+@media (prefers-color-scheme: dark) {
+  .mobile-header { box-shadow: 0 1px 0 #ffffff14 inset, 0 6px 18px #00000055 }
+  .mobile-header.scrolled { box-shadow: 0 1px 0 #ffffff14 inset, var(--elev-2) }
+  .mobile-bottom-nav { box-shadow: 0 -1px 0 #ffffff12 inset, 0 -8px 22px #0000004d }
+}
+
+/* glass is decoration, never a requirement (glassmorphism a11y contract):
+   users who reduce transparency get solid chrome; browsers without
+   backdrop-filter get opaque-enough fills.                                   */
+@media (prefers-reduced-transparency: reduce) {
+  .mobile-header, .mobile-bottom-nav {
+    background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none;
+    box-shadow: var(--elev-1);
+  }
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .mobile-header, .mobile-bottom-nav { background: var(--surface-raised) }
+}
 
 /* ---- feed ---------------------------------------------------------------------- */
 .feed-tabs { background: var(--surface) }
