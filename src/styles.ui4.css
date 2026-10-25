@@ -703,3 +703,18 @@ body { background: var(--soft) }
 @media (prefers-color-scheme: dark) {
   .post-menu button { color: var(--ink-secondary) }
 }
+
+/* ---- M15b self-loop closing pass (re-audit stragglers) ----
+   The final re-audit over the fixed surfaces surfaced four last sub-44 survivors, all grown
+   and verified live: chat per-message .chat-msg-actions dots 22 -> 44 (circle, always visible
+   under @media(hover:none) so it is a real touch target), chat thread-head .icon-button
+   (chat-back / search-in-thread) width 42 -> 44 (height already 44), comments-sheet inline
+   Reply in .comment-tools 13px tall -> 44 (inline-flex keeps left alignment), and the
+   new-group dialog's classless inputs (Group name / Add classmates) 38 -> 44 scoped to
+   .group-creator so the identically-named .group-name sender label in threads is untouched. */
+@media (max-width: 650px) {
+  .chat-msg-actions { min-width: 44px; min-height: 44px }
+  .chat-thread-head .icon-button { min-width: 44px }
+  .comment-tools button { min-height: 44px }
+  .group-creator input { min-height: 44px }
+}
