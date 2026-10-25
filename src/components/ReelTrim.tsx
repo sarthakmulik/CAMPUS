@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useBodyScrollLock } from '../lib/scrollLock'
 import { X, Play, Pause, Check, Scissors } from 'lucide-react'
 import { formatClipTime, probeVideo, REEL_WINDOW_SECONDS } from '../lib/media'
+import { attachSheetDismiss } from '../lib/sheetDismiss'
 
 /**
  * Reel trim modal: pick a window of at most 30 seconds from a picked video.
@@ -20,6 +21,9 @@ export default function ReelTrim({
 }) {
   // trim sheet over a dimmed overlay — lock the feed behind it
   useBodyScrollLock()
+  // swipe-to-dismiss engages only on the grab zones, so the trimmer's own
+  // drags inside the track stay untouched
+  const dismissRef = useRef<(() => void) | null>(null)
   const [duration, setDuration] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [start, setStart] = useState(0)
@@ -92,7 +96,7 @@ export default function ReelTrim({
 
   return (
     <div className="overlay trim-overlay" onMouseDown={event => { if (event.target === event.currentTarget) onCancel() }}>
-      <section className="bottom-sheet trim-sheet" role="dialog" aria-label="Trim reel">
+      <section className="bottom-sheet trim-sheet" role="dialog" aria-label="Trim reel" ref={el => { dismissRef.current?.(); dismissRef.current = el ? attachSheetDismiss(el, onCancel) : null }}>
         <div className="sheet-handle" />
         <div className="sheet-heading">
           <div>

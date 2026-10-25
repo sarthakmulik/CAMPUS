@@ -47,6 +47,7 @@ import ShareContentSheet, { type ShareTarget } from './components/chat/ShareCont
 import type { CampusPost, PollState, PostKind } from './types'
 import * as media from './lib/media'
 import { REEL_WINDOW_SECONDS } from './lib/media'
+import { attachSheetDismiss } from './lib/sheetDismiss'
 
 const seedPosts: CampusPost[] = [
   { id:'p1', author:'Campus Bot', handle:'@campus', initials:'CB', college:'SPPU', time:'a month ago', body:'Exam week survival kit: coffee, notes you barely understand, and pure panic. We got this. 💪 #Exams', likes:412, comments:29, reposts:7, kind:'post', trending:true, tag:'#Exams' },
@@ -1181,7 +1182,25 @@ function CAMPUSApp() {
 
   const mainRef = useRef<HTMLElement | null>(null)
   const sidebarRef = useRef<HTMLElement | null>(null)
+  const mobileHeaderRef = useRef<HTMLElement | null>(null)
+  // swipe-dismiss attaches through ref callbacks (React 18: no ref cleanup
+  // return), so each sheet keeps its own teardown holder
+  const composerDismiss = useRef<(() => void) | null>(null)
+  const editDismiss = useRef<(() => void) | null>(null)
+  const confirmDismiss = useRef<(() => void) | null>(null)
   const [slideDir, setSlideDir] = useState<'none' | 'from-right' | 'from-left'>('none')
+
+  // scroll-edge state for the fixed mobile header: while a page sits at the
+  // top the bar reads as frameless; once content passes underneath, the
+  // hairline deepens into a soft shadow so it separates from scrolling
+  // content (HIG scroll-edge treatment). DOM-only — no re-render per scroll.
+  const updateHeaderEdge = () => {
+    const header = mobileHeaderRef.current
+    if (!header) return
+    const scroller = mainRef.current
+    const top = scroller ? scroller.scrollTop : 0
+    header.classList.toggle('scrolled', top > 6)
+  }
 
   // restore each page's scroll depth synchronously before paint (mobile only —
   // the pages now scroll inside .main-column, so the window never scrolls and
@@ -1192,6 +1211,7 @@ function CAMPUSApp() {
     if (!scroller) return
     const saved = pageScrollMemory.current[activeNav]
     scroller.scrollTop = typeof saved === 'number' ? saved : 0
+    updateHeaderEdge()
   }, [activeNav])
   const slideTimer = useRef<number | null>(null)
   const swipe = useRef({
@@ -1376,11 +1396,17 @@ function CAMPUSApp() {
     main.addEventListener('touchmove', onSwipeMove, { passive: false })
     main.addEventListener('touchend', finishOrCancel, { passive: true })
     main.addEventListener('touchcancel', finishOrCancel, { passive: true })
+    // scroll-edge header: track the scroller directly (on mobile the pages
+    // scroll inside .main-column — the window never scrolls)
+    const onScrollEdge = () => updateHeaderEdge()
+    main.addEventListener('scroll', onScrollEdge, { passive: true })
+    onScrollEdge()
     cleanupRef.current = () => {
       main.removeEventListener('touchstart', onSwipeStart)
       main.removeEventListener('touchmove', onSwipeMove)
       main.removeEventListener('touchend', finishOrCancel)
       main.removeEventListener('touchcancel', finishOrCancel)
+      main.removeEventListener('scroll', onScrollEdge)
       if (slideTimer.current) window.clearTimeout(slideTimer.current)
       for (const id of pendingDragTimers.current) window.clearTimeout(id)
       pendingDragTimers.current = []
@@ -1750,7 +1776,7 @@ function CAMPUSApp() {
 
   return (
     <div className={`app-shell${dmThread && isMobileViewport() ? ' nav-hidden' : ''}`}>
-      <header className="mobile-header">
+      <header className="mobile-header" ref={el => { mobileHeaderRef.current = el }}>
         <div className="mobile-header-left">
           <button className="icon-button" aria-label="Menu" onClick={() => setMobileMenu(true)}><Menu size={21}/></button>
           <button className="brand-mini" onClick={() => navigate('Home')}><span className="brand-mark">C</span><b>CAMPUS</b></button>
@@ -2153,7 +2179,7 @@ function CAMPUSApp() {
         </nav>
       )}
 
-      {composer && <div className="overlay" onMouseDown={e => {if(e.target===e.currentTarget)setComposer(false)}}><section className="bottom-sheet composer-sheet"><div className="sheet-handle"/><div className="sheet-heading"><div><span className="eyebrow">SHARE WITH YOUR CAMPUS</span><h2>Create {composerKind === 'confession' ? 'a confession' : composerKind === 'poll' ? 'a poll' : composerKind === 'reel' ? 'a reel' : 'a post'}</h2></div><button className="icon-button" onClick={() => setComposer(false)} aria-label="Close composer"><X size={20}/></button></div>
+      {composer && <div className="overlay" onMouseDown={e => {if(e.target===e.currentTarget)setComposer(false)}}><section className="bottom-sheet composer-sheet" ref={el => { composerDismiss.current?.(); composerDismiss.current = el ? attachSheetDismiss(el, () => setComposer(false)) : null }}><div className="sheet-handle"/><div className="sheet-heading"><div><span className="eyebrow">SHARE WITH YOUR CAMPUS</span><h2>Create {composerKind === 'confession' ? 'a confession' : composerKind === 'poll' ? 'a poll' : composerKind === 'reel' ? 'a reel' : 'a post'}</h2></div><button className="icon-button" onClick={() => setComposer(false)} aria-label="Close composer"><X size={20}/></button></div>
         <div className="composer-kind-row">{([{kind:'post' as PostKind,label:'Post',icon:Image,style:'purple'},{kind:'reel' as PostKind,label:'Reel',icon:Clapperboard,style:'pink'},{kind:'poll' as PostKind,label:'Poll',icon:ChartNoAxesColumn,style:'orange'},{kind:'confession' as PostKind,label:'Confess',icon:BookOpen,style:'dark'}]).map(item=><button key={item.kind} className={`kind-option ${composerKind===item.kind?'chosen':''}`} onClick={() => handleKindSelect(item.kind)}><span className={`kind-icon ${item.style}`}><item.icon size={22}/></span><b>{item.label}</b></button>)}</div>
         <textarea value={draft} onChange={e => setDraft(e.target.value)} placeholder={composerKind==='confession'?'Share anonymously with your college…':composerKind==='poll'?'Ask your campus a question…':'What’s happening on campus?'} maxLength={500}/>
         {(composerKind === 'post') && (
@@ -2257,7 +2283,7 @@ function CAMPUSApp() {
 
       {editingPost && (
         <div className="overlay" onMouseDown={e => { if (e.target === e.currentTarget) setEditingPost(null) }}>
-          <section className="bottom-sheet composer-sheet" role="dialog" aria-label="Edit post">
+          <section className="bottom-sheet composer-sheet" role="dialog" aria-label="Edit post" ref={el => { editDismiss.current?.(); editDismiss.current = el ? attachSheetDismiss(el, () => setEditingPost(null)) : null }}>
             <div className="sheet-handle"/>
             <div className="sheet-heading"><div><span className="eyebrow">YOUR POST</span><h2>Edit post</h2></div><button className="icon-button" onClick={() => setEditingPost(null)} aria-label="Close editor"><X size={20}/></button></div>
             {editingPost.media && editingPost.media.length > 0 && (
@@ -2275,7 +2301,7 @@ function CAMPUSApp() {
 
       {deleteTarget && (
         <div className="overlay" onMouseDown={e => { if (e.target === e.currentTarget) setDeleteTarget(null) }}>
-          <section className="bottom-sheet confirm-sheet" role="dialog" aria-label="Delete post">
+          <section className="bottom-sheet confirm-sheet" role="dialog" aria-label="Delete post" ref={el => { confirmDismiss.current?.(); confirmDismiss.current = el ? attachSheetDismiss(el, () => setDeleteTarget(null)) : null }}>
             <div className="sheet-handle"/>
             <div className="sheet-heading"><div><span className="eyebrow">DELETE POST</span><h2>Delete this post?</h2></div><button className="icon-button" onClick={() => setDeleteTarget(null)} aria-label="Cancel delete"><X size={20}/></button></div>
             <p className="confirm-copy">“{deleteTarget.body.slice(0, 120)}{deleteTarget.body.length > 120 ? '…' : ''}”</p>

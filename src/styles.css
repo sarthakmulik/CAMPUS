@@ -28,3 +28,23 @@ body{background:var(--soft);color:var(--ink)}
 
 /* UI-2: <small> inherits no UA shrink below the 11px type floor */
 .right-footer small{font-size:11px}
+
+/* ==== UI-3: sheet anatomy ==================================================
+   Grabber: 4px bar but a silent 44px-tall hit zone (hit-target floor), and
+   the grab zones own their touches so the sheet follows the finger without
+   fighting scroll. Dragging = 1:1 follow (no transition); dismissal slides
+   the sheet out and fades its scrim; everything else springs back. */
+.sheet-handle{position:relative}
+.sheet-handle::before{content:"";position:absolute;inset:-16px -70px}
+.bottom-sheet .sheet-handle,.bottom-sheet .sheet-heading{touch-action:none}
+.bottom-sheet.sheet-dragging{transition:none}
+.bottom-sheet.sheet-closing{transition:transform .22s cubic-bezier(.55,.06,.68,.19);transform:translateY(105%)}
+.overlay.overlay-fade{transition:opacity .22s ease;opacity:0}
+.bottom-sheet{animation:sheet-rise .26s cubic-bezier(0.22,0.61,0.36,1)}
+@keyframes sheet-rise{from{transform:translateY(26px);opacity:.5}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion: reduce){.bottom-sheet{animation:none}.bottom-sheet.sheet-closing{transition:none;transform:none}}
+
+/* Scroll-edge header: the fixed mobile bar reads frameless at the top of a
+   page; once content passes underneath, the hairline deepens into a soft
+   shadow edge so it separates from scrolling content. */
+.mobile-header.scrolled{border-bottom-color:#e2e7ef;box-shadow:0 5px 16px #22355d12}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   AlertCircle, Bell, BellOff, CheckCircle2, Clock, Loader2, Mail, MessageSquare,
@@ -9,6 +9,7 @@ import type { NotificationPrefs } from '../lib/db'
 import {
   currentPermission, disablePush, enablePush, pushConfigured, pushSupported,
 } from '../lib/webPush'
+import { attachSheetDismiss } from '../lib/sheetDismiss'
 
 type Props = {
   open: boolean
@@ -44,6 +45,8 @@ const CATEGORY_LABEL: Record<(typeof CATEGORY_KEYS)[number], string> = {
  */
 export default function NotificationSettings({ open, onClose, notify, userId }: Props) {
   const [prefs, setPrefs] = useState<NotificationPrefs | null>(null)
+  // swipe-to-dismiss holder (attach/cleanup through the ref callback)
+  const dismissRef = useRef<(() => void) | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [savingKey, setSavingKey] = useState<string | null>(null)
@@ -169,7 +172,7 @@ export default function NotificationSettings({ open, onClose, notify, userId }: 
   return (
     createPortal(
       <div className="overlay" onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}>
-        <section className="bottom-sheet nc-settings" role="dialog" aria-label="Notification settings">
+        <section className="bottom-sheet nc-settings" role="dialog" aria-label="Notification settings" ref={el => { dismissRef.current?.(); dismissRef.current = el ? attachSheetDismiss(el, onClose) : null }}>
         <div className="sheet-handle"/>
         <div className="sheet-heading">
           <div>

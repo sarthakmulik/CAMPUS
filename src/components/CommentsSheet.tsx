@@ -7,6 +7,7 @@ import {
   setCommentPinned, toggleCommentLike, updateComment, type CampusComment,
 } from '../lib/db'
 import type { CampusPost } from '../types'
+import { attachSheetDismiss } from '../lib/sheetDismiss'
 
 type CommentsSheetProps = {
   post: CampusPost
@@ -33,6 +34,8 @@ export default function CommentsSheet({
 }: CommentsSheetProps) {
   // bottom sheet over a dimmed overlay — keep the feed from scrolling behind it
   useBodyScrollLock()
+  // swipe-to-dismiss attaches through a ref callback; holder keeps the teardown
+  const dismissRef = useRef<(() => void) | null>(null)
   const [comments, setComments] = useState<CampusComment[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -273,7 +276,7 @@ export default function CommentsSheet({
 
   return createPortal(
     <div className="overlay comments-overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-      <section className={`bottom-sheet comments-sheet ${theme === 'dark' ? 'dark' : ''}`} role="dialog" aria-label={`Comments on ${post.anonymous ? 'this post' : 'this post'}`}>
+      <section className={`bottom-sheet comments-sheet ${theme === 'dark' ? 'dark' : ''}`} role="dialog" aria-label={`Comments on ${post.anonymous ? 'this post' : 'this post'}`} ref={el => { dismissRef.current?.(); dismissRef.current = el ? attachSheetDismiss(el, onClose) : null }}>
         <div className="sheet-handle"/>
         <div className="sheet-heading">
           <div>
