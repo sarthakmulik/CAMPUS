@@ -431,5 +431,18 @@ body { background: var(--soft) }
   .mobile-bottom-nav .mobile-create:active { transform: scale(0.9) }
 }
 
+/* ---- M8 weight ramp (variable Inter) -------------------------------------------------------
+   Measured at 390px: a feed tab's label grows 69.3 -> 71.2px when it takes its active 650
+   weight — an instant 1.9px snap that ripples its neighbors. Inter is now the variable
+   font (M2), so font-weight is animatable: the ramp smears the shift over the same beat,
+   which is the "weight changes without layout shift" discipline (the shift is real but
+   settles while moving, unreadable as a jump). Keyframe-pop rules and the reduced-motion
+   kill-switch are unaffected; 650 stays interpolated, never snapped to 700.            */
+.feed-tabs button,
+.lb-tabs button, .lb-periods button,
+.community-tabs button {
+  transition: color var(--motion-fast) ease, font-weight var(--motion-fast) linear, background-color var(--motion-fast) ease, border-color var(--motion-fast) ease;
+}
+
 
 
