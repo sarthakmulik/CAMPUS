@@ -355,4 +355,43 @@ body { background: var(--soft) }
   .feed-tabs button { padding: 0 10px }
 }
 
+/* ---- M5 chats: glass composer + amber-header dark pairing -------------------------------------
+   The DM composer stops being a flex child and becomes an overlay pinned to the bottom of
+   the thread pane; the timeline scrolls beneath it and the glass blur fogs it — the iMessage
+   material. It is glass element #3 on a chats screen (mobile header, bottom nav, composer —
+   the recipe's ceiling). --surface-glass carries both modes (dark #171722ee), so the beige
+   var(--soft) fill it replaces never returns in dark either.                                    */
+.chat-thread-pane { position: relative } /* absolute anchor for the overlay; mobile pane is already absolute */
+.chat-compose {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  z-index: 3;
+  background: var(--surface-glass);
+  -webkit-backdrop-filter: saturate(160%) blur(16px);
+  backdrop-filter: saturate(160%) blur(16px);
+  box-shadow: 0 -1px 0 #ffffff1c inset, 0 -10px 30px #2e355d0f;
+}
+.chat-scroll { padding-bottom: 78px }   /* clearance so the last bubble clears the overlay */
+@media (max-width: 650px) { .chat-scroll { padding-bottom: 84px } }
+@media (min-width: 1100px) { .chat-compose { left: 0; right: 0 } } /* its own 760px column centers via margin-inline:auto */
+@media (prefers-color-scheme: dark) {
+  .chat-compose { box-shadow: 0 -1px 0 #ffffff12 inset, 0 -10px 30px #00000052 }
+  /* dark pairing for the M5 hex restores: headers merge into the panel,
+     inputs keep the dimmed inset the dark rooms already used */
+  .cc-head, .cc-thread-head, .chat-thread-head { background: var(--surface) }
+  .chat-input-row, .chat-toolbar-row { background: var(--surface) }
+  .chat-input-row input, .chat-toolbar-row input { background: var(--soft) }
+  .chats-global-search, .chats-filter-input, .chats-hint, .chat-day-start { background: var(--soft) }
+  .chat-thread-pane { background: var(--surface) }
+  .chat-compose { background: var(--surface-glass) }
+}
+/* glass is decoration, never a requirement */
+@media (prefers-reduced-transparency: reduce) {
+  .chat-compose { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: var(--elev-1) }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .chat-compose { background: var(--surface-raised) }
+}
+
+
 
