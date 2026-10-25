@@ -504,5 +504,24 @@ body { background: var(--soft) }
 .profile-settings-trigger { width: 44px; height: 44px }
 .profile-actions .profile-message, .profile-tabs button { min-height: 44px }
 
+/* ---- M11c leaderboard + reel-bar floors --------------------------------------------------
+   Leaderboard at 390px: the Overall/My College/Communities/Creators/Events tab pills run
+   32px tall, the This week/This month/All time period pills 27px, and the "How points
+   work" disclosure is a 15px str so small it is effectively unproducible. The inline
+   reel card's Play button in the feed measured 30x30. All grow silent zones to 44       */
+.community-tab { min-height: 44px }
+.lb-periods button { min-height: 44px }
+.lb-rules-toggle { min-height: 44px }
+.reel-bar-button { min-width: 44px; min-height: 44px }
+
+/* ---- M11d comments-sheet floors --------------------------------------------------------------
+   The comments sheet at 390px: close ✕ rode the 34px .icon-button, the input pads to 41
+   and the Post comment pill to 40. Raised to the floor — the sheet's visual language
+   (white sheet, handle, pill send) is untouched. Author-name links and inline hashtags
+   stay as-is: inline text links, not controls (HIG leeway, documented).                 */
+.comments-sheet .icon-button { width: 44px; height: 44px }
+.comments-sheet .comment-input { min-height: 44px }
+.comment-send { min-width: 44px; min-height: 44px }
+
 
 
