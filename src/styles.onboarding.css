@@ -2673,7 +2673,10 @@
   height: calc(100dvh - 72px);
   min-height: 420px;
   overflow: hidden;
-  background: var(--soft);
+  background: #fffdfb; /* R3b: restored the pre-UI-7 chats default (UI-7's var(--soft) mapping rendered cream/beige — user's call) */
+}
+@media (prefers-color-scheme: dark) {
+  .chats-page { background: var(--surface) }
 }
 
 .chats-list-pane {
