@@ -482,5 +482,27 @@ body { background: var(--soft) }
 .composer-prompt { min-height: 44px; display: flex; align-items: center }
 .mobile-header .brand-mini { min-height: 44px }
 
+/* ---- M11 reels sweep: glass cost over video + the last sub-floor rails -------------
+   Discover at 390px is the reel surface — five rail chips each ran blur(8px) over
+   PLAYING VIDEO, the most expensive backdrop-filter case there is (the frost re-filters
+   every frame). The chips are translucent dark scrims over media, so plain translucency
+   at a deeper alpha reads the same while compositing for free; the single corner mute
+   chip keeps its frost (one element, off the video stream's busiest zone). Rail buttons
+   also measured 42px (a mobile media rule shrinks the 46px base) — min-width/height now
+   clamp them to the 44pt floor whatever width they compute, ditto the 38px mute.        */
+.reel-rail-item button {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: rgba(20, 16, 40, 0.5);
+}
+.reel-rail-item button, .reel-mute { min-width: 44px; min-height: 44px }
+
+/* ---- M11b profile tap floors -----------------------------------------------------------------
+   Profile at 390px: the settings ⚙ rode the old 34px .icon-button (same miss as the card ⋯ in
+   M9), and "Edit profile" + the Posts/Reels tabs pad to 33px tall. All three grow silent
+   zones to the 44pt floor with unchanged visuals.                                       */
+.profile-settings-trigger { width: 44px; height: 44px }
+.profile-actions .profile-message, .profile-tabs button { min-height: 44px }
+
 
 
