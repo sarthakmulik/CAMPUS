@@ -564,5 +564,62 @@ body { background: var(--soft) }
   }
 }
 
+/* ---- M13 communities material (glassmorphism recipe + HIG floors) --------------------------------
+   The Communities crawl at 390px found:
+   1. The detail page's compact topbar + tab row are STICKY (they stick inside .main-column's
+      scroll, flush under the fixed header — verified no fixed-header collision) but they run
+      an opaque AMBER fill var(--warn-bg) with a WASTED 10px blur — the beige/amber
+      regression family the chats sweep corrected — and zero depth while cards slide
+      beneath them. The topbar becomes real chrome glass (it has earned its frost: content
+      passes underneath); the tab row becomes plain chrome paper (opaque --surface, blur
+      dropped, dead GPU cost gone). Ceiling check: header + bottom nav + topbar = 3.
+   2. Floors: detail tab buttons 36px, the back button and composer Add-image ride the old
+      34px .icon-button, list-page tabs 32px, category chips 27px, the search pill 40px and
+      every .primary-button CTA 40px — all grown by silent zones, visuals untouched.
+   3. Cards were a flat white sheet: no rest elevation, hover-only shadow, no press
+      feedback. Given the float language the app already uses (--elev tokens) and the
+      M7 press scale family, plus the existing hover kept.                            */
+@media (max-width: 650px) {
+  .detail-topbar {
+    background: var(--surface-glass);
+    -webkit-backdrop-filter: saturate(160%) blur(16px);
+    backdrop-filter: saturate(160%) blur(16px);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.3) inset, 0 6px 18px rgba(46, 53, 93, 0.12);
+  }
+  .community-detail > .community-tabs.detail-tabs {
+    background: var(--surface);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    top: 57px;
+  }
+  .community-tabs button { min-height: 44px }
+  .detail-topbar .icon-button { width: 44px; height: 44px }
+  .community-composer .icon-button { width: 44px; height: 44px }
+  .community-searchbar { min-height: 44px }
+  .community-chip { min-height: 40px; display: inline-flex; align-items: center }
+  .primary-button { min-height: 44px }
+}
+@media (prefers-color-scheme: dark) {
+  .detail-topbar { box-shadow: 0 1px 0 rgba(255, 255, 255, 0.12) inset, 0 6px 18px rgba(0, 0, 0, 0.4) }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .detail-topbar { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none }
+}
+/* glass is decoration, never a requirement */
+@supports not (backdrop-filter: blur(1px)) {
+  .detail-topbar { background: var(--surface) }
+}
+
+.community-card {
+  box-shadow: var(--elev-1);
+  transition: box-shadow var(--motion-fast) ease, transform var(--motion-fast) var(--ease-out);
+}
+.community-card:hover { box-shadow: 0 6px 22px #1f29371a }
+.community-card:active { transform: scale(0.985) }
+@media (prefers-color-scheme: dark) {
+  .community-card { box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35) }
+  .community-card:hover { box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5) }
+}
+
 
 
