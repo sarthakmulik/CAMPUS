@@ -7,9 +7,10 @@ import {
   Repeat2, Share2, Flag, MoreHorizontal, X, Send, ChevronDown, TrendingUp,
   Settings, LogOut, UserRound, Check, Hash, Menu, ArrowLeft, CircleHelp,
   GraduationCap, Megaphone, SlidersHorizontal, EyeOff, VolumeX, AlertCircle,
-  Pencil, Trash2, BadgeCheck, ShieldCheck
+  Pencil, Trash2, BadgeCheck, ShieldCheck, Loader2
 } from 'lucide-react'
 import { AuthProvider, hasSeenWelcome, markWelcomeSeen, useAuth } from './lib/auth'
+import { saveComposerDraft, loadComposerDraft, clearComposerDraft, type ComposerDraftMeta } from './lib/drafts'
 import { StaffConsole } from './components/StaffConsole'
 import { reconcilePush } from './lib/webPush'
 import * as navHistory from './lib/navHistory'
@@ -269,6 +270,12 @@ function CAMPUSApp() {
   /* per-draft pending post id (exactly-once key) + uploaded media reuse */
   const composerPendingIdRef = useRef<string | null>(null)
   const inlinePendingIdRef = useRef<string | null>(null)
+  /* in-flight markers: true from Publish press until the attempt is known to
+     have finished; drives the "finish posting after the app was killed" boot
+     resume. Never set on the poll path (no client key there). */
+  const composerFlightRef = useRef(false)
+  const inlineFlightRef = useRef(false)
+  const [resumeTarget, setResumeTarget] = useState<'composer' | 'inline' | null>(null)
   const [draftMediaUrls, setDraftMediaUrls] = useState<string[] | null>(null)
   const DRAFT_STORE_KEY = 'campus.composer.draft.v1'
   const INLINE_STORE_KEY = 'campus.inline.draft.v1'
@@ -464,67 +471,109 @@ function CAMPUSApp() {
 
   /* Restore persisted drafts once at boot — this effect MUST be declared
      before the persistence writers below so the first (empty-state) pass of
-     those writers cannot wipe the store before it is read. Media File
-     objects cannot survive a reload — their uploaded URLs can and do, so
-     attaching media never has to re-upload on a fresh attempt. */
+     those writers cannot wipe the store before it is read. The IndexedDB
+     copy is authoritative (it carries the media File objects); localStorage
+     is the fallback mirror when IDB is unavailable. An inFlight entry means
+     a publish attempt was running (or mid-stall) when the app last closed —
+     resuming it is exactly-once safe thanks to the client-generated PK. */
   const draftsRestoredRef = useRef(false)
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(DRAFT_STORE_KEY)
-      if (raw) {
-        const saved = JSON.parse(raw) as { kind?: PostKind; source?: 'home' | 'confessions'; body?: string; media?: string[] | null; pendingId?: string | null }
-        if (typeof saved.body === 'string' && (saved.body.trim() || saved.media?.length)) {
-          setDraft(saved.body)
-          if (saved.kind) setComposerKind(saved.kind)
-          if (saved.source) setComposerSource(saved.source)
-          composerPendingIdRef.current = saved.pendingId ?? null
-          setDraftMediaUrls(saved.media ?? null)
-        }
+    let cancelled = false
+    const apply = (saved: Partial<ComposerDraftMeta>, files: File[] | null, video: File | null) => {
+      if (!( (saved.body?.trim() ?? false) || (saved.media?.length ?? 0) > 0 || (files?.length ?? 0) > 0 )) return false
+      setDraft(saved.body ?? '')
+      if (saved.kind) setComposerKind(saved.kind)
+      if (saved.source) setComposerSource(saved.source)
+      composerPendingIdRef.current = saved.pendingId ?? null
+      setDraftMediaUrls(saved.media ?? null)
+      if (saved.videoTrim && typeof saved.videoTrim.start === 'number' && typeof saved.videoTrim.end === 'number') {
+        setVideoTrim(saved.videoTrim)
       }
-      const rawInline = window.localStorage.getItem(INLINE_STORE_KEY)
-      if (rawInline) {
-        const savedInline = JSON.parse(rawInline) as { body?: string; pendingId?: string | null }
-        if (typeof savedInline.body === 'string' && savedInline.body.trim()) {
-          setInlineDraft(savedInline.body)
-          inlinePendingIdRef.current = savedInline.pendingId ?? null
+      if (typeof saved.reelDuration === 'number' && saved.reelDuration > 0) setReelDuration(saved.reelDuration)
+      setDraftImages(files?.length ? files : [])
+      setDraftVideo(video ?? null)
+      if (saved.inFlight) setResumeTarget('composer')
+      return true
+    }
+    void (async () => {
+      try {
+        let applied = false
+        const savedIdb = await loadComposerDraft()
+        if (!cancelled && savedIdb) {
+          applied = apply(savedIdb, savedIdb.files ?? [], savedIdb.video ?? null)
         }
-      }
-    } catch { /* malformed store — ignore, memory drafts already loaded */ }
-    draftsRestoredRef.current = true
+        if (!applied && !cancelled) {
+          const raw = window.localStorage.getItem(DRAFT_STORE_KEY)
+          if (raw) {
+            const saved = JSON.parse(raw) as Partial<ComposerDraftMeta>
+            applied = apply(saved, null, null)
+          }
+        }
+        // inline drafts are text-only — localStorage remains their store
+        if (!cancelled) {
+          const rawInline = window.localStorage.getItem(INLINE_STORE_KEY)
+          if (rawInline) {
+            const savedInline = JSON.parse(rawInline) as { body?: string; pendingId?: string | null; inFlight?: boolean }
+            if (typeof savedInline.body === 'string' && savedInline.body.trim()) {
+              setInlineDraft(savedInline.body)
+              inlinePendingIdRef.current = savedInline.pendingId ?? null
+              if (savedInline.inFlight) setResumeTarget(current => current ?? 'inline')
+            }
+          }
+        }
+      } catch { /* malformed store — ignore, memory drafts already loaded */ }
+      if (!cancelled) draftsRestoredRef.current = true
+    })()
+    return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  /* The draft (body, target kind/feed, already-uploaded media, exactly-once
-     key) survives reloads: an outage, a crash or an accidental navigation
-     never eats a post. Written on every change; cleared on publish/delete. */
+  /* The draft (body, target kind/feed, media FILES, uploaded URLs, trim
+     state, exactly-once key) survives reloads, crashes and kills: an outage
+     mid-upload resumes instead of restarting from zero, and attached media
+     re-attach themselves. The in-flight marker rides along — the publishing
+     flag in the deps is what commits those transitions to disk. */
   useEffect(() => {
     if (!draftsRestoredRef.current) return // boot pass — restore effect reads first
     try {
-      if (!draft.trim() && !draftMediaUrls?.length) {
+      const hasContent = Boolean(draft.trim()) || draftImages.length > 0 || draftVideo !== null || (draftMediaUrls?.length ?? 0) > 0
+      if (!hasContent) {
         composerPendingIdRef.current = null
+        composerFlightRef.current = false
         window.localStorage.removeItem(DRAFT_STORE_KEY)
+        void clearComposerDraft()
         return
       }
-      window.localStorage.setItem(DRAFT_STORE_KEY, JSON.stringify({
-        kind: composerKind, source: composerSource, body: draft,
-        media: draftMediaUrls, pendingId: composerPendingIdRef.current,
-      }))
+      const meta: ComposerDraftMeta = {
+        body: draft,
+        kind: composerKind,
+        source: composerSource,
+        media: draftMediaUrls,
+        videoTrim,
+        reelDuration,
+        pendingId: composerPendingIdRef.current,
+        inFlight: composerFlightRef.current,
+      }
+      window.localStorage.setItem(DRAFT_STORE_KEY, JSON.stringify(meta))
+      void saveComposerDraft(meta, draftImages, draftVideo)
     } catch { /* private mode / full storage — drafts stay memory-only */ }
-  }, [draft, composerKind, composerSource, draftMediaUrls])
+  }, [draft, draftImages, draftVideo, videoTrim, reelDuration, draftMediaUrls, composerKind, composerSource, publishing])
 
   useEffect(() => {
     if (!draftsRestoredRef.current) return
     try {
       if (!inlineDraft.trim()) {
         inlinePendingIdRef.current = null
+        inlineFlightRef.current = false
         window.localStorage.removeItem(INLINE_STORE_KEY)
         return
       }
-      window.localStorage.setItem(INLINE_STORE_KEY, JSON.stringify({
-        body: inlineDraft, pendingId: inlinePendingIdRef.current,
-      }))
+      const meta = { body: inlineDraft, pendingId: inlinePendingIdRef.current, inFlight: inlineFlightRef.current }
+      window.localStorage.setItem(INLINE_STORE_KEY, JSON.stringify(meta))
     } catch { /* same as above */ }
-  }, [inlineDraft])
+    // inlineBusy is a dep: the in-flight marker is written when publishes
+    // start/stop even though no draft state changed
+  }, [inlineDraft, inlineBusy])
 
   /* Resolve a network promise against a stall watchdog. `done:false` means
      "still running" — never a failed request, so the user can also just
@@ -1289,7 +1338,7 @@ function CAMPUSApp() {
     if (!requireAuth('create posts, polls and confessions')) return
     // polls validate inline through publishPollDraft (question included);
     // media-less drafts aren't real posts either
-    if (!draft.trim() && composerKind !== 'poll' && !draftMediaUrls?.length) { flash('Write something before posting.'); return }
+    if (!draft.trim() && composerKind !== 'poll' && !draftMediaUrls?.length && !draftVideo) { flash('Write something before posting.'); return }
     if (composerKind === 'poll') {
       // single gate + watchdog for the whole publish family
       if (!assertCanPublish()) return
@@ -1299,6 +1348,10 @@ function CAMPUSApp() {
       return
     }
     if (!assertCanPublish()) return
+    // in-flight marker lands in the persisted draft via the publishing dep on
+    // the writer effect — kill/resume-from-reload applies to posts, reels and
+    // confessions only (polls have no client key)
+    composerFlightRef.current = true
     setPublishing(true)
     // becomes true the moment the stall watchdog fires; publishPostCore uses
     // it to keep quiet while a late-landing attempt resolves on its own
@@ -1309,22 +1362,27 @@ function CAMPUSApp() {
       // Media reuse across retries: a stalled earlier attempt already uploaded
       // the files and their URLs travel with the persisted draft, so "Post"
       // after a reconnect never re-uploads byte-for-byte identical media.
+      // URLs are persisted after EVERY leg, so a kill mid-carousel keeps the
+      // progress already made.
       let mediaUrls: string[] | null = draftMediaUrls
       const reuseCount = Array.isArray(mediaUrls) ? mediaUrls.length : 0
       if (composerKind === 'post' && draftImages.length && reuseCount !== draftImages.length) {
-        const uploaded: string[] = []
-        for (const image of draftImages) {
-          const leg = await raceStall(db.uploadMedia(user!.id, image), UPLOAD_STALL_MS)
+        const uploaded: string[] = [...(mediaUrls ?? [])] // resume the partial carousel
+        for (let index = 0; index < draftImages.length; index++) {
+          if (index < uploaded.length) continue // that stem already has a URL
+          const leg = await raceStall(db.uploadMedia(user!.id, draftImages[index]), UPLOAD_STALL_MS)
           if (!leg.done) {
             // clean whatever fully landed before the stall; the permanently
             // stalled upload cannot be identified, so it is left for the
             // retry to supersede rather than guessed away
-            void db.removeUploadedFiles(uploaded)
-            flash('Your connection stalled while uploading the images. Your draft is kept — press Post again once the network returns.')
+            void db.removeUploadedFiles(uploaded.slice(reuseCount))
+            flash('Your connection stalled while uploading the images. Your draft is kept — press Post again once the network returns (or keep the app open: it keeps trying).')
             return
           }
           uploaded.push(leg.value)
           setPublishProgress(`Uploading image ${uploaded.length} of ${draftImages.length}…`)
+          // persist progress NOW — a reload resumes from here, not from zero
+          setDraftMediaUrls([...uploaded])
         }
         mediaUrls = uploaded
         setDraftMediaUrls(uploaded)
@@ -1359,7 +1417,7 @@ function CAMPUSApp() {
           setPublishProgress('Uploading video…')
           const leg = await raceStall(db.uploadMedia(user!.id, compressed), UPLOAD_STALL_MS)
           if (!leg.done) {
-            flash('Your connection stalled while uploading the video. Your draft and trims are kept — press Post again once the network returns.')
+            flash('Your connection stalled while uploading the video. Your draft and trims are kept — press Post again once the network returns (or keep the app open: it keeps trying).')
             return
           }
           mediaUrls = [leg.value]
@@ -1371,21 +1429,40 @@ function CAMPUSApp() {
       // by every retry until the post actually lands
       const pendingId = composerPendingIdRef.current ?? db.newPostId()
       composerPendingIdRef.current = pendingId
-      const leg = await raceStall(
-        publishPostCore(body, composerKind, mediaUrls, undefined, { postId: pendingId, isStale: () => stalled }),
-        PUBLISH_STALL_MS,
-      )
+      const publishPromise = publishPostCore(body, composerKind, mediaUrls, undefined, { postId: pendingId, isStale: () => stalled })
+      const leg = await raceStall(publishPromise, PUBLISH_STALL_MS)
       if (!leg.done) {
         stalled = true
-        // leave the composer open, draft (and its key) intact; a manual retry
-        // reuses the id, and if the original attempt lands later the feed
-        // dedupes it
-        flash('The network is very slow — the publish keeps trying in the background. Your draft is safe here, and reposting cannot duplicate it.')
+        // The attempt keeps running on its own; nothing downs the composer —
+        // the user may leave, close the sheet or even the app: the persisted
+        // in-flight draft re-drives the publish on the next boot (same id,
+        // PK dedupe). If it resolves while the page is still alive, catch it:
+        flash('The network is very slow — the publish keeps trying in the background. You can leave this screen; reposting cannot duplicate it.')
+        void publishPromise.then(result => {
+          if (result === 'posted') {
+            setDraft(''); setDraftImages([]); setDraftVideo(null); setVideoTrim(null); setDraftMediaUrls(null)
+            composerPendingIdRef.current = null
+            composerFlightRef.current = false
+            setComposer(false)
+            setPublishProgress(null)
+            flash('Your draft just finished posting — it is on the Home feed.')
+          } else {
+            // definitive failure confirmed by the server — the retry below
+            // is safe because the exactly-once key was never committed
+            composerFlightRef.current = false
+            setPublishProgress(null)
+            flash('The background publish could not finish — your draft is kept. Press Post to try again.')
+          }
+        })
         return
       }
-      if (leg.value === 'error') return // composer stays open, draft intact
+      if (leg.value === 'error') {
+        composerFlightRef.current = false
+        return // composer stays open, draft intact
+      }
       setDraft(''); setDraftImages([]); setDraftVideo(null); setVideoTrim(null); setDraftMediaUrls(null)
       composerPendingIdRef.current = null
+      composerFlightRef.current = false
       setComposer(false)
       flash(composerSource === 'confessions' && composerKind === 'confession'
         ? 'Confession posted — it appears here in the Confessions feed.'
@@ -1395,6 +1472,7 @@ function CAMPUSApp() {
     } catch (error) {
       // Media processing or a database failure: the composer stays open with
       // the draft intact; uploaded media stays reusable for the next attempt.
+      composerFlightRef.current = false
       flash(db.friendlyMessage(error))
     } finally {
       setPublishing(false)
@@ -1723,17 +1801,29 @@ function CAMPUSApp() {
 
   const openComposer = (kind: PostKind = 'post', source: 'home' | 'confessions' = 'home'): boolean => {
     if (!requireAuth('create posts, polls and confessions')) return false
-    setComposerKind(kind)
-    setDraftImages([])
-    setDraftVideo(null)
-    setVideoTrim(null)
-    setTrimOpen(false)
-    setPublishProgress(null)
-    // poll fields start fresh every time the composer opens
-    setPollOptions(['', ''])
-    setPollMultiple(false)
-    setPollDays(7)
-    setPollErrors([])
+    // A restored draft owns the sheet: images/videos and the trim survive the
+    // reload with it, so nothing is wiped on reopen — the user picks up
+    // exactly where the draft left off (posting it finishes with the same
+    // exactly-once key). Only a genuinely fresh composer starts blank.
+    const hasDraft = Boolean(draft.trim()) || draftImages.length > 0 || draftVideo !== null || (draftMediaUrls?.length ?? 0) > 0
+    if (hasDraft && !publishing) {
+      // the user is looking at their draft — they own it now; a failed boot
+      // resume must not re-publish edits they decided to keep unfinished
+      composerFlightRef.current = false
+    }
+    if (!hasDraft) {
+      setComposerKind(kind)
+      setDraftImages([])
+      setDraftVideo(null)
+      setVideoTrim(null)
+      setTrimOpen(false)
+      setPublishProgress(null)
+      // poll fields start fresh every time the composer opens blank
+      setPollOptions(['', ''])
+      setPollMultiple(false)
+      setPollDays(7)
+      setPollErrors([])
+    }
     setComposerSource(source)
     setComposer(true)
     return true
@@ -1890,12 +1980,14 @@ function CAMPUSApp() {
   /* ---- inline quick composer (text posts, right on the feed) ------------- */
   const startInlineComposer = () => {
     if (!requireAuth('create posts, polls and confessions')) return
+    if (inlineDraft.trim() && !inlineBusy) inlineFlightRef.current = false // user takes ownership
     setInlineOpen(true)
   }
 
   const publishInlinePost = async () => {
     if (!inlineDraft.trim()) { flash('Write something before posting.'); return }
     if (!assertCanPublish()) return
+    inlineFlightRef.current = true
     setInlineBusy(true)
     // true once the watchdog fires — publishPostCore stays quiet about a late
     // failure (the caller below already owns the messaging)
@@ -1905,16 +1997,23 @@ function CAMPUSApp() {
       // retry (double tap, offline recovery, reload mid-outage)
       const pendingId = inlinePendingIdRef.current ?? db.newPostId()
       inlinePendingIdRef.current = pendingId
-      const leg = await raceStall(
-        publishPostCore(inlineDraft.trim(), 'post', null, undefined, { postId: pendingId, isStale: () => stalled }),
-        PUBLISH_STALL_MS,
-      )
+      const publishPromise = publishPostCore(inlineDraft.trim(), 'post', null, undefined, { postId: pendingId, isStale: () => stalled })
+      const leg = await raceStall(publishPromise, PUBLISH_STALL_MS)
       if (!leg.done) {
         stalled = true
-        // keep the inline composer open with the draft (and its key) intact;
-        // the background attempt either lands and dedupes, or the retry uses
-        // the same id so nothing can publish twice
+        // the attempt keeps running; the inline composer stays open with the
+        // draft (and its key) intact — reload-safe via the persisted flag
         flash('The network is very slow — the publish keeps trying in the background. Your draft is safe here, and reposting cannot duplicate it.')
+        void publishPromise.then(result => {
+          if (result === 'posted') {
+            setInlineDraft('')
+            setInlineOpen(false)
+            flash('Your draft just finished posting — it is on the Home feed.')
+          } else {
+            inlineFlightRef.current = false
+            flash('The background publish could not finish — your draft is kept. Press Post to try again.')
+          }
+        })
         return
       }
       if (leg.value === 'posted') {
@@ -1922,12 +2021,32 @@ function CAMPUSApp() {
         setInlineDraft('')
         setInlineOpen(false)
         flash('Posted to the campus feed.')
+      } else {
+        inlineFlightRef.current = false
       }
     } finally {
       setInlineBusy(false)
       releasePublish()
     }
   }
+
+  /* Boot-resume: a publish attempt was mid-flight when the app last closed,
+     so the platform never saw its outcome — drive it again with the SAME
+     exactly-once key. If the original attempt committed, the posts PK
+     returns the row instead of duplicating; if it did not, the publish
+     happens now. Inline drafts resume through their own publish path. */
+  useEffect(() => {
+    if (!resumeTarget || !user || !configured || status !== 'member') return
+    const target = resumeTarget
+    setResumeTarget(null)
+    if (publishActiveRef.current) return // something is already publishing
+    if (target === 'composer') {
+      void createPost()
+    } else {
+      void publishInlinePost()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumeTarget, user, configured, status])
 
   /** Switching composer type starts the media selection fresh. */
   const changeComposerKind = (kind: PostKind) => {
@@ -2017,10 +2136,24 @@ function CAMPUSApp() {
     ? <div className="toast" role="status"><Check size={17}/>{notice || auth.notice}</div>
     : null
 
+  /* A publish keeps running after the composer is closed (Cancel/back mid
+     flight) — this is where the user sees it: a status pill above the bottom
+     nav, fixed on every page, with a jump-back affordance. */
+  const publishBanner = (publishing && !composer)
+    ? (
+      <div className="publish-banner" role="status">
+        <Loader2 size={14} className="nc-spin"/>
+        <span>{publishProgress || (composerKind === 'poll' ? 'Publishing poll…' : 'Posting…')}</span>
+        <button onClick={() => setComposer(true)}>Show</button>
+      </div>
+    )
+    : null
+
   const modals = (
     <>
       {bootVeil}
       {toast}
+      {publishBanner}
       {gateInfo && (
         <SignUpPrompt
           reason={gateInfo.reason}
