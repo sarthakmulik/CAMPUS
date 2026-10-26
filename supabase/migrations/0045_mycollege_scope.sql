@@ -1,6 +1,7 @@
 -- =====================================================================
 -- 0045 — My College scoping: canonical indexes + college_id in search.
---   Additive only. Nothing existing is dropped or rewritten.
+--   Additive except for search_members, which is a same-signature handoff
+--   rebuild: DROP + re-CREATE of the same name/args (see note at the function).
 --
 --   1. College-scoped queries (My College feed promotions, staff tools and
 --      future server-side college feeds) walk posts by college → time, and
@@ -27,9 +28,15 @@ create index if not exists profiles_college_idx
   where college_id is not null;
 
 -- Rebuilt from the 0010 definition — the return table is the 0010 column set
--- plus college_id, with is_verified retained. The function signature keeps
--- the same name/args so existing callers work unchanged (extra output columns
--- are purely additive).
+-- plus college_id, with is_verified retained (see the note below about the
+-- drop + recreate). The function signature keeps the same name/args so
+-- existing callers work unchanged (extra output columns are purely additive).
+-- The return row type changes, so CREATE OR REPLACE cannot be used (Postgres
+-- requires the function to be dropped first — 42P13). Everything between the
+-- DROP and the CREATE below runs in one editor batch, so there is no window
+-- during which the app loses the function; the trailing revoke/grant block
+-- restores execute rights (a DROP destroys them).
+drop function if exists public.search_members(text, integer);
 create or replace function public.search_members(
   p_query text,
   p_limit integer default 10
