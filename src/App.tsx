@@ -275,6 +275,18 @@ function CAMPUSApp() {
      resume. Never set on the poll path (no client key there). */
   const composerFlightRef = useRef(false)
   const inlineFlightRef = useRef(false)
+  /* draft ownership: the account that started the (draft) publish. The boot
+     resume and every automatic action refuse foreign owners — posting under
+     the wrong account must be impossible, even after sign-out/sign-in. */
+  const composerOwnerIdRef = useRef<string | null>(null)
+  const inlineOwnerIdRef = useRef<string | null>(null)
+  /* mirror of the signed-in user id for checks that run before user state
+     re-renders (restore finishes at boot while user may already be set) */
+  const userIdRef = useRef<string | null>(null)
+  /* mirrors of the live drafts for late-resolution checks: async callbacks
+     read stale state closures, refs always hold the current truth */
+  const composerLatestRef = useRef({ body: '', images: 0, video: false, kind: 'post' as PostKind })
+  const inlineLatestRef = useRef('')
   const [resumeTarget, setResumeTarget] = useState<'composer' | 'inline' | null>(null)
   const [draftMediaUrls, setDraftMediaUrls] = useState<string[] | null>(null)
   const DRAFT_STORE_KEY = 'campus.composer.draft.v1'
@@ -477,6 +489,34 @@ function CAMPUSApp() {
      a publish attempt was running (or mid-stall) when the app last closed —
      resuming it is exactly-once safe thanks to the client-generated PK. */
   const draftsRestoredRef = useRef(false)
+
+  /* A draft found on this device that belongs to a DIFFERENT account must not
+     publish under (or leak into) the signed-in member's feed: wipe every
+     draft surface — memory, refs, localStorage and the IndexedDB mirror. */
+  const clearForeignDrafts = () => {
+    composerOwnerIdRef.current = null
+    inlineOwnerIdRef.current = null
+    composerPendingIdRef.current = null
+    inlinePendingIdRef.current = null
+    composerFlightRef.current = false
+    inlineFlightRef.current = false
+    setResumeTarget(null)
+    setComposer(false)
+    setInlineOpen(false)
+    setDraft('')
+    setDraftImages([])
+    setDraftVideo(null)
+    setVideoTrim(null)
+    setDraftMediaUrls(null)
+    setInlineDraft('')
+    void clearComposerDraft()
+    try {
+      window.localStorage.removeItem(DRAFT_STORE_KEY)
+      window.localStorage.removeItem(INLINE_STORE_KEY)
+    } catch { /* nothing to clean */ }
+    console.debug('drafts cleared: owned by a previous account on this device')
+  }
+
   useEffect(() => {
     let cancelled = false
     const apply = (saved: Partial<ComposerDraftMeta>, files: File[] | null, video: File | null) => {
@@ -490,9 +530,24 @@ function CAMPUSApp() {
         setVideoTrim(saved.videoTrim)
       }
       if (typeof saved.reelDuration === 'number' && saved.reelDuration > 0) setReelDuration(saved.reelDuration)
+      // poll drafts keep their option sheet too — the composer must come
+      // back exactly as it was left
+      if (saved.kind === 'poll') {
+        const opts = Array.isArray(saved.pollOptions)
+          ? saved.pollOptions.filter(value => typeof value === 'string')
+          : null
+        if (opts && opts.length >= 2 && opts.length <= 6) setPollOptions(opts)
+        if (typeof saved.pollMultiple === 'boolean') setPollMultiple(saved.pollMultiple)
+        if (typeof saved.pollDays === 'number' && [1, 3, 7, 30].includes(saved.pollDays)) setPollDays(saved.pollDays)
+      }
+      // legacy drafts carry no owner — they adopt whoever is signed in;
+      // owned drafts are checked below before anything auto-publishes
+      composerOwnerIdRef.current = saved.ownerId ?? null
       setDraftImages(files?.length ? files : [])
       setDraftVideo(video ?? null)
-      if (saved.inFlight) setResumeTarget('composer')
+      if (saved.inFlight && !(saved.ownerId && userIdRef.current && saved.ownerId !== userIdRef.current)) {
+        setResumeTarget('composer')
+      }
       return true
     }
     void (async () => {
@@ -513,12 +568,24 @@ function CAMPUSApp() {
         if (!cancelled) {
           const rawInline = window.localStorage.getItem(INLINE_STORE_KEY)
           if (rawInline) {
-            const savedInline = JSON.parse(rawInline) as { body?: string; pendingId?: string | null; inFlight?: boolean }
+            const savedInline = JSON.parse(rawInline) as { body?: string; pendingId?: string | null; inFlight?: boolean; ownerId?: string | null }
             if (typeof savedInline.body === 'string' && savedInline.body.trim()) {
               setInlineDraft(savedInline.body)
               inlinePendingIdRef.current = savedInline.pendingId ?? null
-              if (savedInline.inFlight) setResumeTarget(current => current ?? 'inline')
+              inlineOwnerIdRef.current = savedInline.ownerId ?? null
+              if (savedInline.inFlight && !(savedInline.ownerId && userIdRef.current && savedInline.ownerId !== userIdRef.current)) {
+                setResumeTarget(current => current ?? 'inline')
+              }
             }
+          }
+        }
+        /* ownership re-check after full restore: the user state may have
+           resolved while IDB was still reading — a draft owned by a different
+           account must never resume or survive onto the next member */
+        if (!cancelled) {
+          const owner = composerOwnerIdRef.current ?? inlineOwnerIdRef.current
+          if (owner && userIdRef.current && owner !== userIdRef.current) {
+            clearForeignDrafts()
           }
         }
       } catch { /* malformed store — ignore, memory drafts already loaded */ }
@@ -553,11 +620,15 @@ function CAMPUSApp() {
         reelDuration,
         pendingId: composerPendingIdRef.current,
         inFlight: composerFlightRef.current,
+        pollOptions: composerKind === 'poll' ? pollOptions : null,
+        pollMultiple: composerKind === 'poll' ? pollMultiple : null,
+        pollDays: composerKind === 'poll' ? pollDays : null,
+        ownerId: composerOwnerIdRef.current,
       }
       window.localStorage.setItem(DRAFT_STORE_KEY, JSON.stringify(meta))
       void saveComposerDraft(meta, draftImages, draftVideo)
     } catch { /* private mode / full storage — drafts stay memory-only */ }
-  }, [draft, draftImages, draftVideo, videoTrim, reelDuration, draftMediaUrls, composerKind, composerSource, publishing])
+  }, [draft, draftImages, draftVideo, videoTrim, reelDuration, draftMediaUrls, composerKind, composerSource, pollOptions, pollMultiple, pollDays, publishing])
 
   useEffect(() => {
     if (!draftsRestoredRef.current) return
@@ -568,12 +639,34 @@ function CAMPUSApp() {
         window.localStorage.removeItem(INLINE_STORE_KEY)
         return
       }
-      const meta = { body: inlineDraft, pendingId: inlinePendingIdRef.current, inFlight: inlineFlightRef.current }
+      const meta = { body: inlineDraft, pendingId: inlinePendingIdRef.current, inFlight: inlineFlightRef.current, ownerId: inlineOwnerIdRef.current }
       window.localStorage.setItem(INLINE_STORE_KEY, JSON.stringify(meta))
     } catch { /* same as above */ }
     // inlineBusy is a dep: the in-flight marker is written when publishes
     // start/stop even though no draft state changed
   }, [inlineDraft, inlineBusy])
+
+  /* Keep the id mirror in sync, and enforce draft ownership whenever the
+     signed-in account changes: a draft that belongs to the previous member
+     is wiped before it can publish under (or appear as) someone else. */
+  useEffect(() => {
+    userIdRef.current = user?.id ?? null
+    const owner = composerOwnerIdRef.current ?? inlineOwnerIdRef.current
+    if (!owner || !user || owner === user.id) return
+    clearForeignDrafts()
+    flash('This device had a draft started by another account — it was cleared to keep posting safe.')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user])
+
+  /* mirrors of the live drafts, kept for the late-resolution checks inside
+     the publish handlers (state closures there would be stale) */
+  useEffect(() => {
+    composerLatestRef.current = { body: draft, images: draftImages.length, video: draftVideo !== null, kind: composerKind }
+  }, [draft, draftImages, draftVideo, composerKind])
+
+  useEffect(() => {
+    inlineLatestRef.current = inlineDraft
+  }, [inlineDraft])
 
   /* Resolve a network promise against a stall watchdog. `done:false` means
      "still running" — never a failed request, so the user can also just
@@ -1317,8 +1410,13 @@ function CAMPUSApp() {
         return
       }
       const pollPost = leg.value
-      const map = await db.pollStatesFor([pollPost])
-      setPollStateMap(current => ({ ...current, ...map }))
+      // The poll is LIVE at this point — its state hydration must never mask
+      // the success: run it in the background, and a failure just defers the
+      // state map to the next feed load instead of flashing an error for a
+      // post that actually landed.
+      void db.pollStatesFor([pollPost])
+        .then(map => setPollStateMap(current => ({ ...current, ...map })))
+        .catch(() => { /* hydrated on the next feed load — not worth alarming */ })
       setPosts(current => [pollPost, ...current])
       setDraft(''); setPollOptions(['', '']); setPollMultiple(false); setPollDays(7); setPollErrors([])
       setComposer(false)
@@ -1352,6 +1450,7 @@ function CAMPUSApp() {
     // the writer effect — kill/resume-from-reload applies to posts, reels and
     // confessions only (polls have no client key)
     composerFlightRef.current = true
+    composerOwnerIdRef.current = user?.id ?? null // this draft belongs to THIS account
     setPublishing(true)
     // becomes true the moment the stall watchdog fires; publishPostCore uses
     // it to keep quiet while a late-landing attempt resolves on its own
@@ -1372,10 +1471,10 @@ function CAMPUSApp() {
           if (index < uploaded.length) continue // that stem already has a URL
           const leg = await raceStall(db.uploadMedia(user!.id, draftImages[index]), UPLOAD_STALL_MS)
           if (!leg.done) {
-            // clean whatever fully landed before the stall; the permanently
-            // stalled upload cannot be identified, so it is left for the
-            // retry to supersede rather than guessed away
-            void db.removeUploadedFiles(uploaded.slice(reuseCount))
+            // Nothing is deleted here: the URLs already uploaded are persisted
+            // per-leg as resume assets — wiping them would break the resumed
+            // attempt with 404s. Superseded uploads, if any, are harmless
+            // unused storage objects.
             flash('Your connection stalled while uploading the images. Your draft is kept — press Post again once the network returns (or keep the app open: it keeps trying).')
             return
           }
@@ -1429,6 +1528,10 @@ function CAMPUSApp() {
       // by every retry until the post actually lands
       const pendingId = composerPendingIdRef.current ?? db.newPostId()
       composerPendingIdRef.current = pendingId
+      // snapshot of what is being submitted: if the user edits the composer
+      // while a slow attempt is still running in the background, the late
+      // clean-up must not destroy their newer edit
+      const submittedSnapshot = { body, images: draftImages.length, video: draftVideo !== null, kind: composerKind }
       const publishPromise = publishPostCore(body, composerKind, mediaUrls, undefined, { postId: pendingId, isStale: () => stalled })
       const leg = await raceStall(publishPromise, PUBLISH_STALL_MS)
       if (!leg.done) {
@@ -1440,6 +1543,20 @@ function CAMPUSApp() {
         flash('The network is very slow — the publish keeps trying in the background. You can leave this screen; reposting cannot duplicate it.')
         void publishPromise.then(result => {
           if (result === 'posted') {
+            const latest = composerLatestRef.current
+            const editedAfterSubmit = latest.body.trim() !== submittedSnapshot.body
+              || latest.images !== submittedSnapshot.images
+              || latest.video !== submittedSnapshot.video
+              || latest.kind !== submittedSnapshot.kind
+            if (editedAfterSubmit) {
+              // the background attempt committed the OLD content with the
+              // key; the newer edits stay as a fresh key-less draft
+              composerPendingIdRef.current = null
+              composerFlightRef.current = false
+              setPublishProgress(null)
+              flash('An earlier version of your draft finished posting — your newer edits are safe in the composer.')
+              return
+            }
             setDraft(''); setDraftImages([]); setDraftVideo(null); setVideoTrim(null); setDraftMediaUrls(null)
             composerPendingIdRef.current = null
             composerFlightRef.current = false
@@ -1988,6 +2105,7 @@ function CAMPUSApp() {
     if (!inlineDraft.trim()) { flash('Write something before posting.'); return }
     if (!assertCanPublish()) return
     inlineFlightRef.current = true
+    inlineOwnerIdRef.current = user ? user.id : null // this draft belongs to THIS account
     setInlineBusy(true)
     // true once the watchdog fires — publishPostCore stays quiet about a late
     // failure (the caller below already owns the messaging)
@@ -1997,6 +2115,7 @@ function CAMPUSApp() {
       // retry (double tap, offline recovery, reload mid-outage)
       const pendingId = inlinePendingIdRef.current ?? db.newPostId()
       inlinePendingIdRef.current = pendingId
+      const submittedBody = inlineDraft.trim()
       const publishPromise = publishPostCore(inlineDraft.trim(), 'post', null, undefined, { postId: pendingId, isStale: () => stalled })
       const leg = await raceStall(publishPromise, PUBLISH_STALL_MS)
       if (!leg.done) {
@@ -2006,6 +2125,13 @@ function CAMPUSApp() {
         flash('The network is very slow — the publish keeps trying in the background. Your draft is safe here, and reposting cannot duplicate it.')
         void publishPromise.then(result => {
           if (result === 'posted') {
+            if (inlineLatestRef.current.trim() !== submittedBody) {
+              // newer edits happened during the slow attempt: the committed
+              // post carries the old body, the edits stay as a fresh draft
+              inlineFlightRef.current = false
+              flash('An earlier version of your draft finished posting — your newer edits are safe in the composer.')
+              return
+            }
             setInlineDraft('')
             setInlineOpen(false)
             flash('Your draft just finished posting — it is on the Home feed.')
@@ -2037,6 +2163,9 @@ function CAMPUSApp() {
      happens now. Inline drafts resume through their own publish path. */
   useEffect(() => {
     if (!resumeTarget || !user || !configured || status !== 'member') return
+    /* ownership: a restored draft from a different account never resumes */
+    const owner = composerOwnerIdRef.current ?? inlineOwnerIdRef.current
+    if (owner && owner !== user.id) { clearForeignDrafts(); return }
     const target = resumeTarget
     setResumeTarget(null)
     if (publishActiveRef.current) return // something is already publishing
@@ -2337,6 +2466,7 @@ function CAMPUSApp() {
               {inlineOpen ? (
                 <div className="inline-composer-open">
                   <textarea
+                    disabled={inlineBusy}
                     value={inlineDraft}
                     onChange={e => setInlineDraft(e.target.value)}
                     placeholder="What's happening on campus?"
@@ -2673,22 +2803,22 @@ function CAMPUSApp() {
       )}
 
       {composer && <div className="overlay" onMouseDown={e => {if(e.target===e.currentTarget)setComposer(false)}}><section className="bottom-sheet composer-sheet" ref={el => { composerDismiss.current?.(); composerDismiss.current = el ? attachSheetDismiss(el, () => setComposer(false)) : null }}><div className="sheet-handle"/><div className="sheet-heading"><div><span className="eyebrow">SHARE WITH YOUR CAMPUS</span><h2>Create {composerKind === 'confession' ? 'a confession' : composerKind === 'poll' ? 'a poll' : composerKind === 'reel' ? 'a reel' : 'a post'}</h2></div><button className="icon-button" onClick={() => setComposer(false)} aria-label="Close composer"><X size={20}/></button></div>
-        <div className="composer-kind-row">{([{kind:'post' as PostKind,label:'Post',icon:Image,style:'purple'},{kind:'reel' as PostKind,label:'Reel',icon:Clapperboard,style:'pink'},{kind:'poll' as PostKind,label:'Poll',icon:ChartNoAxesColumn,style:'orange'},{kind:'confession' as PostKind,label:'Confess',icon:BookOpen,style:'dark'}]).map(item=><button key={item.kind} className={`kind-option ${composerKind===item.kind?'chosen':''}`} onClick={() => handleKindSelect(item.kind)}><span className={`kind-icon ${item.style}`}><item.icon size={22}/></span><b>{item.label}</b></button>)}</div>
-        <textarea value={draft} onChange={e => setDraft(e.target.value)} placeholder={composerKind==='confession'?'Share anonymously with your college…':composerKind==='poll'?'Ask your campus a question…':'What’s happening on campus?'} maxLength={500}/>
+        <div className="composer-kind-row">{([{kind:'post' as PostKind,label:'Post',icon:Image,style:'purple'},{kind:'reel' as PostKind,label:'Reel',icon:Clapperboard,style:'pink'},{kind:'poll' as PostKind,label:'Poll',icon:ChartNoAxesColumn,style:'orange'},{kind:'confession' as PostKind,label:'Confess',icon:BookOpen,style:'dark'}]).map(item=><button key={item.kind} disabled={publishing} className={`kind-option ${composerKind===item.kind?'chosen':''}`} onClick={() => handleKindSelect(item.kind)}><span className={`kind-icon ${item.style}`}><item.icon size={22}/></span><b>{item.label}</b></button>)}</div>
+        <textarea disabled={publishing} value={draft} onChange={e => setDraft(e.target.value)} placeholder={composerKind==='confession'?'Share anonymously with your college…':composerKind==='poll'?'Ask your campus a question…':'What’s happening on campus?'} maxLength={500}/>
         {(composerKind === 'post') && (
           <div className="sheet-media-row">
             {draftImages.length > 0 && (
               <div className="carousel-picker">
                 {imageThumbs.map((thumb, index) => (
-                  <button key={thumb.url} className="picker-thumb" onClick={() => removeComposerImage(index)} aria-label={`Remove image ${index + 1}`}>
+                  <button key={thumb.url} className="picker-thumb" disabled={publishing} onClick={() => removeComposerImage(index)} aria-label={`Remove image ${index + 1}`}>
                     <img src={thumb.url} alt="" />
                     <X size={14} />
                   </button>
                 ))}
-                <label className="picker-thumb picker-thumb-more" role="button" tabIndex={0} aria-label="Add more images"
+                {!publishing && <label className="picker-thumb picker-thumb-more" role="button" tabIndex={0} aria-label="Add more images"
                   onClick={() => imagesInputRef.current?.click()}>
                   <span><X size={16} style={{ transform: 'rotate(45deg)' }}/></span>
-                </label>
+                </label>}
               </div>
             )}
             {draftImages.length === 0 && <p className="media-hint">Tap <b>Post</b> above to pick images — they will post as a swipeable carousel.</p>}
@@ -2709,8 +2839,8 @@ function CAMPUSApp() {
                   <span>CAMPUS compresses it automatically before upload.</span>
                 )}
                 <span className="reel-ready-actions">
-                  <button className="attach-button" onClick={() => setTrimOpen(true)} disabled={reelDuration === 0}>Change trim</button>
-                  <button className="attach-button ghost" onClick={() => { setDraftVideo(null); setVideoTrim(null); setReelDuration(0) }}>Remove</button>
+                  <button className="attach-button" onClick={() => setTrimOpen(true)} disabled={reelDuration === 0 || publishing}>Change trim</button>
+                  <button className="attach-button ghost" disabled={publishing} onClick={() => { setDraftVideo(null); setVideoTrim(null); setReelDuration(0) }}>Remove</button>
                 </span>
               </div>
             ) : (
@@ -2726,6 +2856,7 @@ function CAMPUSApp() {
               <div className="poll-option-row" key={index}>
                 <input
                   value={value}
+                  disabled={publishing}
                   onChange={e => setPollOptions(current => current.map((v, i) => i === index ? e.target.value : v))}
                   placeholder={index < 2 ? `Option ${index + 1} (required)` : `Option ${index + 1}`}
                   maxLength={120}
@@ -2733,7 +2864,7 @@ function CAMPUSApp() {
                   aria-label={`Answer option ${index + 1}`}
                 />
                 {pollOptions.length > 2 && (
-                  <button className="icon-button" aria-label={`Remove option ${index + 1}`}
+                  <button className="icon-button" aria-label={`Remove option ${index + 1}`} disabled={publishing}
                     onClick={() => setPollOptions(current => current.length <= 2 ? current : current.filter((_, i) => i !== index))}>
                     <X size={15}/>
                   </button>
@@ -2741,18 +2872,18 @@ function CAMPUSApp() {
               </div>
             ))}
             {pollOptions.length < 6 && (
-              <button className="poll-add-option" onClick={() => setPollOptions(current => [...current, ''])}>
+              <button className="poll-add-option" disabled={publishing} onClick={() => setPollOptions(current => [...current, ''])}>
                 <Plus size={14}/> Add option
               </button>
             )}
             <div className="poll-settings-row">
               <label className="poll-check">
-                <input type="checkbox" checked={pollMultiple} onChange={e => setPollMultiple(e.target.checked)} aria-label="Allow multiple choices"/>
+                <input type="checkbox" checked={pollMultiple} disabled={publishing} onChange={e => setPollMultiple(e.target.checked)} aria-label="Allow multiple choices"/>
                 <span>Multiple choices allowed</span>
               </label>
               <label className="poll-length">
                 <span>Poll length</span>
-                <select value={pollDays} onChange={e => setPollDays(Number(e.target.value))} aria-label="Poll duration">
+                <select value={pollDays} disabled={publishing} onChange={e => setPollDays(Number(e.target.value))} aria-label="Poll duration">
                   <option value={1}>1 day</option>
                   <option value={3}>3 days</option>
                   <option value={7}>7 days</option>

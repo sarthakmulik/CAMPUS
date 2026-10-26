@@ -27,6 +27,16 @@ export type ComposerDraftMeta = {
    * path has no client key, resuming it could double-post.
    */
   inFlight: boolean
+  /** poll composer state — restored together with kind:'poll' drafts */
+  pollOptions?: string[] | null
+  pollMultiple?: boolean | null
+  pollDays?: number | null
+  /**
+   * account id the draft belongs to. A draft never auto-publishes under a
+   * different account signed in on the same device; ownerless (legacy)
+   * drafts adopt whoever is signed in.
+   */
+  ownerId?: string | null
 }
 
 export type ComposerDraftFile = ComposerDraftMeta & {

@@ -321,6 +321,18 @@ body { background: var(--soft) }
 }
 .publish-banner button:hover { background: #ffffff42; }
 
+/* the edit-lock: while a publish is in flight the draft is literally the
+   bytes being sent — frozen inputs make that honest and prevent edits that
+   could never make it into the running attempt */
+.kind-option:disabled,
+.picker-thumb:disabled,
+.attach-button:disabled,
+.poll-add-option:disabled,
+textarea:disabled {
+  opacity: .55;
+  pointer-events: none;
+}
+
 /* like: the heart answers with one small pop — the standard feedback beat      */
 .post-actions button { transition: color var(--motion-fast) ease, background-color var(--motion-fast) ease, transform var(--motion-fast) ease }
 .post-actions button:active { transform: scale(.9) }
