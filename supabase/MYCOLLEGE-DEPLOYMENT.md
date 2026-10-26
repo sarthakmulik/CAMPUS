@@ -14,8 +14,10 @@ editor (or `psql`). It does exactly two things:
    - `posts_college_created_idx` on `posts (college_id, created_at desc)`
    - `profiles_college_idx` on `profiles (college_id)` (partial — non-null only)
 2. Rebuilds `search_members(text, integer)` with an extra `college_id uuid`
-   return column. Same name, same args, same SECURITY DEFINER visibility as
-   0010 — existing callers work unchanged.
+   return column and RETAINS the existing `is_verified` column (Search hall
+   and My College render the verified tick from it — the first draft of this
+   file dropped it; amended before applying). Same name, same args, same
+   SECURITY DEFINER visibility as 0010 — existing callers work unchanged.
 
 Verify after applying:
 
@@ -25,7 +27,7 @@ select indexname from pg_indexes
 -- expect exactly 2 rows
 
 select * from search_members('test', 3);
--- the result grid must include the college_id column
+-- the result grid must include the college_id column AND is_verified
 ```
 
 ## 2. What works before vs after (no code change needed either way)
@@ -41,6 +43,16 @@ Until 0045 is applied the app keeps working through the documented fallback:
 payload row carries no usable `college_id`. That is honest and stable, but
 short names are not unique across institutions long-term — apply 0045 when
 convenient; nothing in the UI needs to change afterward.
+
+## 2a. Companion migration 0046 (same sitting)
+
+While applying 0045, also apply `supabase/migrations/0046_confession_anonymity.sql`
+— it closes the anonymous-author leak on the `posts` table (a direct-SELECT
+path around the RPC nulling) and pairs with a one-line client change already
+in this commit (`createPost` no longer requests `author_id` in RETURNING).
+Apply/verify/rollback instructions are in that file's header. Order within
+the same session does not matter; both are instant and either can be applied
+first.
 
 ## 3. Not built (documented integration point)
 

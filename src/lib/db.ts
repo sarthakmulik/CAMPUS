@@ -2145,6 +2145,11 @@ export type CreatePostInput = {
  * Insert a post and return it in the feed shape. Confessions stay attributed
  * in the database (RLS requires a real author) but list_public_posts() hides
  * the author fields for is_anonymous rows, so the feed still shows "Anonymous".
+ *
+ * The RETURNING select must NOT request author_id: anonymous authorship is
+ * enforced at the table layer (0046 revokes direct SELECT on posts.author_id).
+ * For the freshly created row the author is always the caller, so the return
+ * value substitutes input.userId instead (nulled for anonymous posts).
  */
 export async function createPost(input: CreatePostInput): Promise<CampusPost> {
   if (!supabase) throw new Error('CAMPUS is not connected.')
@@ -2160,7 +2165,7 @@ export async function createPost(input: CreatePostInput): Promise<CampusPost> {
       media_urls: input.mediaUrls ?? [],
       ...(input.communityId ? { community_id: input.communityId } : {}),
     })
-    .select('id, author_id, college_id, body, kind, media_urls, is_anonymous, is_published, created_at')
+    .select('id, college_id, body, kind, media_urls, is_anonymous, is_published, created_at')
     .single()
   if (error) throw new Error(friendlyMessage(error))
   const row = data as unknown as {
@@ -2170,7 +2175,6 @@ export async function createPost(input: CreatePostInput): Promise<CampusPost> {
     is_anonymous: boolean
     media_urls: string[] | null
     created_at: string
-    author_id: string | null
     edited_at: string | null
   }
   const name = input.isAnonymous ? 'Anonymous' : input.authorName || 'Student'
@@ -2189,7 +2193,7 @@ export async function createPost(input: CreatePostInput): Promise<CampusPost> {
     reposts: 0,
     kind,
     media: row.media_urls ?? [],
-    authorId: row.author_id,
+    authorId: input.isAnonymous ? null : input.userId,
     editedAt: null,
     trending: false,
     anonymous: input.isAnonymous,
