@@ -770,6 +770,9 @@ export function mapFeedRow(row: FeedRow): CampusPost {
     id: row.id,
     author: name,
     handle: username ? `@${username}` : '',
+    // Poster's college resolved by the feed RPC itself (real college_id, not a
+    // name match) — My College filters on this canonical identifier.
+    collegeId: row.college_id ?? null,
     createdAt: row.created_at,
     initials: anonymous ? '' : initialsFor(name, username),
     college: row.college_short_name ?? '',
@@ -807,6 +810,70 @@ export async function fetchFeed(limit = 50): Promise<CampusPost[]> {
   if (error) throw new Error(friendlyMessage(error))
   const rows = (data ?? []) as FeedRow[]
   return rows.map(row => mapFeedRow(row))
+}
+
+/**
+ * Server-side page of the SAME public feed RPC (list_public_posts) used by the
+ * Home feed — offset pagination over the RPC's one consistent ordering.
+ * My College keeps its own page buffer so tab switches never refetch; the
+ * Home `fetchFeed` call stays the page-0 buffer consumers already rely on.
+ */
+export async function fetchFeedPage(offset = 0, limit = 20): Promise<CampusPost[]> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('list_public_posts', {
+    p_limit: Math.min(Math.max(limit, 1), 50),
+    p_offset: Math.max(offset, 0),
+  })
+  if (error) throw new Error(friendlyMessage(error))
+  const rows = (data ?? []) as FeedRow[]
+  return rows.map(row => mapFeedRow(row))
+}
+
+/** One public, non-staff profile of My College's People section. */
+export type CollegeStudent = {
+  id: string
+  username: string
+  name: string
+  avatarUrl: string | null
+  course: string | null
+  year: number | null
+  isVerified: boolean
+}
+
+/**
+ * Same-college students for My College: real, public, non-staff profiles only
+ * (is_private=false + role='member' + the student's own canonical college_id)
+ * ordered by name — no fabrication, no locked accounts, no staff, no private
+ * profile fields. Offset pages for "show more".
+ */
+export async function fetchCollegeStudents(
+  collegeId: string,
+  excludeUserId: string | null,
+  limit = 24,
+  offset = 0,
+): Promise<CollegeStudent[]> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, username, display_name, avatar_url, course, year_of_study, is_verified')
+    .eq('is_private', false)
+    .eq('role', 'member')
+    .eq('college_id', collegeId)
+    .neq('id', excludeUserId ?? '')
+    .order('display_name', { ascending: true })
+    .range(offset, offset + Math.min(Math.max(limit, 1), 50) - 1)
+  if (error) throw new Error(friendlyMessage(error))
+  return ((data ?? []) as Array<{ id: string; username: string | null; display_name: string | null; avatar_url: string | null; course: string | null; year_of_study: number | null; is_verified: boolean | null }>)
+    .map(row => ({
+      id: row.id,
+      username: row.username ?? '',
+      name: (row.display_name ?? '').trim() || (row.username ? `@${row.username}` : 'Student'),
+      avatarUrl: row.avatar_url ?? null,
+      course: row.course ?? null,
+      year: row.year_of_study ?? null,
+      isVerified: Boolean(row.is_verified),
+    }))
+    .filter(s => s.username)
 }
 
 /**
@@ -1131,6 +1198,32 @@ export async function fetchFollowing(followerId: string): Promise<string[]> {
     .eq('follower_id', followerId)
   if (error) throw new Error(friendlyMessage(error))
   return (data ?? []).map(row => (row as { followed_id: string }).followed_id)
+}
+
+/**
+ * Followed HANDLES (@username) for the feed's follow mirrors — the handle
+ * form Home's Following tab and My College's students tab filter by. Two
+ * batched requests at boot time only (follows, then the usernames of those
+ * ids); never per-row.
+ */
+export async function fetchFollowingHandles(followerId: string): Promise<string[]> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase
+    .from('follows')
+    .select('followed_id')
+    .eq('follower_id', followerId)
+  if (error) throw new Error(friendlyMessage(error))
+  const ids = Array.from(new Set((data ?? []).map(row => (row as { followed_id: string }).followed_id)))
+  if (ids.length === 0) return []
+  const { data: prof, error: profErr } = await supabase
+    .from('profiles')
+    .select('id, username')
+    .in('id', ids)
+    .not('username', 'is', null)
+  if (profErr) throw new Error(friendlyMessage(profErr))
+  return (prof ?? [])
+    .filter(row => row.username)
+    .map(row => `@${(row as { username: string }).username}`)
 }
 
 /** True when the signed-in member follows the given profile. */
@@ -1883,6 +1976,10 @@ export type PersonResult = {
   displayName: string
   avatarUrl: string | null
   collegeShort: string | null
+  /** canonical colleges.id of the search hit — in-college scoping key. Only
+   *  present once 0045 is applied; older payloads keep it undefined and the
+   *  consumer falls back to the short name. */
+  collegeId?: string | null
   isPrivate: boolean
   isVerified: boolean
 }
@@ -1893,6 +1990,7 @@ type MemberRow = {
   display_name: string | null
   avatar_url: string | null
   college_short_name: string | null
+  college_id?: string | null
   is_private: boolean
   is_verified?: boolean | null
 }
@@ -1910,6 +2008,7 @@ export async function searchMembers(query: string, limit = 10): Promise<PersonRe
     displayName: row.display_name?.trim() || (row.username ? `@${row.username}` : 'Student'),
     avatarUrl: row.avatar_url,
     collegeShort: row.college_short_name,
+    collegeId: row.college_id ?? null,
     isPrivate: Boolean(row.is_private),
     isVerified: Boolean(row.is_verified),
   }))

@@ -39,6 +39,7 @@ import Bookmarks from './components/Bookmarks'
 import NotificationCenter from './components/NotificationCenter'
 import Confessions from './components/Confessions'
 import Leaderboard from './components/Leaderboard'
+import MyCollege from './components/MyCollege'
 import * as bk from './lib/bookmarks'
 import SearchPanel from './components/SearchPanel'
 import Profile from './components/Profile'
@@ -653,6 +654,27 @@ function CAMPUSApp() {
     return () => { cancelled = true }
   }, [configured, status, user?.id, profile?.college_id])
 
+  // The follow-mirror boots from the REAL follows table (one batched read) so
+  // Home's Following tab and My College's students start in the true state —
+  // session-only flips then ride on top through toggleFollow/toggleFollowFor.
+  useEffect(() => {
+    if (!configured || status !== 'member' || !user) return
+    let cancelled = false
+    db.fetchFollowingHandles(user.id)
+      .then(handles => {
+        if (!cancelled) {
+          setFollowing(current => {
+            const merged = new Set(current)
+            for (const handle of handles) merged.add(handle)
+            return [...merged]
+          })
+        }
+      })
+      .catch(() => { /* honest empty mirror — no fabricated follows */ })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- merge keeps any flip made while this was in flight
+    return () => { cancelled = true }
+  }, [configured, status, user?.id])
+
   const visiblePosts = useMemo(() => {
     let result = [...posts]
     if (feedTab === 'For You') {
@@ -724,13 +746,15 @@ function CAMPUSApp() {
   /* ---- gated actions (visitors get the sign-up prompt) ----------------- */
 
   /** like/unlike; `item` lets feeds outside `posts` (the Confessions page
-   *  keeps its own list) take part — outcomes replay to them via confessPatch */
-  const toggleLike = async (id: string, item?: CampusPost) => {
-    if (!requireAuth('react to posts')) return
+   *  keeps its own list) take part — outcomes replay to them via confessPatch.
+   *  Resolves true only when the write landed, so callers with local mirrors
+   *  (My College's offset pages) can roll back honestly. */
+  const toggleLike = async (id: string, item?: CampusPost): Promise<boolean> => {
+    if (!requireAuth('react to posts')) return false
     // Optimistic flip, then a real write. Any failure is rolled back and
     // reported — the count on screen always matches the database.
     const target = posts.find(p => p.id === id) ?? item
-    if (!target) return
+    if (!target) return false
     const nextLiked = !target.liked
     setPosts(current => current.map(p => p.id === id ? { ...p, liked: !p.liked, likes: p.likes + (p.liked ? -1 : 1) } : p))
     setConfessPatch({ id, liked: nextLiked, likes: target.likes + (target.liked ? -1 : 1) })
@@ -741,12 +765,16 @@ function CAMPUSApp() {
         setPosts(current => current.map(p => p.id === id ? { ...p, liked: target.liked, likes: target.likes } : p))
         setConfessPatch({ id, liked: target.liked, likes: target.likes })
         notify(db.friendlyMessage(error))
+        return false
       }
     }
+    return true
   }
-  const toggleSave = (id: string) => {
+  const toggleSave = (id: string, item?: CampusPost) => {
     if (!requireAuth('bookmark posts')) return
-    const post = posts.find(p => p.id === id)
+    // `item` covers posts living outside `posts` (My College's offset pages);
+    // their kind is authoritative from the record itself
+    const post = posts.find(p => p.id === id) ?? item
     const kind = post?.kind === 'reel' ? 'reel' : 'post'
     // persisted through the shared saved store: optimistic flip everywhere
     // at once, honest rollback + error toast when the write fails
@@ -1021,12 +1049,19 @@ function CAMPUSApp() {
     }
   }
   // Follow / unfollow straight through the follows table.
-  const toggleFollowFor = async (targetId: string, current: boolean): Promise<boolean> => {
+  const toggleFollowFor = async (targetId: string, current: boolean, handle = ''): Promise<boolean> => {
     if (!requireAuth('follow classmates')) return false
     if (!user) return false
     try {
       if (current) await db.unfollowUser(targetId)
       else await db.followUser(user.id, targetId)
+      // the session follow-mirror is what feed filters read (Home Following
+      // tab, My College students) — keep it in step with the real write
+      if (handle) {
+        setFollowing(old => current
+          ? old.filter(x => x !== handle)
+          : old.includes(handle) ? old : [...old, handle])
+      }
       return true
     } catch (error) {
       flash(db.friendlyMessage(error))
@@ -2111,6 +2146,49 @@ function CAMPUSApp() {
                       requireAuth={requireAuth}
                       notify={flash}
                       onGoDiscover={() => navigate('Discover')}
+                    />
+                : activeNav === 'My College'
+                  ? <MyCollege
+                      key="mycollege"
+                      identity={identity && user ? { id: user.id, name: identity.name, username: identity.username, initials: identity.initials, college: identity.college } : null}
+                      configured={configured}
+                      status={status}
+                      isStaff={isStaff}
+                      colleges={colleges}
+                      caps={caps}
+                      myCollegeId={profile?.college_id ?? null}
+                      following={following}
+                      posts={posts}
+                      pollStateMap={pollStateMap}
+                      confessionPatch={confessPatch}
+                      requireAuth={requireAuth}
+                      notify={flash}
+                      feedLoading={feedLoading}
+                      feedSource={feedSource}
+                      feedError={feedError}
+                      reloadFeed={() => void loadFeed()}
+                      onVote={votePoll}
+                      onLike={toggleLike}
+                      onSave={toggleSave}
+                      onComment={openComments}
+                      onShare={sharePost}
+                      onReport={openReport}
+                      onRepost={toggleRepost}
+                      onEdit={startEditPost}
+                      onDelete={setDeleteTarget}
+                      onMessage={messageAuthor}
+                      onRelation={setRelation}
+                      onOpenProfile={openMentionProfile}
+                      onOpenTag={openHashtagSearch}
+                      onToggleFollow={toggleFollowFor}
+                      openConfessionsPage={openConfessionsPage}
+                      onOpenComposer={kind => openComposer(kind)}
+                      onNavigate={navigate}
+                      onOpenEvent={slug => { navigate('Events'); setOpenEventSlug(slug) }}
+                      onOpenCommunity={clubId => { navigate('Communities'); setOpenCommunityId(clubId); setCommunityTab(null) }}
+                      onOpenListing={slug => { navigate('Marketplace'); setOpenListingSlug(slug) }}
+                      onContactSeller={messageListing}
+                      onProfilePatched={() => void reloadProfile()}
                     />
                 : activeNav === 'Leaderboard'
                   ? <Leaderboard

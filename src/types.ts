@@ -28,6 +28,9 @@ export type CampusPost = {
   handle: string
   initials: string
   college: string
+  /** canonical colleges.id of the author — My College scopes feeds by this
+   *  stable identifier; `college` (short name) stays for display only */
+  collegeId?: string | null
   time: string
   /** raw created_at — used by the For You ranking (recency) */
   createdAt?: string
