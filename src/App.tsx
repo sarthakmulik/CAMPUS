@@ -261,6 +261,23 @@ function CAMPUSApp() {
   const [inlineDraft, setInlineDraft] = useState('')
   const [inlineBusy, setInlineBusy] = useState(false)
 
+  /* ---- publish reliability (offline, stalls, retries — exactly-once) ------ */
+  /* honest network signal: Post buttons respect it, transitions announce it */
+  const [isOnline, setIsOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine !== false)
+  /* one publish at a time across the inline composer, the sheet and polls */
+  const publishActiveRef = useRef(false)
+  /* per-draft pending post id (exactly-once key) + uploaded media reuse */
+  const composerPendingIdRef = useRef<string | null>(null)
+  const inlinePendingIdRef = useRef<string | null>(null)
+  const [draftMediaUrls, setDraftMediaUrls] = useState<string[] | null>(null)
+  const DRAFT_STORE_KEY = 'campus.composer.draft.v1'
+  const INLINE_STORE_KEY = 'campus.inline.draft.v1'
+  /* watchdogs: local processing is never raced (it is CPU-bound), only the
+     network legs are — if they stall past the limit the user regains the
+     button while the attempt keeps running and stays exactly-once */
+  const UPLOAD_STALL_MS = 90_000
+  const PUBLISH_STALL_MS = 45_000
+
   // Stable, revoked-on-change object URLs for the carousel previews.
   const imageThumbs = useMemo(
     () => draftImages.map(file => ({ file, url: URL.createObjectURL(file) })),
@@ -428,6 +445,111 @@ function CAMPUSApp() {
     if (noticeTimer.current) window.clearTimeout(noticeTimer.current)
     noticeTimer.current = window.setTimeout(() => setNotice(''), 3200)
   }
+
+  /* ---- publish reliability: connectivity, drafts, exactly-once keys ------- */
+
+  /* Announce real connectivity flips; the flag also drives the fast-fail on
+     the compose buttons below (no blind request into a dead radio). */
+  useEffect(() => {
+    const onOnline = () => { setIsOnline(true); flash('Back online — you can post again.') }
+    const onOffline = () => { setIsOnline(false); flash('You are offline — composing still works; sending waits until you reconnect.') }
+    window.addEventListener('online', onOnline)
+    window.addEventListener('offline', onOffline)
+    return () => {
+      window.removeEventListener('online', onOnline)
+      window.removeEventListener('offline', onOffline)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /* Restore persisted drafts once at boot — this effect MUST be declared
+     before the persistence writers below so the first (empty-state) pass of
+     those writers cannot wipe the store before it is read. Media File
+     objects cannot survive a reload — their uploaded URLs can and do, so
+     attaching media never has to re-upload on a fresh attempt. */
+  const draftsRestoredRef = useRef(false)
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(DRAFT_STORE_KEY)
+      if (raw) {
+        const saved = JSON.parse(raw) as { kind?: PostKind; source?: 'home' | 'confessions'; body?: string; media?: string[] | null; pendingId?: string | null }
+        if (typeof saved.body === 'string' && (saved.body.trim() || saved.media?.length)) {
+          setDraft(saved.body)
+          if (saved.kind) setComposerKind(saved.kind)
+          if (saved.source) setComposerSource(saved.source)
+          composerPendingIdRef.current = saved.pendingId ?? null
+          setDraftMediaUrls(saved.media ?? null)
+        }
+      }
+      const rawInline = window.localStorage.getItem(INLINE_STORE_KEY)
+      if (rawInline) {
+        const savedInline = JSON.parse(rawInline) as { body?: string; pendingId?: string | null }
+        if (typeof savedInline.body === 'string' && savedInline.body.trim()) {
+          setInlineDraft(savedInline.body)
+          inlinePendingIdRef.current = savedInline.pendingId ?? null
+        }
+      }
+    } catch { /* malformed store — ignore, memory drafts already loaded */ }
+    draftsRestoredRef.current = true
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /* The draft (body, target kind/feed, already-uploaded media, exactly-once
+     key) survives reloads: an outage, a crash or an accidental navigation
+     never eats a post. Written on every change; cleared on publish/delete. */
+  useEffect(() => {
+    if (!draftsRestoredRef.current) return // boot pass — restore effect reads first
+    try {
+      if (!draft.trim() && !draftMediaUrls?.length) {
+        composerPendingIdRef.current = null
+        window.localStorage.removeItem(DRAFT_STORE_KEY)
+        return
+      }
+      window.localStorage.setItem(DRAFT_STORE_KEY, JSON.stringify({
+        kind: composerKind, source: composerSource, body: draft,
+        media: draftMediaUrls, pendingId: composerPendingIdRef.current,
+      }))
+    } catch { /* private mode / full storage — drafts stay memory-only */ }
+  }, [draft, composerKind, composerSource, draftMediaUrls])
+
+  useEffect(() => {
+    if (!draftsRestoredRef.current) return
+    try {
+      if (!inlineDraft.trim()) {
+        inlinePendingIdRef.current = null
+        window.localStorage.removeItem(INLINE_STORE_KEY)
+        return
+      }
+      window.localStorage.setItem(INLINE_STORE_KEY, JSON.stringify({
+        body: inlineDraft, pendingId: inlinePendingIdRef.current,
+      }))
+    } catch { /* same as above */ }
+  }, [inlineDraft])
+
+  /* Resolve a network promise against a stall watchdog. `done:false` means
+     "still running" — never a failed request, so the user can also just
+     close the app: the exactly-once key makes any later retry safe. */
+  const raceStall = <T,>(promise: Promise<T>, ms: number): Promise<{ done: true; value: T } | { done: false }> =>
+    Promise.race([
+      promise.then(value => ({ done: true as const, value })),
+      new Promise<{ done: false }>(resolve => { window.setTimeout(() => resolve({ done: false }), ms) }),
+    ])
+
+  /* one gate used by all three publishers: refuses to fire a request into a
+     dead connection and serialises publishes instead of racing them */
+  const assertCanPublish = (): boolean => {
+    if (!isOnline) {
+      flash('You are offline — your draft is kept. Reconnect and press Post again.')
+      return false
+    }
+    if (publishActiveRef.current) {
+      flash('Hang on — your previous post is still sending.')
+      return false
+    }
+    publishActiveRef.current = true
+    return true
+  }
+  const releasePublish = () => { publishActiveRef.current = false }
 
   /* ---- signed-in member context ---------------------------------------- */
 
@@ -1122,7 +1244,12 @@ function CAMPUSApp() {
         ? null
         : (colleges.find(c => c.id === profile?.college_id) ?? colleges[0])
       const options = pollOptions.map(value => value.trim()).filter(Boolean)
-      const pollPost = await db.createPoll({
+      /* watchdog: a stalled network must not pin the button forever. Unlike
+         plain posts this is NOT retriable-safe from the client — create_poll
+         is a single server transaction with no client-generated key, so a
+         stalled attempt may still publish later and a manual retry could
+         double-post. Honest message, draft kept, no automatic retry. */
+      const leg = await raceStall(db.createPoll({
         userId: user.id,
         body: draft.trim(),
         kind: 'poll',
@@ -1135,7 +1262,12 @@ function CAMPUSApp() {
         options,
         multipleChoice: pollMultiple,
         closeDays: pollDays,
-      })
+      }), PUBLISH_STALL_MS)
+      if (!leg.done) {
+        flash('The network is very slow — the poll may still publish in the background. Your draft is safe here.')
+        return
+      }
+      const pollPost = leg.value
       const map = await db.pollStatesFor([pollPost])
       setPollStateMap(current => ({ ...current, ...map }))
       setPosts(current => [pollPost, ...current])
@@ -1155,56 +1287,105 @@ function CAMPUSApp() {
 
   const createPost = async () => {
     if (!requireAuth('create posts, polls and confessions')) return
-    // polls validate inline through publishPollDraft (question included)
-    if (!draft.trim() && composerKind !== 'poll') { flash('Write something before posting.'); return }
+    // polls validate inline through publishPollDraft (question included);
+    // media-less drafts aren't real posts either
+    if (!draft.trim() && composerKind !== 'poll' && !draftMediaUrls?.length) { flash('Write something before posting.'); return }
     if (composerKind === 'poll') {
-      await publishPollDraft()
+      // single gate + watchdog for the whole publish family
+      if (!assertCanPublish()) return
+      try {
+        await publishPollDraft()
+      } finally { releasePublish() }
       return
     }
+    if (!assertCanPublish()) return
     setPublishing(true)
+    // becomes true the moment the stall watchdog fires; publishPostCore uses
+    // it to keep quiet while a late-landing attempt resolves on its own
+    let stalled = false
     try {
       const body = draft.trim()
 
-      let mediaUrls: string[] | null = null
-      if (composerKind === 'post' && draftImages.length) {
+      // Media reuse across retries: a stalled earlier attempt already uploaded
+      // the files and their URLs travel with the persisted draft, so "Post"
+      // after a reconnect never re-uploads byte-for-byte identical media.
+      let mediaUrls: string[] | null = draftMediaUrls
+      const reuseCount = Array.isArray(mediaUrls) ? mediaUrls.length : 0
+      if (composerKind === 'post' && draftImages.length && reuseCount !== draftImages.length) {
         const uploaded: string[] = []
         for (const image of draftImages) {
-          uploaded.push(await db.uploadMedia(user!.id, image))
+          const leg = await raceStall(db.uploadMedia(user!.id, image), UPLOAD_STALL_MS)
+          if (!leg.done) {
+            // clean whatever fully landed before the stall; the permanently
+            // stalled upload cannot be identified, so it is left for the
+            // retry to supersede rather than guessed away
+            void db.removeUploadedFiles(uploaded)
+            flash('Your connection stalled while uploading the images. Your draft is kept — press Post again once the network returns.')
+            return
+          }
+          uploaded.push(leg.value)
           setPublishProgress(`Uploading image ${uploaded.length} of ${draftImages.length}…`)
         }
         mediaUrls = uploaded
+        setDraftMediaUrls(uploaded)
       }
       if (composerKind === 'reel') {
-        if (!draftVideo) {
+        if (!draftVideo && reuseCount !== 1) {
           flash('Select a video to post a reel.')
           return
         }
-        // Videos over 30 s must be trimmed first: the trimmer opens
-        // automatically and Publish stays blocked until a window is picked.
-        if (reelDuration > REEL_WINDOW_SECONDS + 0.05 && !videoTrim) {
-          flash('Trim your reel to 30 seconds first — open the clip timeline and pick a window.')
-          setTrimOpen(true)
-          return
+        if (reuseCount !== 1) {
+          if (!draftVideo) { flash('Select a video to post a reel.'); return }
+          // Videos over 30 s must be trimmed first: the trimmer opens
+          // automatically and Publish stays blocked until a window is picked.
+          if (reelDuration > REEL_WINDOW_SECONDS + 0.05 && !videoTrim) {
+            flash('Trim your reel to 30 seconds first — open the clip timeline and pick a window.')
+            setTrimOpen(true)
+            return
+          }
+          const reelFile = draftVideo
+          const trimWindow = videoTrim ?? { start: 0, end: Math.min(reelDuration || REEL_WINDOW_SECONDS, REEL_WINDOW_SECONDS) }
+          const keepSeconds = Math.min(Math.max(trimWindow.end - trimWindow.start, 0.3), REEL_WINDOW_SECONDS)
+          setPublishProgress('Compressing video…')
+          const compressed = await media.compressVideo({
+            file: reelFile,
+            start: trimWindow.start,
+            keepSeconds,
+            onProgress: progress => {
+              if (progress.phase === 'encoding') setPublishProgress(`Compressing ${progress.percent}%…`)
+              else setPublishProgress('Uploading video…')
+            },
+          })
+          setPublishProgress('Uploading video…')
+          const leg = await raceStall(db.uploadMedia(user!.id, compressed), UPLOAD_STALL_MS)
+          if (!leg.done) {
+            flash('Your connection stalled while uploading the video. Your draft and trims are kept — press Post again once the network returns.')
+            return
+          }
+          mediaUrls = [leg.value]
+          setDraftMediaUrls(mediaUrls)
         }
-        const trimWindow = videoTrim ?? { start: 0, end: Math.min(reelDuration || REEL_WINDOW_SECONDS, REEL_WINDOW_SECONDS) }
-        const keepSeconds = Math.min(Math.max(trimWindow.end - trimWindow.start, 0.3), REEL_WINDOW_SECONDS)
-        setPublishProgress('Compressing video…')
-        const compressed = await media.compressVideo({
-          file: draftVideo,
-          start: trimWindow.start,
-          keepSeconds,
-          onProgress: progress => {
-            if (progress.phase === 'encoding') setPublishProgress(`Compressing ${progress.percent}%…`)
-            else setPublishProgress('Uploading video…')
-          },
-        })
-        setPublishProgress('Uploading video…')
-        mediaUrls = [await db.uploadMedia(user!.id, compressed)]
       }
 
-      const result = await publishPostCore(body, composerKind, mediaUrls)
-      if (result === 'error') return // composer stays open, draft intact
-      setDraft(''); setDraftImages([]); setDraftVideo(null); setVideoTrim(null)
+      // exactly-once key: created once per draft, persisted with it, reused
+      // by every retry until the post actually lands
+      const pendingId = composerPendingIdRef.current ?? db.newPostId()
+      composerPendingIdRef.current = pendingId
+      const leg = await raceStall(
+        publishPostCore(body, composerKind, mediaUrls, undefined, { postId: pendingId, isStale: () => stalled }),
+        PUBLISH_STALL_MS,
+      )
+      if (!leg.done) {
+        stalled = true
+        // leave the composer open, draft (and its key) intact; a manual retry
+        // reuses the id, and if the original attempt lands later the feed
+        // dedupes it
+        flash('The network is very slow — the publish keeps trying in the background. Your draft is safe here, and reposting cannot duplicate it.')
+        return
+      }
+      if (leg.value === 'error') return // composer stays open, draft intact
+      setDraft(''); setDraftImages([]); setDraftVideo(null); setVideoTrim(null); setDraftMediaUrls(null)
+      composerPendingIdRef.current = null
       setComposer(false)
       flash(composerSource === 'confessions' && composerKind === 'confession'
         ? 'Confession posted — it appears here in the Confessions feed.'
@@ -1213,11 +1394,12 @@ function CAMPUSApp() {
           : 'Posted to the campus feed.')
     } catch (error) {
       // Media processing or a database failure: the composer stays open with
-      // the draft intact.
+      // the draft intact; uploaded media stays reusable for the next attempt.
       flash(db.friendlyMessage(error))
     } finally {
       setPublishing(false)
       setPublishProgress(null)
+      releasePublish()
     }
   }
 
@@ -1584,12 +1766,19 @@ function CAMPUSApp() {
    * Shared publish path for the inline composer and the full composer sheet:
    * writes to the posts table when the database is connected, otherwise keeps
    * the post on this device and says exactly that.
+   *
+   * options.postId: the exactly-once key — retries of a stalled/offline
+   * draft reuse it, so the database PK (not client guesswork) is what makes
+   * double publishing impossible. options.isStale: when the caller timed out
+   * waiting, late failures stay silent (the user was already told); late
+   * successes still land in the feed, exactly once.
    */
   const publishPostCore = async (
     body: string,
     kind: PostKind,
     mediaUrls: string[] | null,
     onProgress?: (message: string) => void,
+    options: { postId?: string; isStale?: () => boolean } = {},
   ): Promise<'posted' | 'error'> => {
     const anonymous = kind === 'confession'
     // College scope = the author's own college. Staff (platform-level, no
@@ -1609,11 +1798,16 @@ function CAMPUSApp() {
           authorName: identity.name,
           authorUsername: identity.username,
           mediaUrls,
+          postId: options.postId,
         })
         if (profile?.college_id == null && !isStaff) {
           flash('Posted — but pick your college in the onboarding step so your campus can find it.')
         }
-        setPosts(current => [post, ...current])
+        // exactly-once in the feed too: a late-confirming retry replaces the
+        // surfaced row instead of appending the same post twice
+        setPosts(current => current.some(p => p.id === post.id)
+          ? current.map(p => p.id === post.id ? post : p)
+          : [post, ...current])
         if (composerSource === 'confessions' && kind === 'confession') {
           // published from the Confessions page: stay on it and let it refresh
           setConfRefreshSeq(seq => seq + 1)
@@ -1622,7 +1816,8 @@ function CAMPUSApp() {
         setActiveNav('Home'); setFeedTab('For You')
         return 'posted'
       } catch (error) {
-        flash(db.friendlyMessage(error))
+        // a stalled caller already owns the messaging — stay silent for it
+        if (!options.isStale?.()) flash(db.friendlyMessage(error))
         return 'error'
       }
     }
@@ -1700,13 +1895,37 @@ function CAMPUSApp() {
 
   const publishInlinePost = async () => {
     if (!inlineDraft.trim()) { flash('Write something before posting.'); return }
+    if (!assertCanPublish()) return
     setInlineBusy(true)
-    const result = await publishPostCore(inlineDraft.trim(), 'post', null)
-    setInlineBusy(false)
-    if (result === 'posted') {
-      setInlineDraft('')
-      setInlineOpen(false)
-      flash('Posted to the campus feed.')
+    // true once the watchdog fires — publishPostCore stays quiet about a late
+    // failure (the caller below already owns the messaging)
+    let stalled = false
+    try {
+      // exactly-once key: persisted with the inline draft, reused by every
+      // retry (double tap, offline recovery, reload mid-outage)
+      const pendingId = inlinePendingIdRef.current ?? db.newPostId()
+      inlinePendingIdRef.current = pendingId
+      const leg = await raceStall(
+        publishPostCore(inlineDraft.trim(), 'post', null, undefined, { postId: pendingId, isStale: () => stalled }),
+        PUBLISH_STALL_MS,
+      )
+      if (!leg.done) {
+        stalled = true
+        // keep the inline composer open with the draft (and its key) intact;
+        // the background attempt either lands and dedupes, or the retry uses
+        // the same id so nothing can publish twice
+        flash('The network is very slow — the publish keeps trying in the background. Your draft is safe here, and reposting cannot duplicate it.')
+        return
+      }
+      if (leg.value === 'posted') {
+        // clearing the draft empties the persisted store and key (effects above)
+        setInlineDraft('')
+        setInlineOpen(false)
+        flash('Posted to the campus feed.')
+      }
+    } finally {
+      setInlineBusy(false)
+      releasePublish()
     }
   }
 
@@ -1718,6 +1937,7 @@ function CAMPUSApp() {
     setDraftVideo(null)
     setVideoTrim(null)
     setPublishProgress(null)
+    setDraftMediaUrls(null) // media pending changed — cached URLs are stale
     // fresh poll fields on every switch into the poll composer
     setPollOptions(['', ''])
     setPollMultiple(false)
@@ -1746,10 +1966,13 @@ function CAMPUSApp() {
       if (files.length > room) flash(`Up to 10 images per carousel — keeping the first ${room}.`)
       return [...current, ...files.slice(0, room)]
     })
+    // images pending changed — any cached upload set no longer matches
+    setDraftMediaUrls(null)
   }
 
   const removeComposerImage = (index: number) => {
     setDraftImages(current => current.filter((_, i) => i !== index))
+    setDraftMediaUrls(null)
   }
 
   /** Pick the reel video, then open the trimmer when it is over 30 seconds. */
@@ -1763,6 +1986,7 @@ function CAMPUSApp() {
       setDraftVideo(file)
       setVideoTrim(null)
       setReelDuration(info.duration)
+      setDraftMediaUrls(null) // a new reel file — cached upload URLs are stale
       if (info.duration > media.REEL_WINDOW_SECONDS + 0.05) setTrimOpen(true)
     } catch (error) {
       flash(db.friendlyMessage(error))

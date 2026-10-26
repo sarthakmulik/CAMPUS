@@ -2139,6 +2139,38 @@ export type CreatePostInput = {
   mediaUrls?: string[] | null
   /** 0016: when set, the post belongs to a community (RLS checks membership) */
   communityId?: string | null
+  /**
+   * Client-generated id for exactly-once publishing: a retry of the same
+   * draft (double tap, timeout recovery, app reload mid-outage) reuses the
+   * SAME id, so the database PK rejects the duplicate and the existing row
+   * is returned instead of a second post.
+   */
+  postId?: string
+}
+
+/** A valid UUIDv4 usable as posts.id, even when crypto.randomUUID is absent. */
+export function newPostId(): string {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  } catch { /* fall through to the manual generator */ }
+  const hex = (n: number) => Array.from({ length: n }, () => Math.floor(Math.random() * 16).toString(16)).join('')
+  return `${hex(8)}-${hex(4)}-4${hex(3)}-a${hex(3)}-${hex(12)}`
+}
+
+/** Best-effort storage cleanup for uploads that never reached a post. Never throws. */
+export async function removeUploadedFiles(publicUrls: string[]): Promise<void> {
+  if (!supabase || publicUrls.length === 0) return
+  const parsed = publicUrls
+    .map(url => /\/storage\/v1\/object\/public\/([^/]+)\/(.+)$/.exec(url))
+    .filter(Boolean)
+    .map(m => ({ bucket: (m as RegExpExecArray)[1], path: decodeURIComponent((m as RegExpExecArray)[2]) }))
+  const byBucket = new Map<string, string[]>()
+  for (const { bucket, path } of parsed) byBucket.set(bucket, [...(byBucket.get(bucket) ?? []), path])
+  for (const [bucket, paths] of byBucket) {
+    try {
+      await supabase.storage.from(bucket).remove(paths)
+    } catch { /* orphaned file, harmless — never block a publish over cleanup */ }
+  }
 }
 
 /**
@@ -2156,6 +2188,9 @@ export async function createPost(input: CreatePostInput): Promise<CampusPost> {
   const { data, error } = await supabase
     .from('posts')
     .insert({
+      // exactly-once publishing: the id comes from the caller (persisted with
+      // the draft), so a retried attempt cannot create a second post
+      id: input.postId ?? newPostId(),
       author_id: input.userId,
       college_id: input.collegeId,
       body: input.body,
@@ -2167,8 +2202,7 @@ export async function createPost(input: CreatePostInput): Promise<CampusPost> {
     })
     .select('id, college_id, body, kind, media_urls, is_anonymous, is_published, created_at')
     .single()
-  if (error) throw new Error(friendlyMessage(error))
-  const row = data as unknown as {
+  let row = data as unknown as {
     id: string
     body: string
     kind: string
@@ -2176,7 +2210,29 @@ export async function createPost(input: CreatePostInput): Promise<CampusPost> {
     media_urls: string[] | null
     created_at: string
     edited_at: string | null
+  } | null
+  if (error) {
+    // Duplicate key = a previous attempt of THIS draft already published the
+    // post (timeout recovery, double tap, reload mid-outage). Reuse that row.
+    const dup = (error as { code?: string }).code === '23505' && input.postId
+    if (!dup) {
+      // PGRST116 here = the insert was filtered out (RLS check failed) —
+      // nothing was published; say that instead of a generic postgrest line
+      throw ((error as { code?: string }).code === 'PGRST116'
+        ? new Error('CAMPUS could not publish that post. Check your connection and try again — your draft is kept.')
+        : new Error(friendlyMessage(error)))
+    }
+    const reuse = await supabase
+      .from('posts')
+      .select('id, college_id, body, kind, media_urls, is_anonymous, is_published, created_at')
+      .eq('id', input.postId!)
+      .maybeSingle()
+    if (!reuse.error && reuse.data) row = reuse.data as unknown as typeof row
+    else throw new Error(friendlyMessage(error))
   }
+  // An RLS-violating insert succeeds with zero returned rows — that is a
+  // silent failure, never pretend it posted (draft must stay editable).
+  if (!row) throw new Error('CAMPUS could not publish that post. Check your connection and try again — your draft is kept.')
   const name = input.isAnonymous ? 'Anonymous' : input.authorName || 'Student'
   const username = input.isAnonymous ? '' : input.authorUsername
   const kind: PostKind = row.kind === 'confession' || row.kind === 'poll' || row.kind === 'reel' ? row.kind : 'post'
