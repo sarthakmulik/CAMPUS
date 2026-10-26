@@ -1257,7 +1257,10 @@ function CAMPUSApp() {
     if (label !== 'Search') { setSearchOpen(false); setSearchSeed('') }
     else setSearchOpen(true)
     if (label === 'Profile' && label === activeNav) setViewingProfileId(null)
-    if (scaffoldNav.includes(label) && !['Chats', 'Bookmarks', 'Leaderboard'].includes(label)) flash(`${label} is coming soon.`)
+    // "coming soon" only for genuinely scaffolded pages; Chats, Bookmarks,
+    // Leaderboard, Notifications, Profile and My College are live (the last
+    // three render real backends — verified in the M9–M16 probes)
+    if (scaffoldNav.includes(label) && !['Chats', 'Bookmarks', 'Leaderboard', 'Notifications', 'Profile', 'My College'].includes(label)) flash(`${label} is coming soon.`)
   }
 
   /* ---- mobile swipe navigation (touch only, viewport ≤ 650px) -------------
@@ -2094,6 +2097,8 @@ function CAMPUSApp() {
                   onOpenMention={openMentionProfile}
                   onOpenHashtag={openHashtagSearch}
                   onSignOut={signOut}
+                  onOpenPost={openComments}
+                  onCreatePost={kind => { openComposer(kind) }}
                 />
               : activeNav === 'Communities'
                 ? <Communities

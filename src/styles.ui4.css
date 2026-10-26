@@ -502,7 +502,9 @@ body { background: var(--soft) }
    M9), and "Edit profile" + the Posts/Reels tabs pad to 33px tall. All three grow silent
    zones to the 44pt floor with unchanged visuals.                                       */
 .profile-settings-trigger { width: 44px; height: 44px }
-.profile-actions .profile-message, .profile-tabs button { min-height: 44px }
+.profile-head-tools .icon-button { width: 44px; height: 44px }
+.profile-actions .profile-message, .profile-actions .profile-edit,
+.profile-segment button { min-height: 44px }
 
 /* ---- M11c leaderboard + reel-bar floors --------------------------------------------------
    Leaderboard at 390px: the Overall/My College/Communities/Creators/Events tab pills run
