@@ -425,7 +425,7 @@ declare
   v_prev_cat     text;
   v_pick         uuid;
 begin
-  -- active-season categories from the month table (deterministic, documented)
+  -- active-season categories for THIS campus day (deterministic, documented)
   select coalesce(array_agg(cat), '{}')
     into v_seasonnow
     from jsonb_array_elements(
@@ -433,7 +433,7 @@ begin
              (select jsonb_agg(cat)
                 from (select jsonb_array_elements(s.value->'categories') as cat
                         from jsonb_array_elements(v_seasons) s
-                       where (s.value->'months') @> to_jsonb(extract(month from (p_date + 1)::timestamp))
+                       where (s.value->'months') @> to_jsonb(extract(month from p_date))
                       ) m),
              '[]'::jsonb)
          ) x(cat);
