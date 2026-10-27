@@ -1171,8 +1171,8 @@ begin
          updated_at = now()
    where id = v_item;
   if not found then raise exception 'That item does not exist.'; end if;
-  perform public.log_staff_action('pulse.set_status',
-    jsonb_build_object('item', v_item, 'status', p_status, 'reason', p_reason));
+  perform public.log_staff_action('pulse.set_status', 'pulse_item', v_item,
+    jsonb_build_object('status', p_status, 'reason', p_reason));
   return jsonb_build_object('ok', true);
 end $$;
 
@@ -1232,7 +1232,8 @@ begin
     v_key := v_key + 1;
   end loop;
 
-  perform public.log_staff_action('pulse.create_quiz', jsonb_build_object('item', v_item, 'title', p_title));
+  perform public.log_staff_action('pulse.create_quiz', 'pulse_item', v_item,
+    jsonb_build_object('title', p_title));
   return jsonb_build_object('id', v_item);
 end $$;
 
@@ -1269,7 +1270,8 @@ begin
      set value = to_jsonb(p_value), updated_at = now(), updated_by = v_actor
    where key = p_key;
   if not found then raise exception 'Unknown configuration key.'; end if;
-  perform public.log_staff_action('pulse.config', jsonb_build_object('key', p_key, 'value', p_value));
+  perform public.log_staff_action('pulse.config', null, null,
+    jsonb_build_object('key', p_key, 'value', p_value));
   return jsonb_build_object('ok', true);
 end $$;
 
