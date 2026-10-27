@@ -5,7 +5,7 @@
    is named here by ROLE, not by appearance, and carries measured contrast
    against its paired surface (WCAG 4.5:1 minimum for text below 17px).
 
-   Roles follow the app's own identity: a warm cream campus light, ink navy
+   Roles follow the app's own identity: a cool fresh campus light, ink navy
    type, and the indigo-violet-pink "campus light" gradient reserved for the
    brand mark, primary CTAs and one hero moment.
 
@@ -17,8 +17,8 @@
 
 :root {
   /* ---- surfaces ------------------------------------------------------------ */
-  /* page cream (light) / raised white; dark: near-black with a violet cast    */
-  --soft: #fbf8f3;            /* page background          · ink 13.7:1         */
+  /* page cool-white (light) / raised white; dark: near-black with a violet cast*/
+  --soft: #f6f7fb;            /* page background          · ink ≥13:1          */
   --surface: #ffffff;         /* cards, sheets, bars      · ink 15.1:1         */
   --surface-raised: #ffffff;  /* popovers, toasts         · ink 15.1:1         */
   --surface-glass: #ffffffed; /* floating chrome: header, bottom nav           */

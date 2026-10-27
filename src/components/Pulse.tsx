@@ -297,6 +297,7 @@ export default function Pulse({ identity, configured, isMember, requireAuth, not
 
   return (
     <div className="pulse-page">
+      <h1 className="pulse-page-title">Campus Pulse</h1>
       {hero}
 
       {/* ---------------- Today's Pulse ---------------- */}

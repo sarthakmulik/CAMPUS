@@ -1508,10 +1508,17 @@ textarea:disabled {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 18px;
+  box-shadow: var(--elev-1);   /* desktop idiom: same float as Communities section panels */
   padding: 16px;
   display: flex; flex-direction: column; gap: 10px;
   width: 100%;
 }
+.pulse-page-title {
+  margin: 0;
+  font-size: 21px; font-weight: 750; letter-spacing: -0.5px;
+  color: var(--ink-strong);
+}
+@media (min-width: 651px) { .pulse-page-title { display: none } }   /* desktop topbar's DesktopPageTitle already labels the page */
 .pulse-daily.closed { opacity: .92 }
 .pulse-tag {
   align-self: flex-start;
@@ -1713,5 +1720,31 @@ textarea:disabled {
   .pulse-result-bar-track { grid-area: bar }
   .pulse-result-n     { grid-area: n; align-self: center; white-space: nowrap }
   .pulse-page { gap: 18px }
+}
+
+/* ---- mobile: adopt the feed card language (<650px) ----------------------------
+   Every other tab on a phone renders feed cards: white, radius 13, hairline
+   border, the faint --elev-2 float, and 10px inline gutters on a white page.
+   Pulse was the one outlier (radius 18, zero shadow, no gutter, 16px padding),
+   which is why switching Home → Pulse felt like opening a different app.
+   This block mirrors .post-card exactly. Desktop keeps the section-panel idiom
+   (radius 18 + --elev-1) absent here. */
+@media (max-width: 650px) {
+  .pulse-page { padding-inline: 10px; gap: 16px }
+  .pulse-card {
+    border-radius: 13px;
+    box-shadow: var(--elev-2);
+    padding: 13px 12px;
+    gap: 9px;
+  }
+  .pulse-option { border-radius: 12px }
+  .pulse-statement { padding: 11px 12px 8px }
+  .pulse-statement-text { font-size: 13.5px }
+  .pulse-insight-body { font-size: 13px }
+  .pulse-deck { gap: 8px }
+  .pulse-insights { gap: 8px }
+  .pulse-kicker { font-weight: 750; letter-spacing: 1.2px; font-size: 11px }
+  .pulse-tag { padding: 4px 9px }
+  .pulse-question { font-size: 15.5px }
 }
 
