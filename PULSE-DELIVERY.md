@@ -58,10 +58,24 @@ Daily deterministic self-operating engagement. **No external AI APIs, no paid de
 
 Both `0048_campus_pulse.sql` and `0048b_pulse_seed.sql` are applied to the live database. If a partial run had happened (per-statement autocommit), simply re-running `0048_campus_pulse.sql` is safe — policies drop-guarded, functions recreated, tables/indexes "if not exists"/guarded, seeds unique-keyed.
 
-## Not yet live-probed (blocked, not by code)
+## Staff console (live-probed with the owner session)
 
-- **Staff console Pulse tab** needs an account with the `pulse.admin` operation scope. Probe account (`test1 bot`) is a standard student and its password isn't held in-session; grant the op to a staff account and the tab will appear in Staff Console. Enforced server-side via `has_op('pulse.admin')` — verified in code, not exercised with a live staff session.
+Signed in as the super_admin (auto-lands on Staff Console) and verified:
+
+- **Pulse tab visible** for the owner session (`has_op('pulse.admin')` → super_admin implicit `*`).
+- **Overview tiles** show live totals: 1 vote/7d, 1 vote/today, 0 reactions, 1 quiz attempt, 0 skips; library count 28 approved.
+- **Content library list** + status filters (all/draft/approved/paused/rejected) render from `pulse_admin_list`.
+- **Engine config editor** renders all 11 adjustable keys from `pulse_admin_config_get`; values intact vs seed (safe roundtrip).
+- **Job log** shows real `pulse_job_runs`: `pulse.ensure_daily` and `pulse.insights` ok, keyed by campus day.
+
+### Bug found and fixed during staff probing
+
+9. **Every pulse admin WRITE was broken at runtime.** All three `log_staff_action` calls in 0048 (`set_status`, `create_quiz`, `config_set`) passed `(action, jsonb)` while the 0043 signature is `(action, target_type text, target_id uuid, metadata jsonb)` — signature resolution failed ("function public.log_staff_action(unknown, jsonb) does not exist"). The exception aborted the whole transaction, so status changes, quiz creation and config saves all failed (UI flashed the error; read paths unaffected). Fixed to the proper 4-arg call (`'pulse_item', v_item` targets; config logs key/value metadata). **Re-run `0048_campus_pulse.sql` once to pick up the fix** (idempotent).
+
+## Remaining (honest)
+
 - **Mood/top-statement insight copy** needs ≥ 10 participants on a campus — by design these messages cannot honestly fire at team-of-1 scale. Empty states verified instead.
+- Pulse admin writes + audit trail rows: verify a set-status/config save once 0048 is re-run (fix above).
 
 ## Honest limitations
 
