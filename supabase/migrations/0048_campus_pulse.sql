@@ -498,7 +498,9 @@ begin
       -- 0.10 diversity: differing from yesterday's category scores full
       + (case when v_prev_cat is null or t.category <> v_prev_cat then 1.0 else 0.0 end) * v_weight_div
       -- deterministic tie-break: rotates daily, stable within the day
-      + (mod(hashtext(coalesce(p_scope::text,'platform') || ':' || p_date::text || ':' || t.id::text) + 2147483647, 1000)) / 100000.0
+      -- deterministic tie-break: rotates daily, stable within the day
+      -- (∴ bigint first: hashtext is int32 and +2^31 would overflow)
+      + (mod((hashtext(coalesce(p_scope::text,'platform') || ':' || p_date::text || ':' || t.id::text)::bigint + 2147483647) % 1000000, 1000) + 0.0) / 100000.0
     desc
    limit 1;
 
@@ -724,17 +726,23 @@ declare
   v_scope uuid := public.pulse_scope_of();
   v_date  date := coalesce(p_date, public.pulse_campus_day());
   v_deck  int := public.pulse_cfg('pulse.statementDeck', 5)::int;
+  v_stmts jsonb;
 begin
-  if auth.uid() is null then return jsonb_build_object('error', 'signin'); end if;
+  if auth.uid() is null then return to_json(jsonb_build_object('error', 'signin')); end if;
 
-  return jsonb_build_object('statements', coalesce((with deck as (
+  -- seeded shuffle: bigint arithmetic (hashtext is int32; adding 2^31 to it
+  -- overflows), FINITE deck cut first, then slots 1..N over exactly what shows
+  with scored as (
     select t.id, t.body,
-           row_number() over (order by mod(hashtext(coalesce(v_scope::text,'platform') || ':' || v_date::text || ':' || t.id::text) + 2147483647, 100000)) as slot
+           ((hashtext(coalesce(v_scope::text,'platform') || ':' || v_date::text || ':' || t.id::text)::bigint + 2147483647) % 1000000) % 100000 as rank_seed
       from public.pulse_items t
      where t.kind = 'statement'
        and t.status = 'approved'
        and (t.valid_until is null or t.valid_until > now())
-     limit greatest(v_deck, 1)
+  ),
+  deck as (
+    select s.id, s.body, row_number() over (order by s.rank_seed) as slot
+      from (select * from scored order by rank_seed limit greatest(v_deck, 1)) s
   )
   select coalesce(jsonb_agg(jsonb_build_object(
              'id', d.id, 'text', d.body, 'slot', d.slot, 'my', v1.reaction,
@@ -742,13 +750,15 @@ begin
                 (select count(*) from public.pulse_reactions a where a.statement_id = d.id and a.reaction = 0)::int,
                 (select count(*) from public.pulse_reactions b where b.statement_id = d.id and b.reaction = 1)::int,
                 (select count(*) from public.pulse_reactions c where c.statement_id = d.id and c.reaction = 2)::int
-             ]) order by d.slot), '[]'::json)
+             ]) order by d.slot), '[]'::jsonb)
     from deck d
     left join lateral (
       select r.reaction from public.pulse_reactions r
        where r.statement_id = d.id and r.user_id = auth.uid()
     ) v1 on true
-  )));
+  into v_stmts;
+
+  return to_json(jsonb_build_object('statements', v_stmts));
 end $$;
 
 create or replace function public.pulse_react(v_statement uuid, p_reaction smallint)
