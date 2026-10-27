@@ -331,9 +331,13 @@ create table if not exists public.pulse_insights (
   payload     jsonb not null,
   sample_size integer not null check (sample_size >= 0),
   valid_until timestamptz not null,
-  computed_at timestamptz not null default now(),
-  unique (coalesce(college_id,'00000000-0000-0000-0000-000000000000'::uuid), insight_key, scope_date)
+  computed_at timestamptz not null default now()
 );
+-- the snapshot idempotency key (one payload per scope/day/insight key) —
+-- expression form, same pattern as pulse_instances_scope_day_uq above
+alter table public.pulse_insights drop constraint if exists pulse_insights_snapshot_uq;
+create unique index if not exists pulse_insights_snapshot_uq
+  on public.pulse_insights (coalesce(college_id, '00000000-0000-0000-0000-000000000000'::uuid), insight_key, scope_date);
 alter table public.pulse_insights enable row level security;
 create policy pulse_insights_select on public.pulse_insights
   for select using (true);
