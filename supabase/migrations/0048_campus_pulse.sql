@@ -47,6 +47,7 @@ alter table public.pulse_items enable row level security;
 
 -- Content is public once approved; staff also see drafts for administration.
 -- No insert/update/delete policies exist: content enters ONLY through admin RPCs.
+drop policy if exists pulse_items_select on public.pulse_items;
 create policy pulse_items_select on public.pulse_items
   for select using (status = 'approved' or public.is_staff());
 
@@ -126,11 +127,13 @@ create table if not exists public.pulse_quiz_results (
 alter table public.pulse_quiz_questions enable row level security;
 alter table public.pulse_quiz_results   enable row level security;
 
+drop policy if exists pulse_quiz_q_select on public.pulse_quiz_questions;
 create policy pulse_quiz_q_select on public.pulse_quiz_questions
   for select using (
     exists (select 1 from public.pulse_items i
              where i.id = quiz_id and (i.status = 'approved' or public.is_staff()))
   );
+drop policy if exists pulse_quiz_r_select on public.pulse_quiz_results;
 create policy pulse_quiz_r_select on public.pulse_quiz_results
   for select using (
     exists (select 1 from public.pulse_items i
@@ -162,6 +165,7 @@ alter table public.pulse_instances enable row level security;
 
 -- Members see today's published instance only through the RPC; direct access
 -- stays staff-only (drafts/schedule inspection).
+drop policy if exists pulse_instances_staff_select on public.pulse_instances;
 create policy pulse_instances_staff_select on public.pulse_instances
   for select using (public.is_staff());
 
@@ -192,11 +196,13 @@ alter table public.pulse_skips     enable row level security;
 -- NO select policies on purpose: responses/skips belong exclusively to the
 -- RPC layer. A member can WRITE their own row and never read anyone's,
 -- including their own raw rows outside the product surfaces.
+drop policy if exists pulse_responses_own_insert on public.pulse_responses;
 create policy pulse_responses_own_insert on public.pulse_responses
   for insert with check (user_id = auth.uid());
 -- Note: writes still only happen inside the gated RPC (pulse_vote) to keep
 -- validity checks server-side; this policy is the backstop, not the door.
 
+drop policy if exists pulse_skips_own_insert on public.pulse_skips;
 create policy pulse_skips_own_insert on public.pulse_skips
   for insert with check (user_id = auth.uid());
 
@@ -216,10 +222,13 @@ create index if not exists pulse_reactions_recent_idx on public.pulse_reactions 
 
 alter table public.pulse_reactions enable row level security;
 
+drop policy if exists pulse_reactions_own_insert on public.pulse_reactions;
 create policy pulse_reactions_own_insert on public.pulse_reactions
   for insert with check (user_id = auth.uid());
+drop policy if exists pulse_reactions_own_update on public.pulse_reactions;
 create policy pulse_reactions_own_update on public.pulse_reactions
   for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+drop policy if exists pulse_reactions_own_delete on public.pulse_reactions;
 create policy pulse_reactions_own_delete on public.pulse_reactions
   for delete using (user_id = auth.uid());
 
@@ -238,6 +247,7 @@ create table if not exists public.pulse_attempts (
 );
 
 alter table public.pulse_attempts enable row level security;
+drop policy if exists pulse_attempts_own_select on public.pulse_attempts;
 create policy pulse_attempts_own_select on public.pulse_attempts
   for select using (user_id = auth.uid());
 -- (writes go through pulse_quiz_submit, which re-scores server-side — clients
@@ -253,6 +263,7 @@ create table if not exists public.pulse_config (
   updated_by uuid references public.profiles(id) on delete set null
 );
 alter table public.pulse_config enable row level security;
+drop policy if exists pulse_config_staff_select on public.pulse_config;
 create policy pulse_config_staff_select on public.pulse_config
   for select using (public.is_staff());
 
@@ -316,6 +327,7 @@ create table if not exists public.pulse_milestones (
   primary key (user_id, milestone_key)
 );
 alter table public.pulse_milestones enable row level security;
+drop policy if exists pulse_milestones_own_select on public.pulse_milestones;
 create policy pulse_milestones_own_select on public.pulse_milestones
   for select using (user_id = auth.uid());
 -- (inserts happen only inside the definer RPCs after the qualifying action)
@@ -339,6 +351,7 @@ alter table public.pulse_insights drop constraint if exists pulse_insights_snaps
 create unique index if not exists pulse_insights_snapshot_uq
   on public.pulse_insights (coalesce(college_id, '00000000-0000-0000-0000-000000000000'::uuid), insight_key, scope_date);
 alter table public.pulse_insights enable row level security;
+drop policy if exists pulse_insights_select on public.pulse_insights;
 create policy pulse_insights_select on public.pulse_insights
   for select using (true);
 -- (writing happens only inside pulse_insights_refresh — PostgREST callers
@@ -354,6 +367,7 @@ create table if not exists public.pulse_job_runs (
   unique (job_key, idem_key)
 );
 alter table public.pulse_job_runs enable row level security;
+drop policy if exists pulse_job_runs_staff_select on public.pulse_job_runs;
 create policy pulse_job_runs_staff_select on public.pulse_job_runs
   for select using (public.is_staff());
 
