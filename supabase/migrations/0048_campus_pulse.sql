@@ -1258,10 +1258,12 @@ begin
   if not public.has_op('pulse.admin') then
     raise exception 'Only campus admins can inspect Pulse jobs.';
   end if;
-  return coalesce(jsonb_agg(jsonb_build_object(
-    'jobKey', j.job_key, 'idemKey', j.idem_key, 'ok', j.ok,
-    'detail', j.detail, 'ranAt', j.ran_at) order by j.ran_at desc limit 40), '[]'::jsonb)
-  from public.pulse_job_runs j;
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'jobKey', j.job_key, 'idemKey', j.idem_key, 'ok', j.ok,
+      'detail', j.detail, 'ranAt', j.ran_at) order by j.ran_at desc)
+      from (select * from public.pulse_job_runs order by ran_at desc limit 40) j
+  ), '[]'::jsonb);
 end $$;
 
 -- Admin participation overview (aggregate-only, threshold-conscious)
