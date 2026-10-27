@@ -70,12 +70,12 @@ Signed in as the super_admin (auto-lands on Staff Console) and verified:
 
 ### Bug found and fixed during staff probing
 
-9. **Every pulse admin WRITE was broken at runtime.** All three `log_staff_action` calls in 0048 (`set_status`, `create_quiz`, `config_set`) passed `(action, jsonb)` while the 0043 signature is `(action, target_type text, target_id uuid, metadata jsonb)` — signature resolution failed ("function public.log_staff_action(unknown, jsonb) does not exist"). The exception aborted the whole transaction, so status changes, quiz creation and config saves all failed (UI flashed the error; read paths unaffected). Fixed to the proper 4-arg call (`'pulse_item', v_item` targets; config logs key/value metadata). **Re-run `0048_campus_pulse.sql` once to pick up the fix** (idempotent).
+9. **Every pulse admin WRITE was broken at runtime.** All three `log_staff_action` calls in 0048 (`set_status`, `create_quiz`, `config_set`) passed `(action, jsonb)` while the 0043 signature is `(action, target_type text, target_id uuid, metadata jsonb)` — signature resolution failed ("function public.log_staff_action(unknown, jsonb) does not exist"). The exception aborted the whole transaction, so status changes, quiz creation and config saves all failed (UI flashed the error; read paths unaffected). Fixed to the proper 4-arg call (`'pulse_item', v_item` targets; config logs key/value metadata). **Fixed and verified live** (2026-10-28, owner session): config save returns ok, pause→approve roundtrip ok with the item restored, and `pulse.set_status`/`pulse.config` audit rows now log with full metadata.
 
 ## Remaining (honest)
 
 - **Mood/top-statement insight copy** needs ≥ 10 participants on a campus — by design these messages cannot honestly fire at team-of-1 scale. Empty states verified instead.
-- Pulse admin writes + audit trail rows: verify a set-status/config save once 0048 is re-run (fix above).
+- ~~Pulse admin writes + audit trail rows~~ **verified after the 0048 re-run**: config save returns ok, item pause→re-approve roundtrip ok (item restored to approved), and `pulse.set_status` / `pulse.config` rows now appear in `staff_audit_log` with full metadata. Staff console is fully operational.
 
 ## Honest limitations
 
