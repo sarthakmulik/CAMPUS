@@ -28,7 +28,7 @@ type Props = {
 function PulseResults({ daily }: { daily: PulseDailyView }) {
   const counts = daily.results
   const total = Object.values(counts ?? {}).reduce((a, b) => a + Number(b), 0)
-  if (!daily.myVote) return null
+  if (daily.myVote === null) return null   // option index 0 is valid — must not be treated as "no vote"
   if (!counts) {
     return (
       <div className="pulse-threshold-note" role="status">
