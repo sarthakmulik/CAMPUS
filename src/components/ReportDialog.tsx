@@ -10,6 +10,8 @@ export type ReportTarget = {
   reportedUserId?: string | null
   /** Text snapshot of reported content, sent as details for the moderation queue. */
   excerpt?: string
+  /** Pulse statement target: routes the report through pulse_report_statement. */
+  statementId?: string
 }
 
 type Props = {
@@ -44,12 +46,20 @@ export default function ReportDialog({ target, onClose, onSubmitted }: Props) {
     setBusy(true)
     setError(null)
     try {
-      await db.submitReport({
-        reason,
-        postId: target.postId ?? null,
-        reportedUserId: target.reportedUserId ?? null,
-        details: details.trim() || (target.excerpt ? `Reported content: ${target.excerpt}` : ''),
-      })
+      if (target.statementId) {
+        await db.pulseReportStatement({
+          statementId: target.statementId,
+          reason,
+          details: details.trim() || (target.excerpt ? `Reported content: ${target.excerpt}` : ''),
+        })
+      } else {
+        await db.submitReport({
+          reason,
+          postId: target.postId ?? null,
+          reportedUserId: target.reportedUserId ?? null,
+          details: details.trim() || (target.excerpt ? `Reported content: ${target.excerpt}` : ''),
+        })
+      }
       onSubmitted('Thanks — your report is in the CAMPUS moderation queue.')
     } catch (submitError) {
       setError(db.friendlyMessage(submitError))

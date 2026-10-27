@@ -3141,3 +3141,149 @@ export async function fetchPushSubscriptions(): Promise<PushSubscriptionRecord[]
   }))
 }
 
+/* -------------------------------------------------------------------------- */
+/* CAMPUS PULSE                                                                */
+/* All access rides the server-authoritative RPCs from migration 0048. The     */
+/* client never touches pulse tables directly — selection, thresholds and      */
+/* aggregates are computed in SQL, so a tampered client learns nothing extra.  */
+/* -------------------------------------------------------------------------- */
+
+export type PulseDailyView = {
+  instanceId: string
+  question: string
+  category: string
+  options: { emoji: string; label: string }[]
+  endsAt: string
+  status: string
+  myVote: number | null
+  responsesTotal: number
+  skipsTotal: number
+  minSample: number
+  /** per-option counts — null until responsesTotal reaches minSample */
+  results: Record<string, number> | null
+}
+
+export type PulseEnsureResult = {
+  state?: 'empty' | 'closed' | 'ok'
+  error?: string
+  instanceId?: string
+  daily?: PulseDailyView | null
+}
+
+export type PulseVoteResult = {
+  error?: string
+  state?: string
+  vote?: { just: boolean; already: boolean }
+  daily?: PulseDailyView | null
+}
+
+export type PulseStatementCard = {
+  id: string
+  text: string
+  slot: number
+  /** the user's own reaction (0/1/2) or null when none */
+  my: number | null
+  counts: number[]
+}
+
+export type PulseQuizSummary = {
+  id: string
+  title: string
+  version: number
+  category: string
+  questions: { id: string; prompt: string; options: { text: string; trait: number }[] }[]
+  results: { resultKey: number; label: string; emoji: string; blurb: string }[]
+}
+
+export type PulseQuizResult = {
+  error?: string
+  resultKey?: number
+  label?: string
+  emoji?: string
+  blurb?: string
+}
+
+export type PulseInsight = {
+  key: string
+  sample: number
+  min: number
+  period?: string
+  explain?: string
+  [k: string]: unknown   // remaining fields are key-specific; formatInsight whitelists them
+}
+
+async function pulseRpc<T>(fn: string, params: Record<string, unknown> | undefined): Promise<T> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc(fn, params)
+  if (error) throw new Error(friendlyMessage(error))
+  return (data ?? null) as T
+}
+
+/** Materialize-or-return today's daily question for the caller's campus. */
+export function pulseEnsureDaily(): Promise<PulseEnsureResult> {
+  return pulseRpc('pulse_ensure_daily', { p_date: null })
+}
+
+/** Vote once per day. Duplicate taps keep the FIRST vote (server rule). */
+export function pulseVote(instanceId: string, optionIndex: number): Promise<PulseVoteResult> {
+  return pulseRpc('pulse_vote', { v_instance: instanceId, p_option: optionIndex })
+}
+
+export function pulseSkip(instanceId: string): Promise<{ ok: boolean; error?: string }> {
+  return pulseRpc('pulse_skip', { v_instance: instanceId })
+}
+
+/** The finite daily statement deck (Am I the Only One?). */
+export function pulseStatements(): Promise<{ error?: string; statements: PulseStatementCard[] }> {
+  return pulseRpc('pulse_statements', { p_date: null })
+}
+
+/** Set or clear (null) the user's statement reaction; returns fresh counts. */
+export function pulseReact(statementId: string, reaction: number | null): Promise<
+  { error?: string; counts?: number[]; my?: number | null }
+> {
+  return pulseRpc('pulse_react', { v_statement: statementId, p_reaction: reaction })
+}
+
+export function pulseQuizList(): Promise<{ error?: string; quizzes: PulseQuizSummary[] }> {
+  return pulseRpc<PulseQuizSummary[] | { error: string }>('pulse_quiz_list', undefined).then(data => {
+    if (data && !Array.isArray(data)) return { error: String((data as { error: string }).error ?? ''), quizzes: [] }
+    return { quizzes: (data as PulseQuizSummary[]) ?? [] }
+  })
+}
+
+/** Server re-scores before persisting; the client's count is never trusted. */
+export function pulseQuizSubmit(quizId: string, version: number, answers: number[]): Promise<PulseQuizResult> {
+  return pulseRpc('pulse_quiz_submit', { v_quiz: quizId, p_version: version, p_answers: answers })
+}
+
+export type PulseInsightsResult = { error?: string; state?: string; insights: PulseInsight[] }
+
+export function pulseInsights(): Promise<PulseInsightsResult> {
+  return pulseRpc('pulse_insights', { p_college: null })
+}
+
+export type PulseMilestoneRow = { key: string; at: string }
+
+export function pulseMilestonesMine(): Promise<PulseMilestoneRow[]> {
+  return pulseRpc('pulse_milestones_mine', undefined).then(rows => (rows as PulseMilestoneRow[]) ?? [])
+}
+
+export type PulseAttemptRow = { quizId: string; version: number; resultKey: number; at: string }
+
+export function pulseMyAttempts(): Promise<PulseAttemptRow[]> {
+  return pulseRpc('pulse_my_attempts', undefined).then(rows => (rows as PulseAttemptRow[]) ?? [])
+}
+
+/** Report a Pulse statement into the same moderation queue as every other report. */
+export async function pulseReportStatement(input: { statementId: string; reason: string; details?: string }): Promise<void> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { error } = await supabase.rpc('pulse_report_statement', {
+    p_statement: input.statementId,
+    p_reason: input.reason,
+    p_details: input.details ?? null,
+  })
+  if (error) throw new Error(friendlyMessage(error))
+}
+
+

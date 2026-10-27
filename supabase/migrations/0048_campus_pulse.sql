@@ -51,6 +51,58 @@ create policy pulse_items_select on public.pulse_items
   for select using (status = 'approved' or public.is_staff());
 
 -- ---------------------------------------------------------------------------
+-- 1b. Statement reporting — reuses the platform reports queue, following the
+-- exact precedent of events (0018) and listings (0019): a dedicated nullable
+-- target column, an updated reports_check constraint, an index, and a
+-- rate-limited RPC. The staff Moderation tab already renders reports.
+-- ---------------------------------------------------------------------------
+alter table public.reports add column if not exists pulse_item_id
+  uuid references public.pulse_items(id) on delete cascade;
+create index if not exists reports_pulse_item_idx on public.reports (pulse_item_id);
+
+alter table public.reports drop constraint if exists reports_check;
+alter table public.reports add constraint reports_check
+  check (post_id is not null or reported_user_id is not null
+         or club_id is not null or event_id is not null
+         or listing_id is not null or pulse_item_id is not null);
+
+create or replace function public.pulse_report_statement(
+  p_statement uuid, p_reason text, p_details text default null
+)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_id uuid;
+  v_recent integer;
+begin
+  if auth.uid() is null then
+    raise exception 'You must be signed in to report content.';
+  end if;
+  if p_reason is null or char_length(trim(p_reason)) < 3 then
+    raise exception 'Please choose a reason.';
+  end if;
+  if not exists (select 1 from public.pulse_items t
+                  where t.id = p_statement and t.kind = 'statement') then
+    raise exception 'That statement is not available.';
+  end if;
+
+  select count(*) into v_recent
+    from public.reports
+   where reporter_id = auth.uid()
+     and created_at > now() - interval '24 hours';
+  if v_recent >= 20 then
+    raise exception 'You have reached today''s report limit. Thanks for helping keep CAMPUS safe.';
+  end if;
+
+  insert into public.reports (reporter_id, pulse_item_id, reason, details)
+  values (auth.uid(), p_statement, trim(p_reason), nullif(trim(coalesce(p_details, '')), ''))
+  returning id into v_id;
+
+  return v_id;
+end $$;
+
+-- ---------------------------------------------------------------------------
 -- 2. Quiz structure (questions + deterministic result space)
 -- ---------------------------------------------------------------------------
 create table if not exists public.pulse_quiz_questions (
@@ -1245,6 +1297,7 @@ grant execute on function public.pulse_vote(uuid, smallint)          to authenti
 grant execute on function public.pulse_skip(uuid)                    to authenticated;
 grant execute on function public.pulse_statements(date)              to authenticated;
 grant execute on function public.pulse_react(uuid, smallint)         to authenticated;
+grant execute on function public.pulse_report_statement(uuid, text, text) to authenticated;
 grant execute on function public.pulse_quiz_list()                   to authenticated;
 grant execute on function public.pulse_quiz_submit(uuid, smallint, smallint[]) to authenticated;
 grant execute on function public.pulse_insights(uuid)                to authenticated;

@@ -1466,3 +1466,241 @@ textarea:disabled {
 }
 .mcl-chooser-copy small { font-size: var(--fs-micro); color: var(--ink-secondary) }
 
+/* ============================================================================
+   CAMPUS PULSE (0048) — page styles
+   Mobile-first cards in the existing token system; every interactive surface
+   gets the UI-4 press state + a ≥44px hit region, and the global reduced-
+   motion kill-switch (styles.tokens.css) disables the embraces below for
+   anyone who opted out of motion.
+   ========================================================================== */
+
+.pulse-page {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  max-width: 720px;
+  margin: 0 auto;
+  padding-bottom: 96px;
+}
+.pulse-hero { display: flex; flex-direction: column; gap: 6px }
+.pulse-hero-badges { display: flex; flex-wrap: wrap; gap: 6px }
+.pulse-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: var(--fs-micro); font-weight: 600;
+  padding: 5px 10px; border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--ink-secondary);
+  background: var(--surface);
+}
+.pulse-chip.earned {
+  background: var(--brand-soft); border-color: var(--brand-line); color: var(--brand-ink);
+}
+.pulse-hero-note { font-size: var(--fs-micro); color: var(--ink-secondary) }
+.pulse-kicker {
+  display: flex; align-items: center; gap: 6px;
+  font-size: var(--fs-micro); font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--ink-secondary);
+  margin: 0 0 8px;
+}
+.pulse-kicker svg { color: var(--brand) }
+
+.pulse-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 16px;
+  display: flex; flex-direction: column; gap: 10px;
+  width: 100%;
+}
+.pulse-daily.closed { opacity: .92 }
+.pulse-tag {
+  align-self: flex-start;
+  font-size: var(--fs-micro); font-weight: 600;
+  color: var(--brand-ink); background: var(--brand-soft);
+  border: 1px solid var(--brand-line);
+  padding: 3px 9px; border-radius: 999px;
+}
+.pulse-question { font-size: var(--fs-title); color: var(--ink-strong); line-height: 1.25; margin: 2px 0 }
+.pulse-options { display: grid; gap: 8px }
+.pulse-option {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; min-height: 48px;
+  padding: 10px 14px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--fs-body); font-weight: 600;
+  cursor: pointer; text-align: left;
+  transition: transform .12s ease, border-color .14s ease, background-color .14s ease;
+}
+.pulse-option:hover:not(:disabled) { border-color: var(--brand) }
+.pulse-option:active:not(:disabled) { transform: scale(.985) }
+.pulse-option:disabled { opacity: .55; cursor: default }
+.pulse-option-emoji { font-size: 20px; flex: none }
+.pulse-skip {
+  align-self: center;
+  background: none; border: none;
+  color: var(--ink-secondary);
+  font-size: var(--fs-small); font-weight: 600;
+  min-height: 44px; padding: 8px 12px;
+  cursor: pointer;
+}
+.pulse-skip:hover { color: var(--ink) }
+
+/* results (threshold-gated: bar rows only render when results !== null) */
+.pulse-results { display: flex; flex-direction: column; gap: 9px }
+.pulse-results-meta {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: var(--fs-micro); color: var(--ink-secondary);
+}
+.pulse-results-ok { display: inline-flex; align-items: center; gap: 3px; color: var(--brand-ink); font-weight: 600 }
+.pulse-result-row { display: grid; grid-template-columns: minmax(96px, 1fr) 2fr auto; gap: 8px; align-items: center }
+.pulse-result-row.mine .pulse-result-who { color: var(--brand-ink); font-weight: 700 }
+.pulse-result-who { font-size: var(--fs-small); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.pulse-result-bar-track {
+  height: 9px; border-radius: 999px; background: var(--brand-soft);
+  overflow: hidden; display: block;
+}
+.pulse-result-bar {
+  height: 100%; display: block; border-radius: 999px;
+  background: linear-gradient(100deg, var(--brand), var(--pink));
+  transition: width .35s ease;
+}
+.pulse-result-n { font-size: var(--fs-micro); color: var(--ink-secondary); font-variant-numeric: tabular-nums }
+.pulse-threshold-note {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 11px 12px; border-radius: 12px;
+  background: var(--brand-soft); border: 1px dashed var(--brand-line);
+  font-size: var(--fs-small); color: var(--brand-ink);
+}
+.pulse-threshold-note svg { flex: none; margin-top: 1px }
+.pulse-closed-note { font-size: var(--fs-small); color: var(--ink-secondary) }
+
+/* statement deck */
+.pulse-deck { display: flex; flex-direction: column; gap: 10px }
+.pulse-statement { padding: 14px 14px 10px }
+.pulse-statement-text { font-size: var(--fs-body); color: var(--ink); line-height: 1.45; margin: 0 }
+.pulse-reactions { display: flex; gap: 8px; align-items: center }
+.pulse-reaction {
+  display: inline-flex; align-items: center; gap: 5px;
+  min-height: 40px; padding: 6px 12px;
+  border: 1.5px solid var(--line-strong); border-radius: 999px;
+  background: var(--surface); color: var(--ink);
+  font-size: var(--fs-small); font-weight: 600;
+  cursor: pointer;
+  transition: transform .12s ease, border-color .14s ease, background-color .14s ease;
+}
+.pulse-reaction:hover { border-color: var(--brand) }
+.pulse-reaction:active { transform: scale(.96) }
+.pulse-reaction.mine {
+  border-color: var(--brand); background: var(--brand-soft); color: var(--brand-ink);
+}
+.pulse-reaction-count { font-weight: 700; font-variant-numeric: tabular-nums }
+.pulse-report {
+  margin-left: auto;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; border-radius: 999px;
+  border: none; background: none; color: var(--ink-faint);
+  cursor: pointer;
+}
+.pulse-report:hover { color: var(--ink); background: var(--surface-raised) }
+.pulse-deck-note { font-size: var(--fs-micro); color: var(--ink-secondary) }
+
+/* quizzes */
+.pulse-quiz-tile {
+  gap: 2px; cursor: pointer; text-align: left;
+  transition: transform .12s ease, border-color .14s ease;
+}
+.pulse-quiz-tile:hover { border-color: var(--brand) }
+.pulse-quiz-tile:active { transform: scale(.985) }
+.pulse-quiz-title { font-size: var(--fs-body); font-weight: 700; color: var(--ink-strong) }
+.pulse-quiz-meta { font-size: var(--fs-micro); color: var(--ink-secondary) }
+.pulse-quiz-earned { color: var(--brand-ink); font-weight: 600 }
+.pulse-quiz-progress {
+  height: 6px; border-radius: 999px; background: var(--brand-soft); overflow: hidden; display: block;
+}
+.pulse-quiz-progress span {
+  height: 100%; display: block; border-radius: 999px;
+  background: linear-gradient(100deg, var(--brand), var(--pink));
+  transition: width .25s ease;
+}
+.pulse-quiz-step { font-size: var(--fs-micro); color: var(--ink-secondary); margin: 0 }
+.pulse-quiz-result { align-items: center; text-align: center; gap: 8px }
+.pulse-result-emoji { font-size: 44px; line-height: 1 }
+.pulse-result-label { font-size: var(--fs-title); font-weight: 800; color: var(--ink-strong); margin: 2px 0 0 }
+.pulse-result-blurb { font-size: var(--fs-body); color: var(--ink); line-height: 1.5; margin: 0 }
+.pulse-result-owner { font-size: var(--fs-micro); color: var(--ink-secondary); margin: 0 }
+.pulse-actions { display: flex; gap: 8px; align-items: center; justify-content: center }
+.pulse-quiz-fineprint { font-size: var(--fs-micro); color: var(--ink-secondary); margin: 0 }
+
+/* insights */
+.pulse-insights { display: flex; flex-direction: column; gap: 10px }
+.pulse-insight { flex-direction: row; gap: 12px; align-items: flex-start }
+.pulse-insight-icon { font-size: 24px; line-height: 1.2; flex: none }
+.pulse-insight-title { font-size: var(--fs-body); font-weight: 700; color: var(--ink-strong); margin: 0 0 2px }
+.pulse-insight-body { font-size: var(--fs-small); color: var(--ink); line-height: 1.5; margin: 0 }
+.pulse-insight-explain { margin-top: 6px }
+.pulse-insight-explain summary {
+  font-size: var(--fs-micro); font-weight: 600; color: var(--ink-secondary);
+  cursor: pointer; min-height: 32px; display: flex; align-items: center;
+}
+.pulse-insight-explain summary:hover { color: var(--ink) }
+.pulse-insight-explain p { font-size: var(--fs-micro); color: var(--ink-secondary); margin: 2px 0 }
+.pulse-quiet { font-style: italic }
+
+/* empty + error states */
+.pulse-empty-card { align-items: center; text-align: center; gap: 6px; padding: 26px 18px }
+.pulse-empty-card h2 { margin: 2px 0 0 }
+.pulse-empty-card.small { padding: 20px 16px }
+.pulse-empty-card p { font-size: var(--fs-small); color: var(--ink-secondary); margin: 0; max-width: 420px }
+.pulse-err { color: var(--pink-ink) !important; font-weight: 600 }
+
+/* skeletons (pulse tokens live on --line so both themes get them) */
+.pulse-skel {
+  display: block; border-radius: 10px;
+  background: linear-gradient(100deg, var(--line) 40%, var(--surface-raised) 50%, var(--line) 60%);
+  background-size: 200% 100%;
+  animation: pulse-skel-shimmer 1.4s ease infinite;
+}
+@keyframes pulse-skel-shimmer { from { background-position: 180% 0 } to { background-position: -80% 0 } }
+.pulse-skel-card { gap: 12px }
+
+/* staff console — pulse tab additions */
+.pulse-config-grid { display: flex; flex-direction: column; gap: 6px }
+.pulse-config-row {
+  display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center;
+  padding: 6px 0; border-bottom: 1px solid var(--line);
+}
+.pulse-config-row span { font-size: var(--fs-micro); color: var(--ink-secondary) }
+.pulse-config-controls { display: inline-flex; gap: 6px; align-items: center }
+.pulse-config-controls input {
+  width: 90px; padding: 6px 8px;
+  border: 1px solid var(--line-strong); border-radius: 8px;
+  background: var(--surface); color: var(--ink);
+  font-size: var(--fs-small);
+}
+.staff-filter-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 }
+.staff-chip {
+  border: 1px solid var(--line-strong); background: var(--surface);
+  color: var(--ink-secondary); border-radius: 999px;
+  font-size: var(--fs-micro); font-weight: 600;
+  padding: 5px 11px; min-height: 32px; cursor: pointer;
+}
+.staff-chip.selected { border-color: var(--brand); color: var(--brand-ink); background: var(--brand-soft) }
+.staff-status-select { display: inline-flex; gap: 4px }
+.staff-status-select button {
+  border: 1px solid var(--line-strong); background: var(--surface);
+  color: var(--ink-secondary); border-radius: 8px;
+  font-size: var(--fs-micro); font-weight: 700;
+  padding: 4px 7px; min-height: 32px; min-width: 34px; cursor: pointer;
+}
+.staff-status-select button:hover:not(:disabled) { border-color: var(--brand); color: var(--brand-ink) }
+.staff-status-select button.selected { border-color: var(--brand); color: var(--brand-ink); background: var(--brand-soft) }
+.staff-status-select button:disabled { opacity: .5; cursor: default }
+
+@media (max-width: 480px) {
+  .pulse-result-row { grid-template-columns: minmax(80px, 1fr) 1.6fr auto }
+  .pulse-page { gap: 18px }
+}
+

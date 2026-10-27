@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import {
   ShieldCheck, LayoutDashboard, Users, Building2, Megaphone, ScrollText,
   Ban, RotateCcw, Crown, Search, UserCog, AlertCircle, Clock,
-  Flag, AlertTriangle, EyeOff, Eye, Check, X,
+  Flag, AlertTriangle, EyeOff, Eye, Check, X, Sparkles,
 } from 'lucide-react'
 import { AdsAdmin } from './AdsAdmin'
 import {
@@ -27,6 +27,7 @@ const TABS = [
   { key: 'people', label: 'People', icon: Users },
   { key: 'moderation', label: 'Moderation', icon: Flag },
   { key: 'advertising', label: 'Advertising', icon: Megaphone },
+  { key: 'pulse', label: 'Pulse', icon: Sparkles },
   { key: 'colleges', label: 'Colleges', icon: Building2 },
   { key: 'staff', label: 'Staff & Audit', icon: ScrollText },
 ] as const
@@ -51,7 +52,7 @@ function initialsFor(name: string | null, fallback: string): string {
   return fallback.slice(0, 2).toUpperCase() || 'CM'
 }
 
-type StaffOps = { ads: boolean; suspend: boolean; provision: boolean; warn: boolean; act: boolean }
+type StaffOps = { ads: boolean; suspend: boolean; provision: boolean; warn: boolean; act: boolean; pulse: boolean }
 
 export function StaffConsole({ flash }: { flash: (message: string) => void }) {
   const [tab, setTab] = useState<TabKey>('dashboard')
@@ -70,7 +71,7 @@ export function StaffConsole({ flash }: { flash: (message: string) => void }) {
     const run = async () => {
       setError(null)
       try {
-        const [rosterRows, auditRows, adsOp, suspendOp, provisionOp, warnOp, actOp] = await Promise.all([
+        const [rosterRows, auditRows, adsOp, suspendOp, provisionOp, warnOp, actOp, pulseOp] = await Promise.all([
           loadStaffRoster(),
           loadStaffAudit(80),
           staffRpc('has_op', { p_op: 'ads.view' }),
@@ -78,11 +79,12 @@ export function StaffConsole({ flash }: { flash: (message: string) => void }) {
           staffRpc('has_op', { p_op: 'staff.provision' }),
           staffRpc('has_op', { p_op: 'moderation.warn' }),
           staffRpc('has_op', { p_op: 'moderation.act' }),
+          staffRpc('has_op', { p_op: 'pulse.admin' }),
         ])
         if (cancelled) return
         setRoster(rosterRows)
         setAudit(auditRows)
-        setOps({ ads: adsOp === true, suspend: suspendOp === true, provision: provisionOp === true, warn: warnOp === true, act: actOp === true })
+        setOps({ ads: adsOp === true, suspend: suspendOp === true, provision: provisionOp === true, warn: warnOp === true, act: actOp === true, pulse: pulseOp === true })
       } catch (err) {
         if (cancelled) return
         setError(err instanceof Error ? err.message : 'Staff console data failed to load.')
@@ -131,6 +133,9 @@ export function StaffConsole({ flash }: { flash: (message: string) => void }) {
       {tab === 'advertising' && (ops?.ads
         ? <div className="staff-embed"><AdsAdmin flash={flash}/></div>
         : <div className="staff-empty">Your staff scopes do not include the advertising namespace.</div>)}
+      {tab === 'pulse' && (ops?.pulse
+        ? <div className="staff-embed"><PulseAdminTab busy={busy} setBusy={setBusy} flash={flash} bump={() => setRefreshTick(t => t + 1)}/></div>
+        : <div className="staff-empty">Your staff scopes do not include the pulse namespace.</div>)}
       {tab === 'colleges' && <CollegesTab/>}
       {tab === 'staff' && (ops?.provision || ops
         ? <StaffTab
@@ -792,6 +797,211 @@ function AuditPanel({ audit }: { audit: StaffAuditRow[] }) {
             ))}
           </ul>}
       <p className="staff-muted staff-clock"><Clock size={11}/> Read-only history — audit rows are writable only by trusted database code.</p>
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* ---- Pulse admin (migration 0048 · has_op('pulse.admin')) ----------------- */
+
+type PulseAdminItem = {
+  id: string; kind: string; category: string; body: string
+  version: number; status: string; evergreen: boolean
+  validUntil: string | null; createdAt: string
+}
+type PulseAdminJob = {
+  jobKey: string; idemKey: string; ok: boolean
+  detail: Record<string, unknown>; ranAt: string
+}
+type PulseConfigMap = Record<string, unknown>
+
+const PULSE_STATUSES = ['draft', 'approved', 'paused', 'rejected'] as const
+const PULSE_CONFIG_KEYS = [
+  'pulse.weight.relevance', 'pulse.weight.quality', 'pulse.weight.freshness',
+  'pulse.weight.engagement', 'pulse.weight.diversity', 'pulse.minSample',
+  'pulse.trendMinLiftPts', 'pulse.freshnessDays',
+  'pulse.engagementPriorStrength', 'pulse.engagementBaseline', 'pulse.statementDeck',
+] as const
+
+function PulseAdminTab({ busy, setBusy, flash, bump }: {
+  busy: boolean; setBusy: (b: boolean) => void; flash: (message: string) => void; bump: () => void
+}) {
+  const [overview, setOverview] = useState<Record<string, unknown> | null>(null)
+  const [items, setItems] = useState<PulseAdminItem[] | null>(null)
+  const [statusFilter, setStatusFilter] = useState('')
+  const [config, setConfig] = useState<PulseConfigMap | null>(null)
+  const [configDraft, setConfigDraft] = useState<Record<string, string>>({})
+  const [jobs, setJobs] = useState<PulseAdminJob[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      setError(null)
+      try {
+        const [o, i, c, j] = await Promise.all([
+          staffRpc('pulse_admin_overview'),
+          staffRpc('pulse_admin_list', { p_status: statusFilter }),
+          staffRpc('pulse_admin_config_get'),
+          staffRpc('pulse_admin_jobs'),
+        ])
+        if (cancelled) return
+        setOverview(o as Record<string, unknown>)
+        setItems(i as PulseAdminItem[])
+        const cfg = (c ?? {}) as PulseConfigMap
+        setConfig(cfg)
+        const drafts: Record<string, string> = {}
+        for (const key of PULSE_CONFIG_KEYS) {
+          const value = cfg[key]
+          if (typeof value === 'number') drafts[key] = String(value)
+          else if (typeof value === 'string') drafts[key] = value
+        }
+        setConfigDraft(drafts)
+        setJobs(j as PulseAdminJob[])
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Pulse admin data failed to load.')
+      }
+    })()
+    return () => { cancelled = true }
+  }, [statusFilter])
+
+  const setStatus = async (item: PulseAdminItem, status: string) => {
+    if (busy) return
+    setBusy(true)
+    try {
+      await staffRpc('pulse_admin_set_status', { v_item: item.id, p_status: status, p_reason: null })
+      flash(`Pulse ${item.kind} set to ${status}.`)
+      bump()
+      const i = await staffRpc('pulse_admin_list', { p_status: statusFilter })
+      setItems(i as PulseAdminItem[])
+    } catch (err) {
+      flash(err instanceof Error ? err.message : 'Status change failed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const saveConfig = async (key: string) => {
+    if (busy) return
+    const raw = configDraft[key] ?? ''
+    const value = Number(raw)
+    if (raw === '' || !Number.isFinite(value)) {
+      flash('Configuration values must be numbers.')
+      return
+    }
+    setBusy(true)
+    try {
+      await staffRpc('pulse_admin_config_set', { p_key: key, p_value: value })
+      flash(`${key} saved — the engine reads it live.`)
+      bump()
+    } catch (err) {
+      flash(err instanceof Error ? err.message : 'Configuration save failed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (error && overview === null && items === null) {
+    return <div className="staff-error"><AlertCircle size={16}/><span>{error}</span></div>
+  }
+
+  const byStatus = (overview?.itemsByStatus ?? {}) as Record<string, number>
+  const num = (key: string) => {
+    const v = overview?.[key]
+    return typeof v === 'number' ? v : '—'
+  }
+
+  return (
+    <div className="staff-grid">
+      <div className="staff-card"><small>VOTES · 7 DAYS</small><b>{num('votes7')}</b><p>Genuine pulse responses.</p></div>
+      <div className="staff-card"><small>VOTES TODAY</small><b>{num('votesToday')}</b><p>Skip data is below.</p></div>
+      <div className="staff-card"><small>REACTIONS · 7 DAYS</small><b>{num('reactions7')}</b><p>Am I the Only One? activity.</p></div>
+      <div className="staff-card"><small>QUIZ ATTEMPTS · 7 DAYS</small><b>{num('attempts7')}</b><p>Server-scored completions.</p></div>
+      <div className="staff-card"><small>SKIPS TODAY</small><b>{num('skipsToday')}</b><p>Skipped questions — skips are never participation.</p></div>
+      <div className="staff-card"><small>LIBRARY</small><b>{Number.isFinite(byStatus['approved']) ? byStatus['approved'] : '—'} approved</b><p>{JSON.stringify(byStatus)}</p></div>
+
+      <div className="staff-card wide">
+        <small>CONTENT LIBRARY</small>
+        <div className="staff-filter-row" role="tablist" aria-label="Filter by status">
+          {['', ...PULSE_STATUSES].map(s => (
+            <button key={s || 'all'} className={`staff-chip ${statusFilter === s ? 'selected' : ''}`}
+              onClick={() => setStatusFilter(s)}>{s === '' ? 'all' : s}</button>
+          ))}
+        </div>
+        {items === null
+          ? <p className="staff-muted">Loading the library…</p>
+          : items.length === 0
+            ? <p className="staff-muted">No items in this status yet.</p>
+            : (
+              <ul className="staff-mini-audit">
+                {items.map(item => (
+                  <li key={item.id}>
+                    <span className={`staff-audit-badge ${item.status}`} title={item.id}>{item.kind} · {item.status}</span>
+                    <div className="staff-audit-copy">
+                      <b>{item.body.length > 90 ? item.body.slice(0, 90) + '…' : item.body}</b>
+                      <span>{item.category} · v{item.version}{item.evergreen ? ' · evergreen' : ''}</span>
+                    </div>
+                    <span className="staff-status-select">
+                      {PULSE_STATUSES.map(s => (
+                        <button key={s} disabled={busy || s === item.status}
+                          className={s === item.status ? 'selected' : ''}
+                          onClick={() => void setStatus(item, s)} title={`Set ${s}`}>
+                          {s.slice(0, 2)}
+                        </button>
+                      ))}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+      </div>
+
+      <div className="staff-card wide">
+        <small>ENGINE CONFIGURATION</small>
+        <p className="staff-muted">Weights drive the selection score; thresholds drive privacy and trend gating. Versioned by author on save.</p>
+        {config === null
+          ? <p className="staff-muted">Loading configuration…</p>
+          : (
+            <div className="pulse-config-grid">
+              {PULSE_CONFIG_KEYS.map(key => (
+                <label key={key} className="pulse-config-row">
+                  <span>{key}</span>
+                  <span className="pulse-config-controls">
+                    <input
+                      inputMode="decimal"
+                      value={configDraft[key] ?? ''}
+                      onChange={e => setConfigDraft(d => ({ ...d, [key]: e.target.value }))}
+                      onKeyDown={e => { if (e.key === 'Enter') void saveConfig(key) }}
+                    />
+                    <button className="staff-ghost" disabled={busy} onClick={() => void saveConfig(key)}>Save</button>
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+      </div>
+
+      <div className="staff-card wide">
+        <small>SCHEDULED-JOB RUNS</small>
+        {jobs === null
+          ? <p className="staff-muted">Loading job runs…</p>
+          : jobs.length === 0
+            ? <p className="staff-muted">No Pulse jobs have run yet — they log on first daily view.</p>
+            : (
+              <ul className="staff-mini-audit">
+                {jobs.slice(0, 20).map((job, i) => (
+                  <li key={`${job.jobKey}:${job.idemKey}:${i}`}>
+                    <span className={`staff-audit-badge ${job.ok ? 'approved' : 'rejected'}`}>{job.ok ? 'ok' : 'fail'}</span>
+                    <div className="staff-audit-copy">
+                      <b>{job.jobKey}</b>
+                      <span>{job.idemKey} · {timeAgo(job.ranAt)}</span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+        <p className="staff-muted staff-clock"><Clock size={11}/> The publisher is idempotent: one instance per campus per day, materialized on first read.</p>
+      </div>
     </div>
   )
 }

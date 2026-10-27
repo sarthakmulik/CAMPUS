@@ -45,6 +45,7 @@ import * as bk from './lib/bookmarks'
 import SearchPanel from './components/SearchPanel'
 import Profile from './components/Profile'
 import ReportDialog, { type ReportTarget } from './components/ReportDialog'
+import Pulse from './components/Pulse'
 import ShareContentSheet, { type ShareTarget } from './components/chat/ShareContentSheet'
 import type { CampusPost, PollState, PostKind } from './types'
 import * as media from './lib/media'
@@ -66,7 +67,7 @@ const navItems = [
   { label:'Safety Centre', icon:Shield },
 ]
 /** Pages that only make sense for a signed-in member (visitor gate applies). */
-const restrictedNav = ['Chats', 'Notifications', 'Bookmarks']
+const restrictedNav = ['Chats', 'Notifications', 'Bookmarks', 'Campus Pulse']
 const allNav = [...navItems.map(item => item.label), 'Profile']
 
 /* R3 motion: the nav's ONE gliding hover highlight — a single pill travels to the
@@ -1610,7 +1611,8 @@ function CAMPUSApp() {
       requireAuth(
         label === 'Chats' ? 'chat with classmates'
           : label === 'Notifications' ? 'see your notifications'
-            : 'save posts for later',
+            : label === 'Campus Pulse' ? "answer today's Pulse"
+              : 'save posts for later',
         label,
       )
       return
@@ -1637,7 +1639,7 @@ function CAMPUSApp() {
     // "coming soon" only for genuinely scaffolded pages; Chats, Bookmarks,
     // Leaderboard, Notifications, Profile and My College are live (the last
     // three render real backends — verified in the M9–M16 probes)
-    if (scaffoldNav.includes(label) && !['Chats', 'Bookmarks', 'Leaderboard', 'Notifications', 'Profile', 'My College'].includes(label)) flash(`${label} is coming soon.`)
+    if (scaffoldNav.includes(label) && !['Chats', 'Bookmarks', 'Leaderboard', 'Notifications', 'Profile', 'My College', 'Campus Pulse'].includes(label)) flash(`${label} is coming soon.`)
   }
 
   /* ---- mobile swipe navigation (touch only, viewport ≤ 650px) -------------
@@ -2717,6 +2719,20 @@ function CAMPUSApp() {
                 ? isStaff
                   ? <AdsAdmin flash={flash}/>
                   : <SectionPage name="Advertising" onCreate={openComposer} onSignIn={() => setAuthMode('signup')} isMember={status === 'member'} displayName={identity.name}/>
+              : activeNav === 'Campus Pulse'
+                ? <Pulse
+                    key="pulse"
+                    identity={identity && user ? { id: user.id, name: identity.name, username: identity.username, initials: identity.initials } : null}
+                    configured={configured}
+                    isMember={status === 'member'}
+                    requireAuth={requireAuth}
+                    notify={message => flash(message)}
+                    onSharePost={body => {
+                      // voluntary sharing (Phase 8): opens the real composer prefilled
+                      setDraft(body)
+                      return openComposer('post')
+                    }}
+                  />
                 : <SectionPage name={activeNav} onCreate={openComposer} onSignIn={() => setAuthMode('signup')} isMember={status === 'member'} displayName={identity.name} />}
       </main>
 
