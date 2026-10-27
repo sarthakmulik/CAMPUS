@@ -1487,7 +1487,7 @@ textarea:disabled {
 .pulse-chip {
   display: inline-flex; align-items: center; gap: 4px;
   font-size: var(--fs-micro); font-weight: 600;
-  padding: 5px 10px; border-radius: 999px;
+  min-height: 30px; padding: 5px 10px; border-radius: 999px;
   border: 1px solid var(--line);
   color: var(--ink-secondary);
   background: var(--surface);
@@ -1550,6 +1550,7 @@ textarea:disabled {
 
 /* results (threshold-gated: bar rows only render when results !== null) */
 .pulse-results { display: flex; flex-direction: column; gap: 9px }
+.pulse-card { scroll-margin-top: 60px }   /* scrollIntoView must not land under the fixed mobile header */
 .pulse-results-meta {
   display: flex; justify-content: space-between; align-items: center;
   font-size: var(--fs-micro); color: var(--ink-secondary);
@@ -1584,7 +1585,7 @@ textarea:disabled {
 .pulse-reactions { display: flex; gap: 8px; align-items: center }
 .pulse-reaction {
   display: inline-flex; align-items: center; gap: 5px;
-  min-height: 40px; padding: 6px 12px;
+  min-height: 44px; padding: 6px 12px;   /* 44: minimum comfortable touch target */
   border: 1.5px solid var(--line-strong); border-radius: 999px;
   background: var(--surface); color: var(--ink);
   font-size: var(--fs-small); font-weight: 600;
@@ -1600,7 +1601,7 @@ textarea:disabled {
 .pulse-report {
   margin-left: auto;
   display: inline-flex; align-items: center; justify-content: center;
-  width: 40px; height: 40px; border-radius: 999px;
+  width: 44px; height: 44px; border-radius: 999px;   /* 44: minimum comfortable touch target */
   border: none; background: none; color: var(--ink-faint);
   cursor: pointer;
 }
@@ -1643,7 +1644,7 @@ textarea:disabled {
 .pulse-insight-explain { margin-top: 6px }
 .pulse-insight-explain summary {
   font-size: var(--fs-micro); font-weight: 600; color: var(--ink-secondary);
-  cursor: pointer; min-height: 32px; display: flex; align-items: center;
+  cursor: pointer; min-height: 44px; display: flex; align-items: center;   /* 44: whole bar is the tap target */
 }
 .pulse-insight-explain summary:hover { color: var(--ink) }
 .pulse-insight-explain p { font-size: var(--fs-micro); color: var(--ink-secondary); margin: 2px 0 }
@@ -1676,17 +1677,17 @@ textarea:disabled {
 .pulse-config-row span { font-size: var(--fs-micro); color: var(--ink-secondary) }
 .pulse-config-controls { display: inline-flex; gap: 6px; align-items: center }
 .pulse-config-controls input {
-  width: 90px; padding: 6px 8px;
+  width: 90px; padding: 9px 9px;   /* ~35px tall: a real form field on touch */
   border: 1px solid var(--line-strong); border-radius: 8px;
   background: var(--surface); color: var(--ink);
-  font-size: var(--fs-small);
+  font-size: 13px;
 }
 .staff-filter-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 }
 .staff-chip {
   border: 1px solid var(--line-strong); background: var(--surface);
   color: var(--ink-secondary); border-radius: 999px;
   font-size: var(--fs-micro); font-weight: 600;
-  padding: 5px 11px; min-height: 32px; cursor: pointer;
+  padding: 5px 11px; min-height: 36px; cursor: pointer;   /* 36: touch-friendly filter chip */
 }
 .staff-chip.selected { border-color: var(--brand); color: var(--brand-ink); background: var(--brand-soft) }
 .staff-status-select { display: inline-flex; gap: 4px }
@@ -1694,14 +1695,23 @@ textarea:disabled {
   border: 1px solid var(--line-strong); background: var(--surface);
   color: var(--ink-secondary); border-radius: 8px;
   font-size: var(--fs-micro); font-weight: 700;
-  padding: 4px 7px; min-height: 32px; min-width: 34px; cursor: pointer;
+  padding: 4px 8px; min-height: 36px; min-width: 38px; cursor: pointer;
 }
 .staff-status-select button:hover:not(:disabled) { border-color: var(--brand); color: var(--brand-ink) }
 .staff-status-select button.selected { border-color: var(--brand); color: var(--brand-ink); background: var(--brand-soft) }
 .staff-status-select button:disabled { opacity: .5; cursor: default }
 
 @media (max-width: 480px) {
-  .pulse-result-row { grid-template-columns: minmax(80px, 1fr) 1.6fr auto }
+  /* results restack on phones: label on its own line (no 80px truncate),
+     bar + count beneath — with ≥10 voters the three-column grid was unreadable */
+  .pulse-result-row {
+    grid-template-columns: 1fr auto;
+    grid-template-areas: 'who who' 'bar n';
+    row-gap: 3px;
+  }
+  .pulse-result-who   { grid-area: who; white-space: normal; line-height: 1.35 }
+  .pulse-result-bar-track { grid-area: bar }
+  .pulse-result-n     { grid-area: n; align-self: center; white-space: nowrap }
   .pulse-page { gap: 18px }
 }
 

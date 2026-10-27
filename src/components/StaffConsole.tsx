@@ -945,7 +945,7 @@ function PulseAdminTab({ busy, setBusy, flash, bump }: {
                       {PULSE_STATUSES.map(s => (
                         <button key={s} disabled={busy || s === item.status}
                           className={s === item.status ? 'selected' : ''}
-                          onClick={() => void setStatus(item, s)} title={`Set ${s}`}>
+                          onClick={() => void setStatus(item, s)} title={`Set ${s}`} aria-label={`Set ${s}`}>
                           {s.slice(0, 2)}
                         </button>
                       ))}

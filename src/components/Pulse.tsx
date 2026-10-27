@@ -97,6 +97,20 @@ export default function Pulse({ identity, configured, isMember, requireAuth, not
   const [copied, setCopied] = useState(false)
   const flight = useRef(0)
 
+  // opening a quiz or landing on its result must bring that card into view —
+  // the Personality section sits below the statement deck (≈1.3k px of scroll
+  // on a 390×780 phone frame), so a tile tap otherwise has no visible effect.
+  const quizCardRef = useRef<HTMLDivElement | null>(null)
+  const resultCardRef = useRef<HTMLDivElement | null>(null)
+  const activeQuizId = activeQuiz?.quiz.id ?? null
+  useEffect(() => {
+    const el = outcome ? resultCardRef.current : quizCardRef.current
+    if ((activeQuizId || outcome) && el) {
+      const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+      el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
+    }
+  }, [activeQuizId, outcome])
+
   const load = useCallback(async () => {
     if (!configured || !isMember || !identity) { setLoading(false); return }
     const ticket = ++flight.current
@@ -390,7 +404,7 @@ export default function Pulse({ identity, configured, isMember, requireAuth, not
       <section className="pulse-section" aria-label="Campus Personality">
         <h2 className="pulse-kicker"><Trophy size={15}/> Campus Personality</h2>
         {activeQuiz ? (
-          <div className="pulse-card pulse-quiz">
+          <div className="pulse-card pulse-quiz" ref={quizCardRef}>
             <div className="pulse-quiz-progress" role="progressbar" aria-valuemin={1} aria-valuemax={activeQuiz.quiz.questions.length} aria-valuenow={activeQuiz.step + 1}>
               <span style={{ width: `${((activeQuiz.step + 1) / activeQuiz.quiz.questions.length) * 100}%` }} />
             </div>
@@ -406,7 +420,7 @@ export default function Pulse({ identity, configured, isMember, requireAuth, not
             <button className="pulse-skip" onClick={() => setActiveQuiz(null)}>Quit for now — no result is saved midway</button>
           </div>
         ) : outcome ? (
-          <div className="pulse-card pulse-quiz-result">
+          <div className="pulse-card pulse-quiz-result" ref={resultCardRef}>
             <span className="pulse-result-emoji" aria-hidden="true">{outcome.emoji}</span>
             <p className="pulse-result-label">{outcome.label}</p>
             <p className="pulse-result-blurb">{outcome.blurb}</p>
