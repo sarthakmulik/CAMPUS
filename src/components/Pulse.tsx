@@ -82,6 +82,7 @@ export default function Pulse({ identity, configured, isMember, requireAuth, not
   const [daily, setDaily] = useState<PulseDailyView | null>(null)
   const [dailyEmpty, setDailyEmpty] = useState(false)
   const [statements, setStatements] = useState<PulseStatementCard[]>([])
+  const [sectionErrors, setSectionErrors] = useState<{ deck?: string; quizzes?: string; insights?: string }>({})
   const [quizzes, setQuizzes] = useState<PulseQuizSummary[]>([])
   const [attempts, setAttempts] = useState<PulseAttemptRow[]>([])
   const [insights, setInsights] = useState<PulseInsight[]>([])
@@ -110,9 +111,11 @@ export default function Pulse({ identity, configured, isMember, requireAuth, not
       db.pulseMyAttempts(),
     ])
     if (ticket !== flight.current) return   // a reload raced this response — discard
-    const fail = dailyRes.status === 'rejected'
-      ? dailyRes.reason instanceof Error ? dailyRes.reason.message : String(dailyRes.reason)
-      : null
+    const reasonOf = (r: PromiseSettledResult<unknown>): string =>
+      r.status === 'rejected' ? (
+        r.reason instanceof Error ? r.reason.message : String(r.reason)
+      ) : ''
+    const fail = dailyRes.status === 'rejected' ? reasonOf(dailyRes) : null
     if (fail) setError(fail)
     if (dailyRes.status === 'fulfilled') {
       setDaily(dailyRes.value.daily ?? null)
@@ -123,6 +126,11 @@ export default function Pulse({ identity, configured, isMember, requireAuth, not
     setInsights(insightRes.status === 'fulfilled' ? (insightRes.value.insights ?? []) : [])
     setMilestones(milestoneRes.status === 'fulfilled' ? milestoneRes.value : [])
     setAttempts(attemptRes.status === 'fulfilled' ? attemptRes.value : [])
+    setSectionErrors({
+      deck: deckRes.status === 'rejected' ? reasonOf(deckRes) : undefined,
+      quizzes: quizRes.status === 'rejected' ? reasonOf(quizRes) : undefined,
+      insights: insightRes.status === 'rejected' ? reasonOf(insightRes) : undefined,
+    })
     setLoading(false)
   }, [configured, isMember, identity])
 
@@ -337,7 +345,12 @@ export default function Pulse({ identity, configured, isMember, requireAuth, not
         <h2 className="pulse-kicker">Am I the Only One…?</h2>
         {loading
           ? <div className="pulse-deck">{[0, 1, 2].map(i => <span key={i} className="pulse-skel" style={{ width: '100%', height: 96 }} />)}</div>
-          : statements.length === 0
+          : sectionErrors.deck ? (
+            <div className="pulse-card pulse-empty-card small">
+              <p>The statement deck could not load right now.</p>
+              <p className="pulse-quiet">{sectionErrors.deck}</p>
+            </div>
+          ) : statements.length === 0
             ? <div className="pulse-card pulse-empty-card small"><p>The statement deck is growing — come back tomorrow for a fresh set.</p></div>
             : (
               <div className="pulse-deck">
@@ -410,6 +423,11 @@ export default function Pulse({ identity, configured, isMember, requireAuth, not
           </div>
         ) : loading ? (
           <div className="pulse-deck">{[0, 1].map(i => <span key={i} className="pulse-skel" style={{ width: '100%', height: 84 }} />)}</div>
+        ) : sectionErrors.quizzes ? (
+          <div className="pulse-card pulse-empty-card small">
+            <p>Quizzes could not load right now.</p>
+            <p className="pulse-quiet">{sectionErrors.quizzes}</p>
+          </div>
         ) : quizzes.length === 0 ? (
           <div className="pulse-card pulse-empty-card small"><p>No quizzes yet — the first one is being authored.</p></div>
         ) : (
@@ -436,7 +454,12 @@ export default function Pulse({ identity, configured, isMember, requireAuth, not
         <h2 className="pulse-kicker"><BarChart3 size={15}/> Campus Insights</h2>
         {loading
           ? <span className="pulse-skel" style={{ width: '100%', height: 88 }} />
-          : insights.length === 0 ? (
+          : sectionErrors.insights ? (
+            <div className="pulse-card pulse-empty-card small">
+              <p>Insights could not load right now.</p>
+              <p className="pulse-quiet">{sectionErrors.insights}</p>
+            </div>
+          ) : insights.length === 0 ? (
             <div className="pulse-card pulse-empty-card small">
               <p>No insights yet this week.</p>
               <p className="pulse-quiet">Insights appear once enough of your campus takes part — nothing is estimated or invented.</p>

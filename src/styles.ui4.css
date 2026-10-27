@@ -1654,6 +1654,7 @@ textarea:disabled {
 .pulse-empty-card h2 { margin: 2px 0 0 }
 .pulse-empty-card.small { padding: 20px 16px }
 .pulse-empty-card p { font-size: var(--fs-small); color: var(--ink-secondary); margin: 0; max-width: 420px }
+.pulse-quiet { font-size: var(--fs-micro); color: var(--ink-faint); margin: 2px 0 0 !important; word-break: break-word }
 .pulse-err { color: var(--pink-ink) !important; font-weight: 600 }
 
 /* skeletons (pulse tokens live on --line so both themes get them) */
