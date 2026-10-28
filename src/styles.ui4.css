@@ -1826,6 +1826,17 @@ textarea:disabled {
     opacity: 0; visibility: hidden; pointer-events: none;
   }
 
+  /* ---- one continuous canvas (desktop-only white panel) ------------------
+     The pre-v2 shell painted .main-column --surface (white) so the desktop
+     3-column grid reads as a raised centre panel. On mobile .main-column IS
+     the whole viewport (overflow-hidden shell), so that white panel ended
+     hard at the shell's bottom padding zone and drew a visible white
+     rectangle behind the floating nav — the user-reported defect. On mobile
+     the column paints nothing: every page's --soft canvas meets the shell's
+     own --soft reservation, so the area around the floating pill is air,
+     never a box. */
+  .main-column { background: transparent }
+
   @media (prefers-reduced-motion: reduce) {
     .mobile-header, .mobile-bottom-nav, .app-shell { transition: none }
   }
