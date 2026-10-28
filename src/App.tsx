@@ -1660,16 +1660,49 @@ function CAMPUSApp() {
   const confirmDismiss = useRef<(() => void) | null>(null)
   const [slideDir, setSlideDir] = useState<'none' | 'from-right' | 'from-left'>('none')
 
-  // scroll-edge state for the fixed mobile header: while a page sits at the
-  // top the bar reads as frameless; once content passes underneath, the
-  // hairline deepens into a soft shadow so it separates from scrolling
-  // content (HIG scroll-edge treatment). DOM-only — no re-render per scroll.
-  const updateHeaderEdge = () => {
-    const header = mobileHeaderRef.current
-    if (!header) return
+  // shell-level chrome state: one DOM class pair drives BOTH fixed bars
+  // (`.chrome-away` hides header + bottom nav while reading down a feed;
+  // `.kb-away` slides only the bottom nav clear of an open keyboard).
+  // DOM-only — no React re-render per scroll event.
+  const shellRef = useRef<HTMLElement | null>(null)
+  const searchOpenRef = useRef(searchOpen); searchOpenRef.current = searchOpen
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null)
+  const chromeClock = useRef({ lastTop: 0, accum: 0, hidden: false })
+  // Hysteresis (px of travel in ONE direction before the state flips):
+  // near the top both bars are always visible; a horizontal swipe, drawer or
+  // search panel freezes the state; upward travel reveals early so the bars
+  // are back before the user reaches the top.
+  const CHROME = { topZone: 64, hideAfter: 64, showAfter: 16 }
+
+  const updateChrome = (reset = false) => {
     const scroller = mainRef.current
-    const top = scroller ? scroller.scrollTop : 0
+    const shell = shellRef.current
+    const header = mobileHeaderRef.current
+    if (!scroller || !header) return
+    const top = scroller.scrollTop
     header.classList.toggle('scrolled', top > 6)
+    // desktop: the window owns scrolling — chrome is never hidden there
+    if (!window.matchMedia('(max-width: 650px)').matches) { chromeClock.current = { lastTop: top, accum: 0, hidden: false }; return }
+    if (reset || !shell || shell.classList.contains('chrome-keep')) {
+      chromeClock.current = { lastTop: top, accum: 0, hidden: false }
+      if (shell) shell.classList.remove('chrome-away')
+      return
+    }
+    const clock = chromeClock.current
+    const delta = top - clock.lastTop
+    clock.lastTop = top
+    if (top <= CHROME.topZone) {
+      clock.accum = 0
+      clock.hidden = false
+    } else if (delta > 0.5) {
+      // committed downward travel — accumulate, reset on any direction change
+      clock.accum = clock.accum > 0 ? clock.accum + delta : delta
+      if (clock.accum >= CHROME.hideAfter) { clock.hidden = true; clock.accum = 0 }
+    } else if (delta < -0.5) {
+      clock.accum = clock.accum < 0 ? clock.accum + delta : delta
+      if (clock.accum <= -CHROME.showAfter) { clock.hidden = false; clock.accum = 0 }
+    }
+    shell.classList.toggle('chrome-away', clock.hidden)
   }
 
   // restore each page's scroll depth synchronously before paint (mobile only —
@@ -1681,7 +1714,7 @@ function CAMPUSApp() {
     if (!scroller) return
     const saved = pageScrollMemory.current[activeNav]
     scroller.scrollTop = typeof saved === 'number' ? saved : 0
-    updateHeaderEdge()
+    updateChrome(true)
   }, [activeNav])
   const slideTimer = useRef<number | null>(null)
   const swipe = useRef({
@@ -1868,7 +1901,7 @@ function CAMPUSApp() {
     main.addEventListener('touchcancel', finishOrCancel, { passive: true })
     // scroll-edge header: track the scroller directly (on mobile the pages
     // scroll inside .main-column — the window never scrolls)
-    const onScrollEdge = () => updateHeaderEdge()
+    const onScrollEdge = () => updateChrome()
     main.addEventListener('scroll', onScrollEdge, { passive: true })
     onScrollEdge()
     cleanupRef.current = () => {
@@ -1915,6 +1948,62 @@ function CAMPUSApp() {
       sidebar.removeEventListener('touchstart', onDrawerStart)
       sidebar.removeEventListener('touchmove', onDrawerMove)
       sidebar.removeEventListener('touchend', onDrawerEnd)
+    }
+  }, [])
+
+  /* ---- drawer accessibility: Escape-to-close and focus handoff ----------------
+     The aside doubles as the desktop rail, so dialog semantics are applied by
+     state, not markup. On open, focus moves to the drawer's close button —
+     after the slide-in so it doesn't pre-paint the drawer mid-transition. On
+     close while a control inside the drawer still holds focus (X button, an
+     Escape that started there), focus returns to the header menu button; a
+     navigate() close lets focus follow the tapped item instead. */
+  useEffect(() => {
+    if (mobileMenu) {
+      const t = window.setTimeout(() => {
+        sidebarRef.current?.querySelector<HTMLButtonElement>('.sidebar-close')?.focus({ preventScroll: true })
+      }, 140)
+      const onKey = (event: KeyboardEvent) => {
+        if (event.key === 'Escape') setMobileMenu(false)
+      }
+      document.addEventListener('keydown', onKey)
+      return () => {
+        window.clearTimeout(t)
+        document.removeEventListener('keydown', onKey)
+        const drawer = sidebarRef.current
+        if (drawer?.contains(document.activeElement)) menuButtonRef.current?.focus({ preventScroll: true })
+      }
+    }
+    return undefined
+  }, [mobileMenu])
+
+  /* ---- keyboard vs. the floating nav -----------------------------------------
+     interactive-widget=resizes-content already raises the whole layout when
+     the IME opens, but the floating nav would still sit on the composer's
+     action row — so a text-input focus slides ONLY the nav out of the way
+     (header + search stay reachable), and blur brings it back. */
+  useEffect(() => {
+    const opensKeyboard = (el: Element | null) => {
+      if (!(el instanceof HTMLElement)) return false
+      if (el instanceof HTMLTextAreaElement || el.isContentEditable) return true
+      if (el instanceof HTMLInputElement) {
+        return !['checkbox', 'radio', 'range', 'color', 'file', 'button', 'submit', 'reset', 'image'].includes(el.type)
+      }
+      return false
+    }
+    const onFocusIn = (event: FocusEvent) => {
+      if (opensKeyboard(event.target as Element) && isMobileViewport()) shellRef.current?.classList.add('kb-away')
+    }
+    const onFocusOut = (event: FocusEvent) => {
+      if (!isMobileViewport()) return
+      const next = event.relatedTarget ?? document.activeElement
+      if (!opensKeyboard(next as Element | null)) shellRef.current?.classList.remove('kb-away')
+    }
+    document.addEventListener('focusin', onFocusIn)
+    document.addEventListener('focusout', onFocusOut)
+    return () => {
+      document.removeEventListener('focusin', onFocusIn)
+      document.removeEventListener('focusout', onFocusOut)
     }
   }, [])
 
@@ -2353,11 +2442,17 @@ function CAMPUSApp() {
     )
   }
 
+  /* detail screens own page-level sticky bars and search keeps the header in
+     reach — the scroll-away behavior only applies to plain feed-style tabs */
+  const chromePersistent = Boolean(dmThread || confessionsOpen || searchOpen || openCommunityId || openEventSlug || openListingSlug)
   return (
-    <div className={`app-shell${dmThread && isMobileViewport() ? ' nav-hidden' : ''}`}>
+    <div
+      className={`app-shell${dmThread && isMobileViewport() ? ' nav-hidden' : ''}${chromePersistent ? ' chrome-keep' : ''}`}
+      ref={el => { shellRef.current = el }}
+    >
       <header className="mobile-header" ref={el => { mobileHeaderRef.current = el }}>
         <div className="mobile-header-left">
-          <button className="icon-button" aria-label="Menu" onClick={() => setMobileMenu(true)}><Menu size={21}/></button>
+          <button className="icon-button" aria-label="Menu" ref={menuButtonRef} onClick={() => setMobileMenu(true)}><Menu size={21}/></button>
           <button className="brand-mini" onClick={() => navigate('Home')}><span className="brand-mark">C</span><b>CAMPUS</b></button>
         </div>
         <div className="mobile-header-actions">
@@ -2366,7 +2461,7 @@ function CAMPUSApp() {
         </div>
       </header>
 
-      <aside ref={attachSidebarRef} className={`left-sidebar ${mobileMenu ? 'mobile-open' : ''}`}>
+      <aside ref={attachSidebarRef} className={`left-sidebar ${mobileMenu ? 'mobile-open' : ''}`} role={mobileMenu ? 'dialog' : undefined} aria-modal={mobileMenu ? 'true' : undefined} aria-label="Navigation menu">
         <button className="icon-button sidebar-close" aria-label="Close menu" onClick={() => setMobileMenu(false)}><X size={20}/></button>
         <button className="brand" onClick={() => navigate('Home')}><span className="brand-mark">C</span><span>CAMPUS</span></button>
         <div className="sidebar-campus-card">

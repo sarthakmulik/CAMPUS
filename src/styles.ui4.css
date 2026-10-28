@@ -290,7 +290,7 @@ body { background: var(--soft) }
 .publish-banner {
   position: fixed;
   left: 50%;
-  bottom: calc(64px + env(safe-area-inset-bottom));
+  bottom: calc(78px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   z-index: 20;
   display: inline-flex;
@@ -1746,5 +1746,79 @@ textarea:disabled {
   .pulse-kicker { font-weight: 750; letter-spacing: 1.2px; font-size: 11px }
   .pulse-tag { padding: 4px 9px }
   .pulse-question { font-size: 15.5px }
+}
+
+/* ==========================================================================
+   MOBILE CHROME V2 — floating bottom nav + scroll-aware header (single bin)
+   App.tsx owns ONE controller that writes two DOM classes on .app-shell:
+     .chrome-away — sustained downward travel hides BOTH bars together and
+                    releases the shell's top strip so content rises with the
+                    header; upward travel reveals them before the top.
+     .kb-away     — a text input holds focus: only the nav slides aside so
+                    composer action rows are never covered.
+   Explicit rules: `.chrome-keep` pages (detail screens, confessions, search,
+   DM thread) never hide chrome; the reel stage and chat thread own their own
+   scroll and are outside this controller. Transform/opacity only; hidden
+   bars drop visibility so they are neither seen nor focused.
+   ========================================================================== */
+@media (max-width: 650px) {
+  /* ---- the floating pill (replaces the edge-to-edge bar) ------------------
+     Glass surface reused from the system surface-glass token so dark mode
+     and the reduced-transparency fallback keep working unchanged. */
+  .mobile-bottom-nav {
+    top: auto;
+    left: 10px; right: 10px;
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    height: 64px;
+    display: flex; align-items: center; justify-content: space-around;
+    padding: 5px 8px;
+    border: 1px solid var(--line);
+    border-radius: 21px;
+    box-shadow: 0 10px 30px rgba(23, 40, 76, .16), 0 1px 0 rgba(255, 255, 255, .55) inset;
+    transform: translateY(0);
+    transition: transform .26s var(--ease-out), opacity .2s ease, visibility 0s linear .26s;
+  }
+  @media (prefers-color-scheme: dark) {
+    .mobile-bottom-nav { box-shadow: 0 10px 30px rgba(0, 0, 0, .5), 0 1px 0 rgba(255, 255, 255, .08) inset }
+  }
+  .mobile-bottom-nav button { border-radius: 15px }
+  .mobile-bottom-nav button.active:before { inset: 0 3px 16px; border-radius: 15px }
+  /* the create FAB breaks out of the pill like a real floating action:
+     a page-colored ring keeps it distinct without a heavy glow */
+  .mobile-bottom-nav .mobile-create {
+    width: 52px; height: 52px; min-width: 52px;
+    margin-top: -30px;
+    border: 3px solid var(--surface);
+    box-shadow: 0 8px 20px rgba(102, 84, 245, .35);
+  }
+
+  /* ---- content reservation: 8px float gap + 64px nav + 12px breathing ---
+     mirrored by the reels stage and the ad wedge; keep the three in sync */
+  .app-shell { padding-top: calc(50px + env(safe-area-inset-top)); padding-bottom: calc(84px + env(safe-area-inset-bottom)) }
+  .toast { bottom: calc(84px + env(safe-area-inset-bottom)) }
+
+  /* ---- hide states -------------------------------------------------------
+     chrome-away frees the 50px header strip (padding-top -> 0 animates the
+     page up in lockstep with the header slide) — sticky page headers like
+     .feed-tabs then take the vacated top edge, exactly as native apps do. */
+  .app-shell { transition: padding-top .26s var(--ease-out) }
+  .app-shell.chrome-away { padding-top: 0 }
+  .app-shell.chrome-away .mobile-header {
+    transform: translateY(-118%);
+    opacity: 0; visibility: hidden; pointer-events: none;
+    transition: transform .26s var(--ease-out), opacity .2s ease, visibility 0s linear .26s;
+  }
+  .app-shell.chrome-away .mobile-bottom-nav {
+    transform: translateY(calc(100% + 44px));
+    opacity: 0; visibility: hidden; pointer-events: none;
+  }
+  .app-shell.kb-away .mobile-bottom-nav {
+    transform: translateY(calc(100% + 48px));
+    opacity: 0; visibility: hidden; pointer-events: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .mobile-header, .mobile-bottom-nav, .app-shell { transition: none }
+  }
 }
 

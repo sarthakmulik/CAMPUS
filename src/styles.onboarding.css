@@ -2640,10 +2640,14 @@
 @media (max-width: 650px) {
   /* the page scroll container already starts below the fixed header and ends
      above the fixed nav, so the stage simply fills it */
-  .reels-stage { top: 0; height: calc(100vh - 109px); height: calc(100dvh - 109px); }
-  .reel-rail { bottom: 74px; right: 8px; }
+  /* page scroll container reserves the 50px header + the floating nav zone
+     (8 float gap + 64 nav + 12 breathing) — chrome-away releasing the top
+     strip is harmless here: the stage is a fixed-height snap scroller own-
+     sized, and App.tsx keeps reels outside the chrome-away controller */
+  .reels-stage { top: 0; height: calc(100vh - 134px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); height: calc(100dvh - 134px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+  .reel-rail { bottom: calc(80px + env(safe-area-inset-bottom)); right: 8px; }
   .reel-rail-item button { width: 42px; height: 42px; }
-  .reel-info { left: 12px; right: 62px; bottom: 78px; }
+  .reel-info { left: 12px; right: 62px; bottom: calc(86px + env(safe-area-inset-bottom)); }
   .reel-caption { font-size: 12.5px; }
   .reel-progressline { bottom: 12px; }
 }
