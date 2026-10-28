@@ -1849,6 +1849,16 @@ textarea:disabled {
      never a box. */
   .main-column { background: transparent }
 
+  /* ---- one continuous canvas ---------------------------------------------
+     Page-level white panels are a desktop idiom (raised column). On mobile
+     each of them previously ended mid-viewport and exposed the shell's soft
+     background beneath it — reading as a white 'box' behind the floating
+     nav. Erase them to the one canvas tone; the white surfaces live on
+     cards/sheets. The reels stage also stops carrying the old reservation
+     arithmetic and simply fills its scroll container. */
+  .chats-page, .section-page { background: var(--soft) }
+  .reels-stage { height: 100% }
+
   @media (prefers-reduced-motion: reduce) {
     .mobile-header, .mobile-bottom-nav, .app-shell { transition: none }
   }
