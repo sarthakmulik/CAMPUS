@@ -3263,8 +3263,8 @@
   z-index: 1;
 }
 .profile-grid-item.is-text .grid-text {
-  margin: 30px 2px 0;
-  font-size: 12px;
+  margin: 12px 2px 0;
+  font-size: 12.5px;
   line-height: 1.55;
   color: var(--ink);
   display: -webkit-box;
@@ -3272,7 +3272,10 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
   min-height: 0;
+  /* long words / raw urls must never blow out the 2-col tile */
+  overflow-wrap: anywhere;
 }
+/* ordinary text posts carry no badge: their text is the content */
 .profile-grid-item.is-text .tile-foot {
   position: static;
   padding: 7px 1px 1px;

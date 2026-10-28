@@ -369,7 +369,7 @@ export default function Profile({ profileId, myUserId, colleges, isMember, caps,
                     key={post.id}
                     className={`profile-grid-item${media ? '' : ' is-text'}`}
                     onClick={() => onOpenPost?.(post)}
-                    aria-label={`${kindLabel(post)}: ${excerpt ? excerpt.slice(0, 70) : 'open'}`}
+                    aria-label={excerpt ? excerpt.slice(0, 70) : 'Open this post'}
                   >
                     {media
                       ? <>
@@ -385,7 +385,7 @@ export default function Profile({ profileId, myUserId, colleges, isMember, caps,
                           </span>
                         </>
                       : <>
-                          <span className="grid-kind">{kindLabel(post)}</span>
+                          {kindLabel(post) !== 'Post' && <span className="grid-kind">{kindLabel(post)}</span>}
                           <span className="grid-text">{excerpt || 'Open this post'}</span>
                           <span className="tile-foot">
                             <span>{post.time}</span>

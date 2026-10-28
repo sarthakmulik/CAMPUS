@@ -259,6 +259,10 @@ function CAMPUSApp() {
   const [deleteTarget, setDeleteTarget] = useState<CampusPost | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [commentTarget, setCommentTarget] = useState<CampusPost | null>(null)
+  /** post-detail variant of the comments sheet: the OPENED FROM — the card tap
+   *  (profile grid) shows the full post above its thread; the explicit
+   *  comments button keeps the established comments-only sheet. */
+  const [detailOpen, setDetailOpen] = useState(false)
   const [inlineOpen, setInlineOpen] = useState(false)
   const [inlineDraft, setInlineDraft] = useState('')
   const [inlineBusy, setInlineBusy] = useState(false)
@@ -1066,6 +1070,15 @@ function CAMPUSApp() {
   }
   const openComments = (post: CampusPost) => {
     if (!requireAuth('join the conversation')) return
+    setDetailOpen(false)
+    setCommentTarget(post)
+  }
+  /** Post-detail destination: taps on ordinary post card surfaces (profile
+   *  grid) open the FULL post with its comment thread below — reusing the
+   *  single CommentsSheet in its detail variant and the canonical PostCard.
+   *  Viewing is open to visitors; signing in is only demanded to interact. */
+  const openPostDetail = (post: CampusPost) => {
+    setDetailOpen(true)
     setCommentTarget(post)
   }
   const copyPost = (body: string) => {
@@ -2686,7 +2699,7 @@ function CAMPUSApp() {
                   onOpenMention={openMentionProfile}
                   onOpenHashtag={openHashtagSearch}
                   onSignOut={signOut}
-                  onOpenPost={openComments}
+                  onOpenPost={openPostDetail}
                   onCreatePost={kind => { openComposer(kind) }}
                 />
               : activeNav === 'Communities'
@@ -3061,6 +3074,26 @@ function CAMPUSApp() {
           userId={user?.id ?? null}
           identity={identity}
           requireAuth={requireAuth}
+          detail={detailOpen}
+          detailNode={detailOpen ? (
+            <PostCard
+              post={commentTarget}
+              isOwn={Boolean(user && commentTarget.authorId === user.id)}
+              onLike={() => { void toggleLike(commentTarget.id, commentTarget).then(ok => { if (ok) setCommentTarget(cur => cur && cur.id === commentTarget.id ? { ...cur, liked: !cur.liked, likes: cur.likes + (cur.liked ? -1 : 1) } : cur) }) }}
+              onSave={() => toggleSave(commentTarget.id, commentTarget)}
+              onComment={() => document.getElementById('detail-comments')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })}
+              onShare={() => void sharePost(commentTarget)}
+              onReport={() => openReport(commentTarget)}
+              onRepost={() => toggleRepost(commentTarget.id, commentTarget)}
+              onBlock={() => void setRelation('user_blocks', commentTarget)}
+              onMute={() => void setRelation('user_mutes', commentTarget)}
+              onEdit={() => { setCommentTarget(null); startEditPost(commentTarget) }}
+              onDelete={() => { setCommentTarget(null); setDeleteTarget(commentTarget) }}
+              onMessage={() => void messageAuthor(commentTarget)}
+              onOpenMention={openMentionProfile}
+              onOpenTag={openHashtagSearch}
+            />
+          ) : null}
           onClose={() => setCommentTarget(null)}
           onCountChange={count => {
             setPosts(current => current.map(p => p.id === commentTarget.id ? { ...p, comments: count } : p))

@@ -1859,6 +1859,30 @@ textarea:disabled {
   .chats-page, .section-page { background: var(--soft) }
   .reels-stage { height: 100% }
 
+  /* ---- post-detail sheet variant ------------------------------------------
+     Tapping a profile grid tile opens the full post (the ONE canonical
+     PostCard, rendered by App) with its comment thread below — comments are
+     part of the post experience, not the automatic destination. */
+  .comments-sheet.detail {
+    height: min(92dvh, 700px);
+    max-height: min(92dvh, 700px);
+    padding-bottom: calc(14px + env(safe-area-inset-bottom));
+  }
+  .comments-sheet.detail .comments-list {
+    flex: 1 1 auto;
+    max-height: none;
+  }
+  /* the feed card sheds its panel chrome inside the sheet — the sheet IS the
+     panel; content flows edge-to-edge through the shared padding */
+  .comments-sheet.detail .comments-detail-post { margin: 2px 0 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line) }
+  .comments-sheet.detail .comments-detail-post .post-card {
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    padding: 0;
+    margin: 0;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .mobile-header, .mobile-bottom-nav, .app-shell { transition: none }
   }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useBodyScrollLock } from '../lib/scrollLock'
 import { createPortal } from 'react-dom'
 import { BadgeCheck, Check, Heart, MessageCircle, Pencil, Pin, Send, Trash2, X } from 'lucide-react'
@@ -16,6 +16,12 @@ type CommentsSheetProps = {
   requireAuth: (reason: string) => boolean
   /** 'light' = feed sheets, 'dark' = Discover reels theme. */
   theme?: 'light' | 'dark'
+  /** post-detail variant: the sheet shows the full post above its thread —
+   *  the canonical destination for tapping a post card (profile grid). The
+   *  post node is rendered by App so it can reuse the ONE PostCard with all
+   *  of its existing action handlers; this component stays comments-logic-only. */
+  detail?: boolean
+  detailNode?: ReactNode
   onClose: () => void
   /** Syncs the live comment count back to the feed/reel that opened the sheet. */
   onCountChange: (count: number) => void
@@ -30,7 +36,7 @@ type ThreadRow = { parent: CampusComment; replies: CampusComment[] }
  * sheet, Discover opens it in the dark reels theme.
  */
 export default function CommentsSheet({
-  post, userId, identity, requireAuth, theme = 'light', onClose, onCountChange,
+  post, userId, identity, requireAuth, theme = 'light', detail = false, detailNode = null, onClose, onCountChange,
 }: CommentsSheetProps) {
   // bottom sheet over a dimmed overlay — keep the feed from scrolling behind it
   useBodyScrollLock()
@@ -282,17 +288,18 @@ export default function CommentsSheet({
 
   return createPortal(
     <div className="overlay comments-overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-      <section className={`bottom-sheet comments-sheet ${theme === 'dark' ? 'dark' : ''}`} role="dialog" aria-label={`Comments on ${post.anonymous ? 'this post' : 'this post'}`} ref={el => { dismissRef.current?.(); dismissRef.current = el ? attachSheetDismiss(el, onClose) : null }}>
+      <section className={`bottom-sheet comments-sheet ${theme === 'dark' ? 'dark' : ''}${detail ? ' detail' : ''}`} role="dialog" aria-label={detail ? 'Post detail' : `Comments on ${post.anonymous ? 'this post' : 'this post'}`} ref={el => { dismissRef.current?.(); dismissRef.current = el ? attachSheetDismiss(el, onClose) : null }}>
         <div className="sheet-handle"/>
         <div className="sheet-heading">
           <div>
-            <span className="eyebrow">{post.anonymous ? 'CONFESS THREAD' : 'CAMPUS THREAD'}</span>
-            <h2>Comments{comments.length > 0 ? ` · ${comments.length}` : ''}</h2>
+            <span className="eyebrow">{detail ? 'POST' : post.anonymous ? 'CONFESS THREAD' : 'CAMPUS THREAD'}</span>
+            <h2>{`Comments${comments.length > 0 ? ` · ${comments.length}` : ''}`}</h2>
           </div>
           <button className="icon-button" onClick={onClose} aria-label="Close comments"><X size={20}/></button>
         </div>
+        {detail && detailNode && <div className="comments-detail-post">{detailNode}</div>}
 
-        <div className="comments-list" ref={listRef}>
+        <div id={detail ? 'detail-comments' : undefined} className="comments-list" ref={listRef}>
           {loading && <p className="comments-status">Loading comments…</p>}
           {error && (
             <div className="comments-error">
