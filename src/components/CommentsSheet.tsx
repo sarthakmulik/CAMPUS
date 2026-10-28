@@ -34,6 +34,12 @@ export default function CommentsSheet({
 }: CommentsSheetProps) {
   // bottom sheet over a dimmed overlay — keep the feed from scrolling behind it
   useBodyScrollLock()
+  // Escape closes, matching the drawer's dismissal contract (keyboard a11y)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
   // swipe-to-dismiss attaches through a ref callback; holder keeps the teardown
   const dismissRef = useRef<(() => void) | null>(null)
   const [comments, setComments] = useState<CampusComment[]>([])

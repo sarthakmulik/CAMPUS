@@ -1667,12 +1667,15 @@ function CAMPUSApp() {
   const shellRef = useRef<HTMLElement | null>(null)
   const searchOpenRef = useRef(searchOpen); searchOpenRef.current = searchOpen
   const menuButtonRef = useRef<HTMLButtonElement | null>(null)
-  const chromeClock = useRef({ lastTop: 0, accum: 0, hidden: false })
+  const chromeClock = useRef({ lastTop: 0, accum: 0, hidden: false, freezeUntil: 0 })
   // Hysteresis (px of travel in ONE direction before the state flips):
   // near the top both bars are always visible; a horizontal swipe, drawer or
   // search panel freezes the state; upward travel reveals early so the bars
-  // are back before the user reaches the top.
-  const CHROME = { topZone: 64, hideAfter: 64, showAfter: 16 }
+  // are back before the user reaches the top. After a self-made toggle the
+  // released padding changes the scroll area and the browser's scroll
+  // anchoring fires a ±(paddingDelta) compensation event ~9ms later — those
+  // artifacts are ignored (freeze = 300ms), real position always tracked.
+  const CHROME = { topZone: 64, hideAfter: 64, showAfter: 16, freeze: 300 }
 
   const updateChrome = (reset = false) => {
     const scroller = mainRef.current
@@ -1682,9 +1685,9 @@ function CAMPUSApp() {
     const top = scroller.scrollTop
     header.classList.toggle('scrolled', top > 6)
     // desktop: the window owns scrolling — chrome is never hidden there
-    if (!window.matchMedia('(max-width: 650px)').matches) { chromeClock.current = { lastTop: top, accum: 0, hidden: false }; return }
+    if (!window.matchMedia('(max-width: 650px)').matches) { chromeClock.current = { lastTop: top, accum: 0, hidden: false, freezeUntil: 0 }; return }
     if (reset || !shell || shell.classList.contains('chrome-keep')) {
-      chromeClock.current = { lastTop: top, accum: 0, hidden: false }
+      chromeClock.current = { lastTop: top, accum: 0, hidden: false, freezeUntil: 0 }
       if (shell) shell.classList.remove('chrome-away')
       return
     }
@@ -1694,13 +1697,15 @@ function CAMPUSApp() {
     if (top <= CHROME.topZone) {
       clock.accum = 0
       clock.hidden = false
+      clock.freezeUntil = 0
+    } else if (performance.now() < clock.freezeUntil) {
+      // inside the anchor-compensation window: track position, change nothing
     } else if (delta > 0.5) {
-      // committed downward travel — accumulate, reset on any direction change
       clock.accum = clock.accum > 0 ? clock.accum + delta : delta
-      if (clock.accum >= CHROME.hideAfter) { clock.hidden = true; clock.accum = 0 }
+      if (clock.accum >= CHROME.hideAfter) { clock.hidden = true; clock.accum = 0; clock.freezeUntil = performance.now() + CHROME.freeze }
     } else if (delta < -0.5) {
       clock.accum = clock.accum < 0 ? clock.accum + delta : delta
-      if (clock.accum <= -CHROME.showAfter) { clock.hidden = false; clock.accum = 0 }
+      if (clock.accum <= -CHROME.showAfter) { clock.hidden = false; clock.accum = 0; clock.freezeUntil = performance.now() + CHROME.freeze }
     }
     shell.classList.toggle('chrome-away', clock.hidden)
   }
