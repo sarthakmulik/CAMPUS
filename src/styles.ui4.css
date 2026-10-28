@@ -114,7 +114,7 @@ body { background: var(--soft) }
    are the cheap ones (shadow/border); blur radii never animate on scroll. Safari pairs the
    -webkit- prefix on every backdrop-filter.                                    */
 .mobile-header {
-  background: var(--surface-glass);
+  background: var(--chrome-glass);
   -webkit-backdrop-filter: saturate(160%) blur(12px);
   backdrop-filter: saturate(160%) blur(12px);
   border-bottom-color: var(--line);
@@ -122,7 +122,7 @@ body { background: var(--soft) }
 }
 .mobile-header.scrolled { border-bottom-color: var(--line-strong); box-shadow: 0 1px 0 #ffffff40 inset, var(--elev-2) }
 .mobile-bottom-nav {
-  background: var(--surface-glass);
+  background: var(--chrome-glass);
   -webkit-backdrop-filter: saturate(160%) blur(14px);
   backdrop-filter: saturate(160%) blur(14px);
   border-top-color: var(--line);
@@ -1793,8 +1793,16 @@ textarea:disabled {
   }
 
   /* ---- content reservation: 8px float gap + 64px nav + 12px breathing ---
-     mirrored by the reels stage and the ad wedge; keep the three in sync */
-  .app-shell { padding-top: calc(50px + env(safe-area-inset-top)); padding-bottom: calc(84px + env(safe-area-inset-bottom)) }
+     mirrored by the reels stage and the ad wedge; keep the three in sync.
+     BOTH paddings release together when the chrome hides — a reserved strip
+     would otherwise survive as an opaque band showing the page background
+     (the 'white block' defect); released space lets content fill the full
+     viewport while nothing is covering it. */
+  .app-shell {
+    padding-top: calc(50px + env(safe-area-inset-top));
+    padding-bottom: calc(84px + env(safe-area-inset-bottom));
+    transition: padding-top .26s var(--ease-out), padding-bottom .26s var(--ease-out);
+  }
   .toast { bottom: calc(84px + env(safe-area-inset-bottom)) }
 
   /* ---- hide states -------------------------------------------------------
@@ -1802,7 +1810,8 @@ textarea:disabled {
      page up in lockstep with the header slide) — sticky page headers like
      .feed-tabs then take the vacated top edge, exactly as native apps do. */
   .app-shell { transition: padding-top .26s var(--ease-out) }
-  .app-shell.chrome-away { padding-top: 0 }
+  .app-shell.chrome-away { padding-top: 0; padding-bottom: 0 }
+  .app-shell.kb-away { padding-bottom: 0 }
   .app-shell.chrome-away .mobile-header {
     transform: translateY(-118%);
     opacity: 0; visibility: hidden; pointer-events: none;
@@ -1819,6 +1828,12 @@ textarea:disabled {
 
   @media (prefers-reduced-motion: reduce) {
     .mobile-header, .mobile-bottom-nav, .app-shell { transition: none }
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    /* a11y glass contract: solid surfaces when transparency is reduced —
+       must live AFTER the glass rules above so it wins the cascade */
+    .mobile-header, .mobile-bottom-nav { background: var(--surface-raised) }
   }
 }
 

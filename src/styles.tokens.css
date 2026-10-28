@@ -22,6 +22,9 @@
   --surface: #ffffff;         /* cards, sheets, bars      · ink 15.1:1         */
   --surface-raised: #ffffff;  /* popovers, toasts         · ink 15.1:1         */
   --surface-glass: #ffffffed; /* floating chrome: header, bottom nav           */
+  /* true glass for the fixed chrome itself (82%): page content reads through
+     it; worst case (ink on glass over a black photo) still measures ≈7.9:1 */
+  --chrome-glass: rgba(255, 255, 255, .82);
   --scrim: #0f172a70;         /* overlay behind sheets & modals               */
 
   /* ---- ink (text) ---------------------------------------------------------- */
@@ -128,6 +131,7 @@
     --surface: #171722;       /* cards                   · ink 14.97:1         */
     --surface-raised: #1e1e2b;
     --surface-glass: #171722ee; /* floating chrome over dark content            */
+    --chrome-glass: rgba(23, 23, 34, .82);
     --scrim: #05050fd9;       /* overlay behind sheets & modals               */
     --ink: #edeaf6;           /* primary text            · 14.97:1 on surface  */
     --ink-strong: #f8f6ff;
