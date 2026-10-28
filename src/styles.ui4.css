@@ -1792,17 +1792,30 @@ textarea:disabled {
     box-shadow: 0 8px 20px rgba(102, 84, 245, .35);
   }
 
-  /* ---- content reservation: 8px float gap + 64px nav + 12px breathing ---
-     mirrored by the reels stage and the ad wedge; keep the three in sync.
-     BOTH paddings release together when the chrome hides — a reserved strip
-     would otherwise survive as an opaque band showing the page background
-     (the 'white block' defect); released space lets content fill the full
-     viewport while nothing is covering it. */
+  /* ---- no shell bottom reservation ---------------------------------------
+     The old 84px shell padding reserved an empty page-background band behind
+     the floating pill — it read as a permanent white rectangle (user report).
+     Native floating bars overlay CONTENT instead: the pill sits over the feed
+     (true glass) and the safe-bottom breathing room lives INSIDE the scroll
+     content as a transparent ::after spacer on the scroll container, so the
+     last interactive item can still scroll clear of the glass. The reel
+     stage, chat thread and dmThread own their geometry and are unaffected. */
   .app-shell {
     padding-top: calc(50px + env(safe-area-inset-top));
-    padding-bottom: calc(84px + env(safe-area-inset-bottom));
-    transition: padding-top .26s var(--ease-out), padding-bottom .26s var(--ease-out);
+    padding-bottom: 0;
+    transition: padding-top .26s var(--ease-out);
   }
+  .main-column::after {
+    /* end-of-scroll breathing room: replaces the shell reservation */
+    content: '';
+    display: block;
+    height: calc(88px + env(safe-area-inset-bottom));
+  }
+  /* fixed-height pages that own their own geometry must not gain 88px of
+     fake scroll: the dm thread (its scroller + composer fill the column) and
+     the reels stage (a fixed-height snap scroller sized by 100dvh offsets) */
+  .app-shell.nav-hidden .main-column::after { display: none }
+  .main-column:has(> .reels-stage)::after { display: none }
   .toast { bottom: calc(84px + env(safe-area-inset-bottom)) }
 
   /* ---- hide states -------------------------------------------------------
@@ -1810,8 +1823,7 @@ textarea:disabled {
      page up in lockstep with the header slide) — sticky page headers like
      .feed-tabs then take the vacated top edge, exactly as native apps do. */
   .app-shell { transition: padding-top .26s var(--ease-out) }
-  .app-shell.chrome-away { padding-top: 0; padding-bottom: 0 }
-  .app-shell.kb-away { padding-bottom: 0 }
+  .app-shell.chrome-away { padding-top: 0 }
   .app-shell.chrome-away .mobile-header {
     transform: translateY(-118%);
     opacity: 0; visibility: hidden; pointer-events: none;
