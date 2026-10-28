@@ -8,3 +8,5 @@ dist
 supabase/0029b_paste_ready_DO_NOT_COMMIT.sql
 .tmp-push-profile/
 *.log
+temp-dump.cjs
+temp-pulse-tests.cjs
