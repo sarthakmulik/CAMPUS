@@ -1775,7 +1775,7 @@ textarea:disabled {
     border: 1px solid var(--line);
     border-radius: 21px;
     box-shadow: 0 10px 30px rgba(23, 40, 76, .16), 0 1px 0 rgba(255, 255, 255, .55) inset;
-    transform: translateY(0);
+    transform: translateZ(0);   /* own compositing layer: the blurred glass must not lose paint while the drawer/page transforms animate */
     transition: transform .26s var(--ease-out), opacity .2s ease, visibility 0s linear .26s;
   }
   @media (prefers-color-scheme: dark) {
