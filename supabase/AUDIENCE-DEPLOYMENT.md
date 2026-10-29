@@ -1,5 +1,21 @@
 # Post audience deployment note — migration 0049 (My-College-only posting)
 
+> ## ⚠️ REQUIRED IMMEDIATE FIX (run this one line right now if 0049 is applied
+> ## and publishing/read posts from the client started 403-ing)
+>
+> Migration **0046** (confession anonymity) narrowed SELECT on `posts` to
+> **column-level grants** (everything except `author_id`). A column added
+> later by 0049 inherits **no grant**, so any direct table read/write that
+> mentions `audience` fails with `42501 permission denied for table posts`
+> — feeds still work (they are RPCs), but publishing and direct reads break.
+>
+> ```sql
+> grant select (audience) on public.posts to anon, authenticated;
+> ```
+>
+> Run it once in the SQL editor. The 0049 migration file now includes this
+> grant itself, so fresh setups need nothing extra.
+
 One out-of-band step this feature needs, modeled on MYCOLLEGE-DEPLOYMENT.md
 (PUSH-DEPLOYMENT.md pattern): a supabase SQL-editor run that cannot be
 performed from the app or the repo alone.

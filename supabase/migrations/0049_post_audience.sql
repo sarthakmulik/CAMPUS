@@ -80,6 +80,11 @@ create index if not exists posts_public_audience_idx
   on public.posts (created_at desc)
   where is_published = true and audience = 'public' and community_id is null;
 
+-- 0046 narrowed SELECT on posts to column-level grants (author_id hidden for
+-- the confession anonymity). A NEW column inherits no grant, so any direct
+-- table read/write naming `audience` would 403 (42501). Grant it:
+grant select (audience) on public.posts to anon, authenticated;
+
 /* ------------------------------------------------------------------ */
 /* 2. Visibility helpers                                                */
 /* ------------------------------------------------------------------ */

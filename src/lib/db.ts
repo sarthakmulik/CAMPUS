@@ -2227,7 +2227,7 @@ export async function createPost(input: CreatePostInput): Promise<CampusPost> {
     pubError = attempt.error ? (attempt.error as { code?: string; message?: unknown }) : null
     if (!pubError) audienceEnforced = input.audience === 'college'
   }
-    if (pubError && (pubError.code === '42703' || /audience/i.test(String(pubError.message)))) {
+    if (pubError && (pubError.code === '42703' || /audience/i.test(String(pubError.message)) || (pubError.code === '42501' && /permission denied/i.test(String(pubError.message))))) {
       // column not deployed yet — publish plainly, exactly as before 0049
       audienceEnforced = false
       const retry = await supabase
@@ -2261,7 +2261,7 @@ export async function createPost(input: CreatePostInput): Promise<CampusPost> {
       .select('id, college_id, body, kind, media_urls, is_anonymous, is_published, created_at, audience')
       .eq('id', input.postId!)
       .maybeSingle()
-    if (reuse.error && /audience/i.test(String((reuse.error as { message?: unknown }).message))) {
+    if (reuse.error && (/audience/i.test(String((reuse.error as { message?: unknown }).message)) || (reuse.error as { code?: string }).code === '42501')) {
       reuse = await supabase
         .from('posts')
         .select('id, college_id, body, kind, media_urls, is_anonymous, is_published, created_at')
