@@ -7,7 +7,7 @@ import {
   Repeat2, Share2, Flag, MoreHorizontal, X, Send, ChevronDown, TrendingUp,
   Settings, LogOut, UserRound, Check, Hash, Menu, ArrowLeft, CircleHelp,
   GraduationCap, Megaphone, SlidersHorizontal, EyeOff, VolumeX, AlertCircle,
-  Pencil, Trash2, BadgeCheck, ShieldCheck, Loader2
+  Pencil, Trash2, BadgeCheck, ShieldCheck, Loader2, Globe
 } from 'lucide-react'
 import { AuthProvider, hasSeenWelcome, markWelcomeSeen, useAuth } from './lib/auth'
 import { saveComposerDraft, loadComposerDraft, clearComposerDraft, type ComposerDraftMeta } from './lib/drafts'
@@ -309,6 +309,9 @@ function CAMPUSApp() {
   )
   useEffect(() => () => { imageThumbs.forEach(thumb => URL.revokeObjectURL(thumb.url)) }, [imageThumbs])
   const [composerKind, setComposerKind] = useState<PostKind>('post')
+  /** 0049 who sees this draft's post: 'public' (everyone) or 'college'
+   *  (the author's own college only — server-enforced after the publish). */
+  const [composerAudience, setComposerAudience] = useState<'public' | 'college'>('public')
   const [draft, setDraft] = useState('')
   /* poll composer fields (migration 0028) — sane defaults: single choice,
      7-day duration, two option inputs ready to fill */
@@ -528,6 +531,7 @@ function CAMPUSApp() {
       if (!( (saved.body?.trim() ?? false) || (saved.media?.length ?? 0) > 0 || (files?.length ?? 0) > 0 )) return false
       setDraft(saved.body ?? '')
       if (saved.kind) setComposerKind(saved.kind)
+      if (saved.audience === 'college' || saved.audience === 'public') setComposerAudience(saved.audience)
       if (saved.source) setComposerSource(saved.source)
       composerPendingIdRef.current = saved.pendingId ?? null
       setDraftMediaUrls(saved.media ?? null)
@@ -629,11 +633,12 @@ function CAMPUSApp() {
         pollMultiple: composerKind === 'poll' ? pollMultiple : null,
         pollDays: composerKind === 'poll' ? pollDays : null,
         ownerId: composerOwnerIdRef.current,
+        audience: composerAudience,
       }
       window.localStorage.setItem(DRAFT_STORE_KEY, JSON.stringify(meta))
       void saveComposerDraft(meta, draftImages, draftVideo)
     } catch { /* private mode / full storage — drafts stay memory-only */ }
-  }, [draft, draftImages, draftVideo, videoTrim, reelDuration, draftMediaUrls, composerKind, composerSource, pollOptions, pollMultiple, pollDays, publishing])
+  }, [draft, draftImages, draftVideo, videoTrim, reelDuration, draftMediaUrls, composerKind, composerSource, composerAudience, pollOptions, pollMultiple, pollDays, publishing])
 
   useEffect(() => {
     if (!draftsRestoredRef.current) return
@@ -967,7 +972,7 @@ function CAMPUSApp() {
       })
     }
     if (feedTab === 'Following') result = result.filter(p => following.includes(p.handle) || p.author === 'Campus Bot')
-    if (feedTab === 'My College') result = result.filter(p => p.college === identity.college || p.college === 'Your college')
+    if (feedTab === 'My College') result = result.filter(p => (p.collegeId && p.collegeId === profile?.college_id) || p.college === identity.college || p.college === 'Your college')
     if (feedTab === 'Latest') result = result.reverse()
     if (blockedHandles.length || mutedHandles.length) {
       const hidden = new Set([...blockedHandles, ...mutedHandles])
@@ -1418,6 +1423,7 @@ function CAMPUSApp() {
         options,
         multipleChoice: pollMultiple,
         closeDays: pollDays,
+        audience: composerAudience,
       }), PUBLISH_STALL_MS)
       if (!leg.done) {
         flash('The network is very slow — the poll may still publish in the background. Your draft is safe here.')
@@ -1433,10 +1439,11 @@ function CAMPUSApp() {
         .catch(() => { /* hydrated on the next feed load — not worth alarming */ })
       setPosts(current => [pollPost, ...current])
       setDraft(''); setPollOptions(['', '']); setPollMultiple(false); setPollDays(7); setPollErrors([])
+      setComposerAudience('public')
       setComposer(false)
       setActiveNav('Home'); setFeedTab('For You')
       setConfessionsOpen(false)
-      flash(pollMultiple ? 'Poll posted — classmates can pick several options.' : 'Poll posted to the campus feed.')
+      flash(pollMultiple ? 'Poll posted — classmates can pick several options.' : composerAudience === 'college' ? 'Poll posted to your college feed — only your campus can see it.' : 'Poll posted to the campus feed.')
     } catch (error) {
       // a failed publish keeps the composer open with the whole draft intact
       flash(db.friendlyMessage(error))
@@ -1546,7 +1553,7 @@ function CAMPUSApp() {
       // while a slow attempt is still running in the background, the late
       // clean-up must not destroy their newer edit
       const submittedSnapshot = { body, images: draftImages.length, video: draftVideo !== null, kind: composerKind }
-      const publishPromise = publishPostCore(body, composerKind, mediaUrls, undefined, { postId: pendingId, isStale: () => stalled })
+      const publishPromise = publishPostCore(body, composerKind, mediaUrls, undefined, { postId: pendingId, isStale: () => stalled, audience: composerAudience })
       const leg = await raceStall(publishPromise, PUBLISH_STALL_MS)
       if (!leg.done) {
         stalled = true
@@ -1594,12 +1601,17 @@ function CAMPUSApp() {
       setDraft(''); setDraftImages([]); setDraftVideo(null); setVideoTrim(null); setDraftMediaUrls(null)
       composerPendingIdRef.current = null
       composerFlightRef.current = false
+      setComposerAudience('public')
       setComposer(false)
       flash(composerSource === 'confessions' && composerKind === 'confession'
-        ? 'Confession posted — it appears here in the Confessions feed.'
+        ? composerAudience === 'college'
+          ? 'Confession posted to your college feed — hidden outside your campus.'
+          : 'Confession posted — it appears here in the Confessions feed.'
         : composerKind === 'confession'
           ? 'Confession posted to the campus feed — your name stays hidden.'
-          : 'Posted to the campus feed.')
+          : composerAudience === 'college'
+            ? 'Posted to your college feed — only your campus can see it.'
+            : 'Posted to the campus feed.')
     } catch (error) {
       // Media processing or a database failure: the composer stays open with
       // the draft intact; uploaded media stays reusable for the next attempt.
@@ -2094,7 +2106,7 @@ function CAMPUSApp() {
     kind: PostKind,
     mediaUrls: string[] | null,
     onProgress?: (message: string) => void,
-    options: { postId?: string; isStale?: () => boolean } = {},
+    options: { postId?: string; isStale?: () => boolean; audience?: 'public' | 'college' } = {},
   ): Promise<'posted' | 'error'> => {
     const anonymous = kind === 'confession'
     // College scope = the author's own college. Staff (platform-level, no
@@ -2102,6 +2114,10 @@ function CAMPUSApp() {
     const collegeRow = isStaff
       ? null
       : (colleges.find(c => c.id === profile?.college_id) ?? colleges[0])
+    // 0049 audience: the chosen college-only scope applies only to members
+    // with a real college; without one the server stores 'public' anyway.
+    const audience: 'public' | 'college' =
+      options.audience === 'college' && profile?.college_id ? 'college' : 'public'
     if (user && configured) {
       try {
         const post = await db.createPost({
@@ -2115,9 +2131,14 @@ function CAMPUSApp() {
           authorUsername: identity.username,
           mediaUrls,
           postId: options.postId,
+          audience,
         })
         if (profile?.college_id == null && !isStaff) {
           flash('Posted — but pick your college in the onboarding step so your campus can find it.')
+        } else if (audience === 'college' && post.audience !== 'college') {
+          // 0049 not applied server-side yet: the DB kept the row public.
+          // Say it plainly instead of silently pretending the scope exists.
+          flash('Posted to the public feed — your college cannot be scoped yet (server update pending).')
         }
         // exactly-once in the feed too: a late-confirming retry replaces the
         // surfaced row instead of appending the same post twice
@@ -3021,6 +3042,24 @@ function CAMPUSApp() {
               </label>
             </div>
             {pollErrors.length > 0 && <p className="poll-error" role="alert">{pollErrors[0]}</p>}
+          </div>
+        )}
+        {/* 0049 audience — posts/reels/polls/confessions default to Everyone;
+            members with a real college may scope college-only (server-enforced) */}
+        {profile?.college_id && (
+          <div className="composer-audience" role="radiogroup" aria-label="Who can see this post">
+            <button type="button" role="radio" aria-checked={composerAudience === 'public'}
+              className={`audience-chip${composerAudience === 'public' ? ' selected' : ''}`}
+              disabled={publishing}
+              onClick={() => setComposerAudience('public')}>
+              <Globe size={13}/> Everyone
+            </button>
+            <button type="button" role="radio" aria-checked={composerAudience === 'college'}
+              className={`audience-chip${composerAudience === 'college' ? ' selected' : ''}`}
+              disabled={publishing}
+              onClick={() => setComposerAudience('college')}>
+              <Building2 size={13}/> My College only
+            </button>
           </div>
         )}
         <div className="sheet-helper">{composerKind==='confession'?'Your identity will be hidden in the feed.':composerKind==='poll'?'Single choice by default — set multiple choices and the poll length below.':'Keep it kind. Your campus is listening.'}<span>{draft.length}/500</span></div>

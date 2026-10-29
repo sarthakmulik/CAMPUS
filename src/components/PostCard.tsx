@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSavedFlag } from '../lib/bookmarks'
 import {
-  BadgeCheck, BookOpen, Bookmark, ChartNoAxesColumn, Check, EyeOff, Flag, Heart,
+  BadgeCheck, BookOpen, Bookmark, Building2, ChartNoAxesColumn, Check, EyeOff, Flag, Heart,
   MessageCircle, MoreHorizontal, Pencil, Pin, Repeat2, Share2, Sparkles, Trash2, VolumeX,
 } from 'lucide-react'
 import { relativeTime } from '../lib/db'
@@ -247,7 +247,9 @@ export function PostCard({
       <button className="icon-button more-button" onClick={() => setMenuOpen(v=>!v)} aria-label="More options"><MoreHorizontal size={20}/></button>{menuOpen&&<div className="post-menu">{isOwn&&<button onClick={()=>{onEdit();setMenuOpen(false)}}><Pencil size={15}/> Edit post</button>}{isOwn&&<button className="danger" onClick={()=>{onDelete();setMenuOpen(false)}}><Trash2 size={15}/> Delete post</button>}{onPin&&<button onClick={()=>{onPin();setMenuOpen(false)}}>{post.isPinned?<><Pin size={15}/> Unpin from top</>:<><Pin size={15}/> Pin to top</>}</button>}<button onClick={()=>{onReport();setMenuOpen(false)}}><Flag size={15}/> Report post</button><button onClick={()=>{onShare();setMenuOpen(false)}}><Share2 size={15}/> Copy post text</button>{canActOnAuthor&&!isOwn&&<button onClick={()=>{onMute();setMenuOpen(false)}}><VolumeX size={15}/> Mute {post.handle}</button>}{canActOnAuthor&&!isOwn&&<button onClick={()=>{onBlock();setMenuOpen(false)}}><EyeOff size={15}/> Block {post.handle}</button>}{canActOnAuthor&&!isOwn&&<button onClick={()=>{onMessage();setMenuOpen(false)}}><MessageCircle size={15}/> Message {post.handle}</button>}</div>}
     </div>
     <div className="post-content">
-      {(post.trending || post.anonymous || post.tag) && <div className="post-badges">{post.trending&&<span className="badge trending-badge"><Sparkles size={12}/> Trending</span>}{post.anonymous&&<span className="badge confession-badge">😳 Confession</span>}{post.tag&&<span className="badge college-badge">{post.tag}</span>}</div>}
+      {/* meaningful scope chip only: a college-scoped post announces exactly
+          who can see it (0049). Ordinary public posts get no label. */}
+      {(post.trending || post.anonymous || post.tag || post.audience === 'college') && <div className="post-badges">{post.trending&&<span className="badge trending-badge"><Sparkles size={12}/> Trending</span>}{post.anonymous&&<span className="badge confession-badge">😳 Confession</span>}{post.tag&&<span className="badge college-badge">{post.tag}</span>}{post.audience === 'college'&&<span className="badge audience-badge"><Building2 size={12}/> My College</span>}</div>}
       {(slides.length === 0 && post.kind !== 'poll') && <p className="post-body"><RichText text={post.body} onMention={onOpenMention} onHashtag={onOpenTag}/></p>}
       {post.kind === 'poll' && <p className="post-body poll-question">{slides.length === 0 ? <RichText text={post.body} onMention={onOpenMention} onHashtag={onOpenTag}/> : post.body}</p>}
       {mediaBlock}

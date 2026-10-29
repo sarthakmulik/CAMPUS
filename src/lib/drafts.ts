@@ -37,6 +37,8 @@ export type ComposerDraftMeta = {
    * drafts adopt whoever is signed in.
    */
   ownerId?: string | null
+  /** 0049 intended visibility — restored with the rest of the draft */
+  audience?: 'public' | 'college' | null
 }
 
 export type ComposerDraftFile = ComposerDraftMeta & {

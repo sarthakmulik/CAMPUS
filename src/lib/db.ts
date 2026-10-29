@@ -730,6 +730,7 @@ type FeedRow = {
   like_count: number | string | null
   comment_count: number | string | null
   liked_by_me: boolean
+  audience?: string | null
 }
 
 /** Feed-relative time, also reused for the "edited · 2 hours ago" marker. */
@@ -794,6 +795,7 @@ export function mapFeedRow(row: FeedRow): CampusPost {
     // No tag for named posts — the college already shows in the author line;
     // a college badge only appears on anonymous posts (where the line hides it).
     tag: anonymous ? row.college_short_name ?? '' : '',
+    audience: row.audience === 'college' ? 'college' : 'public',
   }
 }
 
@@ -2146,6 +2148,10 @@ export type CreatePostInput = {
    * is returned instead of a second post.
    */
   postId?: string
+  /** 0049 who can see the post: 'college' = only the author's own college
+   *  (plus staff); 'public' = everyone. Server-side RLS/RPCs enforce it —
+   *  the client merely declares intent. */
+  audience?: 'public' | 'college'
 }
 
 /** A valid UUIDv4 usable as posts.id, even when crypto.randomUUID is absent. */
@@ -2185,23 +2191,53 @@ export async function removeUploadedFiles(publicUrls: string[]): Promise<void> {
  */
 export async function createPost(input: CreatePostInput): Promise<CampusPost> {
   if (!supabase) throw new Error('CAMPUS is not connected.')
-  const { data, error } = await supabase
-    .from('posts')
-    .insert({
-      // exactly-once publishing: the id comes from the caller (persisted with
-      // the draft), so a retried attempt cannot create a second post
-      id: input.postId ?? newPostId(),
-      author_id: input.userId,
-      college_id: input.collegeId,
-      body: input.body,
-      kind: input.kind,
-      is_anonymous: input.isAnonymous,
-      is_published: true,
-      media_urls: input.mediaUrls ?? [],
-      ...(input.communityId ? { community_id: input.communityId } : {}),
-    })
-    .select('id, college_id, body, kind, media_urls, is_anonymous, is_published, created_at')
-    .single()
+  const baseColumns = {
+    // exactly-once publishing: the id comes from the caller (persisted with
+    // the draft), so a retried attempt cannot create a second post
+    id: input.postId ?? newPostId(),
+    author_id: input.userId,
+    college_id: input.collegeId,
+    body: input.body,
+    kind: input.kind,
+    is_anonymous: input.isAnonymous,
+    is_published: true,
+    media_urls: input.mediaUrls ?? [],
+    ...(input.communityId ? { community_id: input.communityId } : {}),
+  }
+  // 0049: server-side visibility scope. Pre-0049 databases don't have the
+  // column yet (42703) — retry once without it (audience stays 'public').
+  let audienceEnforced = false
+  let data: unknown = null
+  let pubError: { code?: string; message?: unknown } | null = null
+  const postError = (error: { code?: string; message?: unknown }): Error =>
+    (error as { code?: string }).code === 'PGRST116'
+      ? new Error('CAMPUS could not publish that post. Check your connection and try again — your draft is kept.')
+      : new Error(friendlyMessage(error))
+  {
+    const attempt = await supabase
+      .from('posts')
+      .insert({
+        ...baseColumns,
+        // 0049: server-side visibility scope; anything unexpected → 'public'
+        ...(input.audience === 'college' ? { audience: 'college' } : {}),
+      })
+      .select('id, college_id, body, kind, media_urls, is_anonymous, is_published, created_at, audience')
+      .single()
+    data = attempt.data
+    pubError = attempt.error ? (attempt.error as { code?: string; message?: unknown }) : null
+    if (!pubError) audienceEnforced = input.audience === 'college'
+  }
+    if (pubError && (pubError.code === '42703' || /audience/i.test(String(pubError.message)))) {
+      // column not deployed yet — publish plainly, exactly as before 0049
+      audienceEnforced = false
+      const retry = await supabase
+        .from('posts')
+        .insert(baseColumns)
+        .select('id, college_id, body, kind, media_urls, is_anonymous, is_published, created_at')
+        .single()
+      data = retry.data
+      pubError = retry.error ? (retry.error as { code?: string; message?: unknown }) : null
+    }
   let row = data as unknown as {
     id: string
     body: string
@@ -2211,24 +2247,29 @@ export async function createPost(input: CreatePostInput): Promise<CampusPost> {
     created_at: string
     edited_at: string | null
   } | null
-  if (error) {
+  if (pubError) {
     // Duplicate key = a previous attempt of THIS draft already published the
     // post (timeout recovery, double tap, reload mid-outage). Reuse that row.
-    const dup = (error as { code?: string }).code === '23505' && input.postId
+    const dup = pubError.code === '23505' && input.postId
     if (!dup) {
       // PGRST116 here = the insert was filtered out (RLS check failed) —
       // nothing was published; say that instead of a generic postgrest line
-      throw ((error as { code?: string }).code === 'PGRST116'
-        ? new Error('CAMPUS could not publish that post. Check your connection and try again — your draft is kept.')
-        : new Error(friendlyMessage(error)))
+      throw postError(pubError)
     }
-    const reuse = await supabase
+    let reuse = await supabase
       .from('posts')
-      .select('id, college_id, body, kind, media_urls, is_anonymous, is_published, created_at')
+      .select('id, college_id, body, kind, media_urls, is_anonymous, is_published, created_at, audience')
       .eq('id', input.postId!)
       .maybeSingle()
+    if (reuse.error && /audience/i.test(String((reuse.error as { message?: unknown }).message))) {
+      reuse = await supabase
+        .from('posts')
+        .select('id, college_id, body, kind, media_urls, is_anonymous, is_published, created_at')
+        .eq('id', input.postId!)
+        .maybeSingle()
+    }
     if (!reuse.error && reuse.data) row = reuse.data as unknown as typeof row
-    else throw new Error(friendlyMessage(error))
+    else throw new Error(friendlyMessage(pubError))
   }
   // An RLS-violating insert succeeds with zero returned rows — that is a
   // silent failure, never pretend it posted (draft must stay editable).
@@ -2247,6 +2288,7 @@ export async function createPost(input: CreatePostInput): Promise<CampusPost> {
     likes: 0,
     comments: 0,
     reposts: 0,
+    audience: audienceEnforced ? 'college' : 'public',
     kind,
     media: row.media_urls ?? [],
     authorId: input.isAnonymous ? null : input.userId,
@@ -2346,12 +2388,27 @@ export type CreatePollInput = CreatePostInput & {
  */
 export async function createPoll(input: CreatePollInput): Promise<CampusPost> {
   if (!supabase) throw new Error('CAMPUS is not connected.')
-  const { data, error } = await supabase.rpc('create_poll', {
+  // 0049: create_poll gained the trailing p_audience arg. Pre-0049 servers
+  // reject the unknown named arg (42883) — retry once the old signature.
+  const attempt = await supabase.rpc('create_poll', {
     p_body: input.body,
     p_options: input.options,
     p_multiple_choice: input.multipleChoice,
     p_close_days: input.closeDays,
+    // the RPC falls back to 'public' when the caller has no college
+    ...(input.audience === 'college' ? { p_audience: 'college' } : {}),
   })
+  let { data, error } = attempt
+  if (error && (/p_audience/i.test(String((error as { message?: unknown }).message)) || (error as { code?: string }).code === '42883')) {
+    const legacy = await supabase.rpc('create_poll', {
+      p_body: input.body,
+      p_options: input.options,
+      p_multiple_choice: input.multipleChoice,
+      p_close_days: input.closeDays,
+    })
+    data = legacy.data
+    error = legacy.error
+  }
   if (error) throw new Error(pollBackedMessage(error))
   const row = ((data ?? []) as { id: string; created_at: string }[])[0]
   if (!row?.id) throw new Error('The poll server did not return a post id — try again.')
@@ -2379,6 +2436,7 @@ export async function createPoll(input: CreatePollInput): Promise<CampusPost> {
     reposted: false,
     tag: '',
     poll: undefined,
+    audience: input.audience === 'college' ? 'college' : 'public',
   }
 }
 

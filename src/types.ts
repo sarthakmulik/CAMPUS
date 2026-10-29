@@ -53,4 +53,8 @@ export type CampusPost = {
   tag?: string
   /** hydrated in batches from poll_states() after a feed page lands */
   poll?: PollState | null
+  /** 0049 who can see it: 'college' = visible only inside the posting
+   *  author's own college (server-enforced); 'public' = everyone incl.
+   *  visitors. Default 'public' when absent (pre-0049 rows). */
+  audience?: 'public' | 'college'
 }

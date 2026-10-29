@@ -1883,6 +1883,34 @@ textarea:disabled {
     margin: 0;
   }
 
+  /* 0049 audience: scope picker in the composer + the card chip */
+  .composer-audience {
+    display: flex;
+    gap: 8px;
+    padding: 4px 0 2px;
+  }
+  .composer-audience .audience-chip {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 1px solid var(--line);
+    background: var(--soft);
+    color: var(--muted);
+    border-radius: 12px;
+    padding: 9px 12px;
+    font-size: 12px;
+    font-weight: 650;
+  }
+  .composer-audience .audience-chip.selected {
+    border-color: var(--brand-line, #6654f5);
+    background: #f1edff;
+    color: var(--brand, #6654f5);
+  }
+  .badge.audience-badge { background: #eff3ff; color: #4a5fc4; }
+  .badge.audience-badge svg { width: 11px; height: 11px; }
+
   @media (prefers-reduced-motion: reduce) {
     .mobile-header, .mobile-bottom-nav, .app-shell { transition: none }
   }
