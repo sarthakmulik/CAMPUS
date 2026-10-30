@@ -61,3 +61,19 @@ outsiders even via the raw URL.
 - Media pasted into Chats uses the separate `chat-media` pipeline — untouched.
 - Object URLs from uploads are still stored canonically (public-shaped); only
   presentation rewrites them — flipping back only needs `public = true`.
+
+## Verified live (applied + re-run with the definer wrapper)
+
+- Raw `/object/public/media/…` → 400 "Bucket not found" for every path.
+- Anon mint of a **public** post's object → signed URL serves the bytes.
+- Anon + outsider (-college) mint of a **college-only** post's object → denied,
+  surfaced as 404 "Object not found" (no existence leak; the storage API
+  reports mint denials as missing objects, not 403s).
+- Author re-scope `college → public` → anon mint starts working immediately
+  (live-posts join, no staleness); unpublish → instant denial; re-publish →
+  back. Owner mint of an own **unpublished** upload still works (composer).
+- In-app (built bundle): visitor feed images + reel render signed; Discover
+  reel slide renders signed; Profile grid tiles render signed as member; a
+  college-only post's media renders for its COEP author; Bookmarks thumb and
+  the chat share-sheet preview render signed; outsiders see no COEP card
+  anywhere in their feeds.
