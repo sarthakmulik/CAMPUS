@@ -20,6 +20,8 @@
 -- table policies, so it now applies can_view_post itself.
 --
 -- Safe to re-run. Run in the Supabase SQL editor.
+-- (Original issue and re-run error both fixed: every policy name is now
+-- dropped before its create, so the file is a clean no-op when re-done.)
 -- ============================================================================
 
 -- 1. kill the 0005-era permissive policies -----------------------------------
