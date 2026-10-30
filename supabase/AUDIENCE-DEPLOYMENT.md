@@ -16,6 +16,19 @@
 > Run it once in the SQL editor. The 0049 migration file now includes this
 > grant itself, so fresh setups need nothing extra.
 
+> ## Also required: migration **0050_projection_policy_repair.sql**
+>
+> Live pen-testing on 0029 caught that 0049's `drop policy if exists` names
+> for `post_comments` never matched the LIVE policy names from 0005
+> ("members comment as themselves", "comments readable by everyone"). Since
+> RLS policies are permissive-OR, the old allow-all ones kept winning —
+> outsiders could **comment on and read the threads of** college-scoped
+> posts. 0050 drops those names, reasserts the gated policies, and adds the
+> audience filter to the security-definer read RPC `list_post_comments`.
+> Re-verified after applying: outsider comment insert → 403, outsider
+> comment reads (direct + RPC, anon + auth) → 0 rows, public-thread reads
+> unaffected.
+
 One out-of-band step this feature needs, modeled on MYCOLLEGE-DEPLOYMENT.md
 (PUSH-DEPLOYMENT.md pattern): a supabase SQL-editor run that cannot be
 performed from the app or the repo alone.
