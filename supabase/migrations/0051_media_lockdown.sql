@@ -37,8 +37,25 @@ create table if not exists public.post_media_gate (
   primary key (name, post_id)
 );
 alter table public.post_media_gate enable row level security;
--- direct access stays closed; rules run through the storage policies below
+-- direct access stays closed; the only reader is the definer wrapper below
 revoke all on public.post_media_gate from anon, authenticated;
+
+-- the wrapper the storage policies call: runs as owner, so neither the
+-- table grant nor posts RLS play a part — the 0049 rule is the only gate
+create or replace function public.can_view_media_object(p_name text)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.post_media_gate g
+    join public.posts p on p.id = g.post_id
+    where g.name = p_name
+      and p.is_published = true
+      and public.post_visible_to(p.audience, p.college_id, p.author_id)
+  )
+$$;
+revoke all on function public.can_view_media_object(text) from public;
+grant execute on function public.can_view_media_object(text) to anon, authenticated;
 
 -- 2. trigger: keep the gate in sync with posts.media_urls --------------------
 create or replace function public.post_media_gate_sync()
@@ -95,6 +112,11 @@ on conflict (name, post_id) do nothing;
 do $$
 declare r record;
 begin
+  -- idempotency: drop this migration's own policy by exact name (an earlier
+  -- run may have left it behind in older shapes), then re-create fresh below
+  drop policy if exists "media visible via campaign post" on storage.objects;
+  drop policy if exists "media owner reads own on media" on storage.objects;
+
   for r in
     select policyname from pg_policies
     where schemaname = 'storage'
@@ -105,40 +127,53 @@ begin
     execute format('drop policy if exists %I on storage.objects', r.policyname);
   end loop;
 
-  -- owner of the object (the uploader) — column shape differs between storage
-  -- schema versions (owner_id vs owner), so try both
+  -- owner of the object — the storage schema shipped different owner shapes
+  -- over its releases (owner_id uuid, owner_id text, owner text). Try each in
+  -- turn; the first that parses wins.
   begin
-    execute $p$
-      create policy "media owner reads own on media" on storage.objects
-        for select to authenticated
-        using (bucket_id = 'media' and owner_id = auth.uid())
-    $p$;
-  exception when undefined_column then
-    execute $p$
-      create policy "media owner reads own on media" on storage.objects
-        for select to authenticated
-        using (bucket_id = 'media' and owner = auth.uid())
-    $p$;
-  when duplicate_object then null; -- policy already exists from an earlier run
+    begin
+      execute $p$
+        create policy "media owner reads own on media" on storage.objects
+          for select to authenticated
+          using (bucket_id = 'media' and owner_id = auth.uid())
+      $p$;
+    exception
+      when duplicate_object then null;
+      when undefined_function then  -- 42883: wrong operand type → text variant
+        execute $p$
+          create policy "media owner reads own on media" on storage.objects
+            for select to authenticated
+            using (bucket_id = 'media' and owner_id = auth.uid()::text)
+        $p$;
+    end;
+  exception
+    when undefined_column then   -- no owner_id column at all → legacy `owner`
+      begin
+        execute $o$
+          create policy "media owner reads own on media" on storage.objects
+            for select to authenticated
+            using (bucket_id = 'media' and owner = auth.uid()::text)
+        $o$;
+      exception
+        when undefined_function then  -- owner is uuid-typed instead of text
+          execute $o$
+            create policy "media owner reads own on media" on storage.objects
+              for select to authenticated
+              using (bucket_id = 'media' and owner = auth.uid())
+          $o$;
+        when duplicate_object then null;
+      end;
+    when duplicate_object then null;
   end;
 
-  -- anyone: objects referenced by a post the caller may see (live state)
+  -- anyone: objects referenced by a post the caller may see (live state).
+  -- The check runs through the security-definer wrapper: a policy subquery
+  -- otherwise evaluates under the caller's role, which has no grant on the
+  -- gate table (revoked above on purpose) — the wrapper is the only reader.
   execute $q$
     create policy "media visible via campaign post" on storage.objects
       for select to anon, authenticated
-      using (
-        bucket_id = 'media'
-        and exists (
-          select 1 from public.post_media_gate g
-          where g.name = name
-            and exists (
-              select 1 from public.posts p
-              where p.id = g.post_id
-                and p.is_published = true
-                and public.post_visible_to(p.audience, p.college_id, p.author_id)
-            )
-        )
-      )
+      using (bucket_id = 'media' and public.can_view_media_object(name))
   $q$;
 exception
   when duplicate_object then null; -- already applied on an earlier run

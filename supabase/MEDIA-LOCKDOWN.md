@@ -13,7 +13,10 @@ guessable URL of a college-scoped post's image/reel could be fetched by anyone.
      the caller is allowed to see per 0049's `post_visible_to`. Resolution goes
      through `post_media_gate` (an object-name index maintained by a trigger on
      `posts`), then checks the LIVE posts row — unpublising or re-scoping a
-     post hides its media **immediately**, no staleness.
+     post hides its media **immediately**, no staleness. The check runs inside
+     `can_view_media_object()`, a security-definer function, because a policy
+     subquery otherwise evaluates under the caller's role which has no grant
+     on the gate table (kept closed on purpose).
 3. **The client renders media through short-lived signed URLs** it mints per
    source (lib/signedMedia.ts, 6-hour TTL, cached module-side). Minting itself
    requires the caller to pass the same policy, so a signed URL can never
