@@ -37,6 +37,7 @@ create policy "comments readable within post audience" on public.post_comments
 --    parent post is visible to you (authors always see their own posts)
 drop policy if exists "authors edit own comments" on public.post_comments;
 drop policy if exists "users create comments" on public.post_comments;
+drop policy if exists "authors manage own comments" on public.post_comments;
 create policy "authors manage own comments" on public.post_comments
   for all to authenticated
   using (
