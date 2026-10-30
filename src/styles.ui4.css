@@ -1910,6 +1910,21 @@ textarea:disabled {
   }
   .badge.audience-badge { background: #eff3ff; color: #4a5fc4; }
   .badge.audience-badge svg { width: 11px; height: 11px; }
+  /* 0051 signed-media skeletons: hold layout while a signed URL is minted */
+  .post-media.media-loading {
+    background: var(--soft, #f6f5fa);
+    min-height: 160px;
+  }
+  .bk-fallback.media-loading {
+    background: var(--soft, #f6f5fa);
+  }
+  .profile-grid-item.is-loading::before {
+    content: '';
+    display: block;
+    width: 100%;
+    aspect-ratio: 1;
+    background: var(--soft, #f6f5fa);
+  }
 
   @media (prefers-reduced-motion: reduce) {
     .mobile-header, .mobile-bottom-nav, .app-shell { transition: none }

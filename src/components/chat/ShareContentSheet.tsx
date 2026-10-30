@@ -4,6 +4,7 @@ import type { ChatSummary } from '../../lib/db'
 import * as db from '../../lib/db'
 import { useBodyScrollLock } from '../../lib/scrollLock'
 import { useEscapeKey } from '../../lib/menuDismiss'
+import { useSignedMedia } from '../../lib/signedMedia'
 
 export type ShareTarget = {
   kind: db.ChatSharedKind
@@ -25,6 +26,22 @@ type Recipient = {
 }
 
 const isVideoUrl = (url: string) => /\.(webm|mp4|mov|m4v)(\?|$)/i.test(url)
+
+/** 0051: media-bucket sources render through signed URLs (a component — the
+ *  signed resolution is a hook). The ORIGINAL URL only breaks if it was one. */
+function ShareMediaPreview({ src, video, muted, playsInline, preload, ariaHidden }: {
+  src: string
+  video?: boolean
+  muted?: boolean
+  playsInline?: boolean
+  preload?: string
+  ariaHidden?: boolean
+}) {
+  const signed = useSignedMedia([src])
+  const real = signed.urls[0] ?? src
+  if (video) return <video src={real} muted={muted} playsInline={playsInline} preload={preload} aria-hidden={ariaHidden ?? false}/>
+  return <img src={real} alt="" loading="lazy" aria-hidden={ariaHidden}/>
+}
 
 /**
  * The share sheet — Instagram-style: the content is already KNOWN (the user
@@ -195,9 +212,14 @@ export default function ShareContentSheet({
 
         <div className="share-target-row">
           {target.image
-            ? isVideoUrl(target.image)
-              ? <video src={target.image} muted playsInline preload="metadata" aria-hidden="true"/>
-              : <img src={target.image} alt="" loading="lazy"/>
+            ? <ShareMediaPreview
+                src={target.image}
+                video={isVideoUrl(target.image)}
+                muted
+                playsInline
+                preload={isVideoUrl(target.image) ? 'metadata' : undefined}
+                ariaHidden
+              />
             : <span className="share-target-fallback" aria-hidden="true">{target.kind[0]?.toUpperCase()}</span>}
           <span className="share-target-copy">
             <b>{target.title}</b>

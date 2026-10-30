@@ -7,6 +7,7 @@ import * as bk from '../lib/bookmarks'
 import { SAVED_KIND_LABEL } from '../lib/bookmarks'
 import type { SavedFilter, SavedItem, SavedKind } from '../lib/bookmarks'
 import { relativeTime } from '../lib/db'
+import { useSignedMedia } from '../lib/signedMedia'
 
 type Identity = { id: string; name: string; username: string; initials: string }
 
@@ -403,11 +404,11 @@ function metaOf(item: SavedItem, payload: Record<string, unknown>): string[] {
 }
 
 function thumbOf(item: SavedItem, payload: Record<string, unknown>, icon: JSX.Element) {
-  // 1) the real image when the content has one
-  const media = payload.media ?? payload.image ?? payload.cover
-  if (typeof media === 'string' && media) {
-    return <img src={media} alt="" loading="lazy"/>
-  }
+  // 1) the real image when the content has one — signed via 0051 when it is a
+  //    media-bucket source (the tile is one hook span per card, so this is a
+  //    component, not a bare helper — that is why the signing lives below and
+  //    is rendered from the card body)
+  if (isMediaSource(payload)) return <SavedMediaThumb sources={mediaSourcesOf(payload)} fallback={icon}/>
   // 2) resource file: type-tinted icon tile; link-only: link tile
   if (item.kind === 'resource') {
     if (payload.has_file) return <span className="bk-fallback resource">{icon}</span>
@@ -415,4 +416,21 @@ function thumbOf(item: SavedItem, payload: Record<string, unknown>, icon: JSX.El
   }
   // 3) branded, per-kind gradient tile otherwise
   return <span className={`bk-fallback ${item.kind}`}>{icon}</span>
+}
+
+function mediaSourcesOf(payload: Record<string, unknown>): string {
+  const media = payload.media ?? payload.image ?? payload.cover
+  return typeof media === 'string' ? media : ''
+}
+
+function isMediaSource(payload: Record<string, unknown>): boolean {
+  const src = mediaSourcesOf(payload)
+  return Boolean(src) && src.includes('/storage/v1/object/public/media/')
+}
+
+/** Signed-media image tile for a saved card (a component — hooks live here). */
+function SavedMediaThumb({ sources, fallback }: { sources: string; fallback: JSX.Element }) {
+  const signed = useSignedMedia(sources ? [sources] : null)
+  if (!signed.ready) return <span className="bk-fallback media-loading">{fallback}</span>
+  return <img src={signed.urls[0] ?? sources} alt="" loading="lazy"/>
 }

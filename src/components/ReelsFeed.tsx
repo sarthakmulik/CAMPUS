@@ -10,6 +10,7 @@ import {
 import type { CampusPost } from '../types'
 import * as bk from '../lib/bookmarks'
 import { useSavedFlag } from '../lib/bookmarks'
+import { useSignedMedia } from '../lib/signedMedia'
 import CommentsSheet from './CommentsSheet'
 import type { ShareTarget } from './chat/ShareContentSheet'
 
@@ -282,7 +283,9 @@ function ReelSlide({
   // one truth for the saved state: the shared persisted saved store
   const saved = useSavedFlag('reel', post.id)
 
-  const src = post.media && post.media.length > 0 ? post.media[0] : ''
+  // 0051: private media bucket — resolve the reel source through a signed URL
+  const mediaSigned = useSignedMedia(post.media ?? null)
+  const src = mediaSigned.ready && mediaSigned.urls.length > 0 ? mediaSigned.urls[0] : ''
   const initials = post.anonymous ? '' : initialsFor(post.author, post.handle.replace('@', ''))
 
   useEffect(() => {

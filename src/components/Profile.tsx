@@ -6,6 +6,7 @@ import {
 import * as db from '../lib/db'
 import type { CampusPost, Caps, College, PersonResult, Profile as DbProfile, ProfileStats } from '../lib/db'
 import { friendlyMessage, initialsFor } from '../lib/db'
+import { useSignedMedia } from '../lib/signedMedia'
 import ProfileSettings from './ProfileSettings'
 import RichText from './RichText'
 
@@ -359,48 +360,19 @@ export default function Profile({ profileId, myUserId, colleges, isMember, caps,
               )}
             </div>
           ) : (
-            <div className="profile-grid">
-              {posts.map(post => {
-                const media = post.media?.[0] ?? null
-                const isVideo = media ? /\.(mp4|webm|mov)(\?|$)/i.test(media) : false
-                const excerpt = (post.body ?? '').trim()
-                return (
-                  <button
-                    key={post.id}
-                    className={`profile-grid-item${media ? '' : ' is-text'}`}
-                    onClick={() => onOpenPost?.(post)}
-                    aria-label={excerpt ? excerpt.slice(0, 70) : 'Open this post'}
-                  >
-                    {media
-                      ? <>
-                          {isVideo
-                            ? <video src={media} preload="metadata" muted playsInline/>
-                            : <img src={media} alt="" loading="lazy" decoding="async" onError={e => { e.currentTarget.style.display = 'none' }}/>}
-                          {isVideo && <span className="grid-play" aria-hidden="true"><Play size={15} fill="currentColor"/></span>}
-                          <span className="tile-foot">
-                            <span>{post.time}</span>
-                            {(post.likes > 0 || post.comments > 0) && (
-                              <span className="grid-meta">{post.likes > 0 && `♥ ${post.likes}`}{post.likes > 0 && post.comments > 0 ? ' · ' : ''}{post.comments > 0 && `${post.comments} 💬`}</span>
-                            )}
-                          </span>
-                        </>
-                      : <>
-                          {kindLabel(post) !== 'Post' && <span className="grid-kind">{kindLabel(post)}</span>}
-                          <span className="grid-text">{excerpt || 'Open this post'}</span>
-                          <span className="tile-foot">
-                            <span>{post.time}</span>
-                            {(post.likes > 0 || post.comments > 0) && (
-                              <span className="grid-meta">{post.likes > 0 && `♥ ${post.likes}`}{post.likes > 0 && post.comments > 0 ? ' · ' : ''}{post.comments > 0 && `${post.comments} 💬`}</span>
-                            )}
-                          </span>
-                        </>}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-        </>
-      )}
+             <div className="profile-grid">
+               {posts.map(post => (
+                 <ProfileGridTile
+                   key={post.id}
+                   post={post}
+                   onOpen={() => onOpenPost?.(post)}
+                   kindLabel={kindLabel(post)}
+                 />
+               ))}
+             </div>
+           )}
+         </>
+       )}
     </section>
   )
 }
@@ -417,5 +389,50 @@ function ProfileSkeleton() {
         {Array.from({ length: 6 }, (_, i) => <div key={i} className="profile-grid-item skeleton-tile"><span className="skeleton-fill"/></div>)}
       </div>
     </>
+  )
+}
+
+/** One grid tile. A real component (not a map-body callback) because 0051's
+ *  signed-media resolution is a hook — hooks live in components, one per tile. */
+function ProfileGridTile({ post, onOpen, kindLabel }: {
+  post: CampusPost
+  onOpen: () => void
+  kindLabel: string
+}) {
+  // 0051: private media bucket — resolve through a signed URL
+  const signed = useSignedMedia(post.media ?? null)
+  const media = signed.ready ? (signed.urls[0] ?? null) : null
+  const isVideo = media ? /\.(mp4|webm|mov)(\?|$)/i.test(media) : false
+  const excerpt = (post.body ?? '').trim()
+  return (
+    <button
+      className={`profile-grid-item${media ? '' : ' is-text'}${!signed.ready ? ' is-loading' : ''}`}
+      onClick={onOpen}
+      aria-label={excerpt ? excerpt.slice(0, 70) : 'Open this post'}
+    >
+      {media
+        ? <>
+            {isVideo
+              ? <video src={media} preload="metadata" muted playsInline/>
+              : <img src={media} alt="" loading="lazy" decoding="async" onError={e => { e.currentTarget.style.display = 'none' }}/>}
+            {isVideo && <span className="grid-play" aria-hidden="true"><Play size={15} fill="currentColor"/></span>}
+            <span className="tile-foot">
+              <span>{post.time}</span>
+              {(post.likes > 0 || post.comments > 0) && (
+                <span className="grid-meta">{post.likes > 0 && `♥ ${post.likes}`}{post.likes > 0 && post.comments > 0 ? ' · ' : ''}{post.comments > 0 && `${post.comments} 💬`}</span>
+              )}
+            </span>
+          </>
+        : <>
+            {kindLabel !== 'Post' && <span className="grid-kind">{kindLabel}</span>}
+            <span className="grid-text">{excerpt || 'Open this post'}</span>
+            <span className="tile-foot">
+              <span>{post.time}</span>
+              {(post.likes > 0 || post.comments > 0) && (
+                <span className="grid-meta">{post.likes > 0 && `♥ ${post.likes}`}{post.likes > 0 && post.comments > 0 ? ' · ' : ''}{post.comments > 0 && `${post.comments} 💬`}</span>
+              )}
+            </span>
+          </>}
+    </button>
   )
 }

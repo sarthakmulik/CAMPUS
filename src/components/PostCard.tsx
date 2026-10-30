@@ -5,6 +5,7 @@ import {
   MessageCircle, MoreHorizontal, Pencil, Pin, Repeat2, Share2, Sparkles, Trash2, VolumeX,
 } from 'lucide-react'
 import { relativeTime } from '../lib/db'
+import { useSignedMedia } from '../lib/signedMedia'
 import type { CampusPost, PollState } from '../types'
 import RichText from './RichText'
 import ReelPlayer from './ReelPlayer'
@@ -190,7 +191,10 @@ export function PostCard({
 }: PostCardProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [slide, setSlide] = useState(0)
-  const slides = post.media ?? []
+  // 0051: media sources mint signed URLs per caller; hold a skeleton until
+  // resolution settles so nothing flashes a broken image on the private bucket
+  const media = useSignedMedia(post.media ?? null)
+  const slides = media.urls
   const canActOnAuthor = Boolean(post.handle) && !post.anonymous
   // the saved flag comes from the shared saved store (persisted through
   // post_bookmarks), so every feed that renders this card shows one truth
@@ -207,7 +211,9 @@ export function PostCard({
     const track = trackRef.current
     if (track) track.scrollTo({ left: index * track.clientWidth, behavior: 'smooth' })
   }
-  const mediaBlock = slides.length === 1 ? (
+  const mediaBlock = !media.ready ? (
+    <div className="post-media media-loading" aria-label="Loading media"/>
+  ) : slides.length === 1 ? (
     post.kind === 'reel'
       ? <ReelPlayer src={slides[0]} />
       : <img className="post-media" src={slides[0]} alt="" loading="lazy"/>
