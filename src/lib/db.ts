@@ -2115,8 +2115,10 @@ export async function fetchFollowSuggestions(
 
 /**
  * Load one page of Reel posts for the Discover page via list_public_reels
- * (migration 0004). Paginated: pass offset = page * limit as the user
- * scrolls; an empty/short page means there are no more reels.
+ * (0052 returns the audience column, so the reel slide can announce a
+ * college-only scope exactly like feed posts). Paginated: pass
+ * offset = page * limit as the user scrolls; an empty/short page means there
+ * are no more reels.
  */
 export async function fetchReels(limit = 8, offset = 0): Promise<CampusPost[]> {
   if (!supabase) throw new Error('CAMPUS is not connected.')

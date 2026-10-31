@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Bookmark, Flag, Heart, MessageCircle, MoreHorizontal,
+  Bookmark, Building2, Flag, Heart, MessageCircle, MoreHorizontal,
   Play, Share2, Volume2, VolumeX,
 } from 'lucide-react'
 import {
@@ -459,6 +459,9 @@ function ReelSlide({
                 {post.anonymous ? 'Anonymous' : post.author}
               </button>
               {post.college && <span className="reel-college-chip">{post.college}</span>}
+              {/* 0049/0052: a college-only reel announces its scope, same badge
+                  as posts (dark-overlay variant is styled in styles.onboarding) */}
+              {post.audience === 'college' && <span className="badge audience-badge reel-audience-chip"><Building2 size={11}/> My College</span>}
               <span className="reel-time">{post.time}</span>
               {post.editedAt && <span className="reel-time">· edited</span>}
             </div>
