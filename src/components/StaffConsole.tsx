@@ -5,12 +5,14 @@ import {
   ShieldCheck, LayoutDashboard, Users, Building2, Megaphone, ScrollText,
   Ban, RotateCcw, Crown, Search, UserCog, AlertCircle, Clock,
   Flag, AlertTriangle, EyeOff, Eye, Check, X, Sparkles,
+  FileSearch, Image as ImageIcon,
 } from 'lucide-react'
 import { AdsAdmin } from './AdsAdmin'
+import { useSignedMedia } from '../lib/signedMedia'
 import {
   StaffAccountRow, StaffAuditRow, Profile, ModerationReportRow,
   loadStaffRoster, loadStaffAudit, loadColleges, findStaffTargets, staffRpc,
-  loadStaffReports, loadStaffReportCounts,
+  loadStaffReports, loadStaffReportCounts, fetchStaffPostContent, StaffPostContent,
 } from '../lib/db'
 
 /**
@@ -334,6 +336,62 @@ const SUBJECT_LABEL: Record<string, string> = {
   'post+person': 'POST + PERSON',
 }
 
+/**
+ * Full-content inspector (0053): renders exactly what a reporter saw — full
+ * body plus media through the signed layer. Each opened view debits an
+ * `moderation.view_content` audit row server-side, so this only mounts on an
+ * explicit toggle, never ambently.
+ */
+function StaffPostInspector({ postId }: { postId: string }) {
+  const [state, setState] = useState<
+    { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ready'; post: StaffPostContent }
+  >({ kind: 'loading' })
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const post = await fetchStaffPostContent(postId)
+        if (!cancelled) setState({ kind: 'ready', post })
+      } catch (err) {
+        if (!cancelled) setState({ kind: 'error', message: errText(err) })
+      }
+    })()
+    return () => { cancelled = true }
+  }, [postId])
+
+  if (state.kind === 'loading') return <p className="staff-muted">Fetching full content…</p>
+  if (state.kind === 'error') return <p className="staff-inspect-err"><AlertCircle size={14}/>{state.message}</p>
+
+  const post = state.post
+  return (
+    <div className="staff-inspect">
+      <code>{post.body}</code>
+      <StaffPostMedia urls={post.media_urls}/>
+      <small>
+        {post.is_anonymous
+          ? 'anonymous post — author identity not shown, by design'
+          : `by ${post.author_name?.trim() || '@' + (post.author_username ?? '?')}${post.author_username ? ` (@${post.author_username})` : ''}`}
+        {' · '}{post.is_published ? 'live' : 'hidden'}
+        {post.edited_at ? ' · edited' : ''}
+        {' · '}{timeAgo(post.created_at)}
+      </small>
+    </div>
+  )
+}
+
+/** Inspector media: signed-minted tiles, with the honest "denied" fallback. */
+function StaffPostMedia({ urls }: { urls: string[] }) {
+  const signed = useSignedMedia(urls.length ? urls : null)
+  if (!urls.length) return null
+  return (
+    <div className="staff-mod-media">
+      {signed.urls.map((u, i) => <img key={i} src={u} alt="" loading="lazy"/>)}
+      {signed.blocked ? <small className="staff-mod-media-note">media not viewable right now</small> : null}
+    </div>
+  )
+}
+
 function ModerationTab({ ops, busy, setBusy, flash, bump }: {
   ops: StaffOps | null
   busy: boolean
@@ -351,6 +409,7 @@ function ModerationTab({ ops, busy, setBusy, flash, bump }: {
     { kind: 'warn' | 'suspend'; row: ModerationReportRow } | null
   >(null)
   const [warnNote, setWarnNote] = useState('')
+  const [inspectId, setInspectId] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -456,7 +515,7 @@ function ModerationTab({ ops, busy, setBusy, flash, bump }: {
       <div className="staff-filterrow" role="tablist">
         {REPORT_FILTERS.map(f => (
           <button key={f.key} className={`staff-chip clickable ${filter === f.key ? 'selected' : ''}`}
-            onClick={() => setFilter(f.key)}>
+            onClick={() => { setFilter(f.key); setInspectId(null) }}>
             {f.label}{counts?.[f.key] !== undefined ? ` · ${counts[f.key]}` : ''}
           </button>
         ))}
@@ -488,10 +547,33 @@ function ModerationTab({ ops, busy, setBusy, flash, bump }: {
                       <div className="staff-mod-post">
                         <code>{row.post_excerpt}</code>
                         <small>
-                          by {row.post_author_username ? `@${row.post_author_username}` : 'unknown author'}
+                          by {row.post_author_username
+                            ? `@${row.post_author_username}`
+                            : 'author not shown'}
                           {row.post_author_username ? ' · ' : ''}
                           {row.post_is_published ? 'live' : 'hidden'} · {timeAgo(row.post_created_at ?? row.created_at)}
                         </small>
+                        {row.post_id && (
+                          <div className="staff-mod-scope">
+                            {row.post_community_name && (
+                              <span className="staff-scope-pill community">{row.post_community_name}</span>
+                            )}
+                            {!row.post_community_name && (row.post_audience === 'college'
+                              ? <span className="staff-scope-pill college">My College only</span>
+                              : <span className="staff-scope-pill public">Everyone</span>)}
+                            {row.post_has_media && (
+                              <span className="staff-scope-pill media"><ImageIcon size={11}/> media</span>
+                            )}
+                            <button
+                              type="button"
+                              className="staff-scope-toggle"
+                              onClick={() => setInspectId(inspectId === row.post_id ? null : row.post_id)}
+                            >
+                              <FileSearch size={12}/>{inspectId === row.post_id ? 'close' : 'full content'}
+                            </button>
+                          </div>
+                        )}
+                        {inspectId === row.post_id && <StaffPostInspector postId={row.post_id}/>}
                       </div>
                     )}
                     {row.reported_user_id && (

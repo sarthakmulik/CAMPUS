@@ -516,6 +516,11 @@ export type ModerationReportRow = {
   post_author_username: string | null
   post_is_published: boolean | null
   post_created_at: string | null
+  /** 'public' | 'college' — 0053: the scope the reviewed content lives in */
+  post_audience: string | null
+  post_community_id: string | null
+  post_community_name: string | null
+  post_has_media: boolean | null
   reported_user_id: string | null
   reported_username: string | null
   reported_name: string | null
@@ -531,6 +536,35 @@ export function loadStaffReports(status: string, limit = 60): Promise<Moderation
 
 export function loadStaffReportCounts(): Promise<{ open: number; reviewing: number; resolved: number; dismissed: number }> {
   return staffRpc('staff_report_counts') as Promise<{ open: number; reviewing: number; resolved: number; dismissed: number }>
+}
+
+/**
+ * Full content of any reported post — hidden or live, any scope (0053).
+ * The member RPCs all refuse hidden/unscoped rows; reviewers still need to see
+ * exactly what a report is about. Server-side this debits an
+ * 'moderation.view_content' audit row per call, so expansion is on-demand only.
+ */
+export type StaffPostContent = {
+  post_id: string
+  kind: string
+  body: string
+  media_urls: string[]
+  is_published: boolean
+  is_anonymous: boolean
+  audience: string
+  created_at: string
+  edited_at: string | null
+  author_id: string | null
+  author_username: string | null
+  author_name: string | null
+  author_role: string | null
+  community_id: string | null
+  community_name: string | null
+  community_privacy: string | null
+}
+
+export function fetchStaffPostContent(postId: string): Promise<StaffPostContent> {
+  return staffRpc('staff_fetch_post', { p_post_id: postId }) as Promise<StaffPostContent>
 }
 
 /* College suggestions                                                         */

@@ -181,6 +181,36 @@
 }
 .staff-mod-post code { font-size: 11px; line-height: 1.5; word-break: break-word; color: var(--ink); font-family: inherit; }
 .staff-mod-post small { color: var(--muted); font-size:11px; }
+.staff-mod-scope { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 1px; }
+.staff-scope-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10.5px; font-weight: 800; letter-spacing: .4px;
+  border-radius: 7px; padding: 2px 7px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--muted);
+}
+.staff-scope-pill.public { color: var(--muted); }
+.staff-scope-pill.college { color: var(--college-ink); background: var(--college-soft); }
+.staff-scope-pill.community { color: var(--brand-ink); background: var(--brand-soft); border-color: var(--brand-line); }
+.staff-scope-pill.media { font-style: italic; font-weight: 700; }
+.staff-scope-toggle {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 4px;
+  font: inherit; font-size: 11px; color: var(--muted);
+  background: none; border: none; padding: 2px 4px; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.staff-inspect {
+  border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
+  padding: 10px 11px; display: flex; flex-direction: column; gap: 8px;
+}
+.staff-inspect > code { font-size: 12px; line-height: 1.55; word-break: break-word; color: var(--ink); font-family: inherit; }
+.staff-inspect > small { color: var(--muted); font-size: 11px; }
+.staff-inspect-err { display: flex; align-items: center; gap: 6px; color: var(--warn); font-size: 11px; margin: 0; }
+.staff-mod-media { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; align-items: start; }
+.staff-mod-media img {
+  width: 100%; aspect-ratio: 1; object-fit: cover;
+  border-radius: 8px; border: 1px solid var(--line); background: var(--soft);
+}
+.staff-mod-media-note { color: var(--muted); font-size: 11px; grid-column: 1 / -1; }
 .staff-mod-person { color: var(--muted); font-size:11px; }
 .staff-mod-reviewed { color: var(--muted); font-size:11px; font-style: italic; }
 .staff-mod-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 2px; }
