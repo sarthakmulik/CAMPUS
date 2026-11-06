@@ -10,3 +10,6 @@ supabase/0029b_paste_ready_DO_NOT_COMMIT.sql
 *.log
 temp-dump.cjs
 temp-pulse-tests.cjs
+
+# graphify knowledge-graph build (queryable locally via the graphify CLI)
+graphify-out/
