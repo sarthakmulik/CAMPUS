@@ -11,6 +11,7 @@ import type { CampusPost } from '../types'
 import * as bk from '../lib/bookmarks'
 import { useSavedFlag } from '../lib/bookmarks'
 import { useSignedMedia } from '../lib/signedMedia'
+import { onAppPause, onAppResume } from '../platform/lifecycle'
 import CommentsSheet from './CommentsSheet'
 import type { ShareTarget } from './chat/ShareContentSheet'
 
@@ -307,21 +308,18 @@ function ReelSlide({
     // after the mint settles — autoplay must kick in then, not just on scroll
   }, [active, muted, src])
 
-  // Pause when the tab is hidden, resume the slide in view when it returns.
+  // Pause when the app/tab leaves the foreground, resume the slide in view
+  // when it returns (appStateChange on native, visibilitychange on web).
   useEffect(() => {
-    const onVisibility = () => {
+    const offPause = onAppPause(() => { videoRef.current?.pause() })
+    const offResume = onAppResume(() => {
       const video = videoRef.current
-      if (!video) return
-      if (document.hidden) {
-        video.pause()
-      } else if (active) {
-        video.muted = muted
-        const playback = video.play()
-        if (playback) playback.catch(() => {})
-      }
-    }
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => document.removeEventListener('visibilitychange', onVisibility)
+      if (!video || !active) return
+      video.muted = muted
+      const playback = video.play()
+      if (playback) playback.catch(() => {})
+    })
+    return () => { offPause(); offResume() }
   }, [active, muted])
 
   useEffect(() => () => {

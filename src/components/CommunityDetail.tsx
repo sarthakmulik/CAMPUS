@@ -6,6 +6,7 @@ import {
   Send, Settings, Share2, Trash2, UserPlus, Users, X,
 } from 'lucide-react'
 import * as db from '../lib/db'
+import { publicWebOrigin } from '../platform/platform'
 import * as cm from '../lib/communities'
 import { friendlyMessage, initialsFor, relativeTime } from '../lib/db'
 import { useSignedMediaUrl } from '../lib/signedMedia'
@@ -330,7 +331,7 @@ function CommunityActions({ detail, identity, isOwner, notify, requireAuth, onCh
     }
   }
 
-  const communitySlugUrl = `${window.location.origin}${window.location.pathname}#/communities/${detail.slug}`
+  const communitySlugUrl = `${publicWebOrigin()}${window.location.pathname}#/communities/${detail.slug}`
 
   const copyLink = async () => {
     const failure = await db.copyToClipboard(communitySlugUrl)

@@ -8,6 +8,7 @@ import * as mk from '../lib/marketplace'
 import { useSignedMedia } from '../lib/signedMedia'
 import * as bk from '../lib/bookmarks'
 import * as db from '../lib/db'
+import { publicWebOrigin } from '../platform/platform'
 import ShareContentSheet, { type ShareTarget } from './chat/ShareContentSheet'
 
 type Identity = { id: string; name: string; username: string; initials: string }
@@ -145,7 +146,7 @@ export default function ListingDetail({
     if (!row || row.status !== 'active') {
       // a draft/removed listing has no shareable card — copy the link only
       void (async () => {
-        const url = `${window.location.origin}${window.location.pathname}#m/${slug}`
+        const url = `${publicWebOrigin()}${window.location.pathname}#m/${slug}`
         const failure = await db.copyToClipboard(url)
         notify(failure ?? 'Link copied — share it with a classmate.')
       })()

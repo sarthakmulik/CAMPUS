@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Link2, Loader2, Search, X } from 'lucide-react'
+import { Check, Link2, Loader2, Search, Share2, X } from 'lucide-react'
 import type { ChatSummary } from '../../lib/db'
 import * as db from '../../lib/db'
+import { publicWebOrigin } from '../../platform/platform'
+import { canSystemShare, shareLink } from '../../platform/share'
 import { useBodyScrollLock } from '../../lib/scrollLock'
 import { useEscapeKey } from '../../lib/menuDismiss'
 import { useSignedMedia } from '../../lib/signedMedia'
@@ -146,13 +148,22 @@ export default function ShareContentSheet({
     })
   }
 
-  const copyLink = async () => {
-    const base = window.location.origin + window.location.pathname
-    const url = target.kind === 'listing' && target.slug ? `${base}/#m/${target.slug}`
+  const linkForTarget = () => {
+    const base = publicWebOrigin() + window.location.pathname
+    return target.kind === 'listing' && target.slug ? `${base}/#m/${target.slug}`
       : target.kind === 'event' && target.slug ? `${base}/#e/${target.slug}`
       : `${base}/#p/${target.id}`
-    const failure = await db.copyToClipboard(url)
+  }
+
+  const copyLink = async () => {
+    const failure = await db.copyToClipboard(linkForTarget())
     onFlash?.(failure ?? 'Link copied — paste it anywhere to share.')
+  }
+
+  const systemShare = async () => {
+    const outcome = await shareLink({ title: target.title, text: target.subtitle ?? undefined, url: linkForTarget() })
+    if (outcome === 'copied') onFlash?.('Link copied — paste it anywhere to share.')
+    else if (outcome === 'failed') onFlash?.('Could not share or copy the link.')
   }
 
   /**
@@ -228,6 +239,11 @@ export default function ShareContentSheet({
           <button className="link-button" onClick={() => void copyLink()}>
             <Link2 size={13}/> Copy link
           </button>
+          {canSystemShare() && (
+            <button className="link-button" onClick={() => void systemShare()}>
+              <Share2 size={13}/> Share via…
+            </button>
+          )}
         </div>
 
         <div className="share-search">

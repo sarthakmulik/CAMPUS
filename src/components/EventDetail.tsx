@@ -7,6 +7,7 @@ import {
 import * as ev from '../lib/events'
 import * as bk from '../lib/bookmarks'
 import * as db from '../lib/db'
+import { publicWebOrigin } from '../platform/platform'
 import { friendlyMessage } from '../lib/db'
 import { useSignedMediaUrl } from '../lib/signedMedia'
 import { registrationState } from './Events'
@@ -149,7 +150,7 @@ export default function EventDetail({
     if (!detail || detail.cancelled_at || !detail.published) {
       // an unpublished/cancelled event has no shareable card — link only
       void (async () => {
-        const link = `${window.location.origin}${window.location.pathname}#e/${detail?.slug ?? slug}`
+        const link = `${publicWebOrigin()}${window.location.pathname}#e/${detail?.slug ?? slug}`
         const failure = await db.copyToClipboard(link)
         notify(failure ?? 'Event link ready to share.')
       })()

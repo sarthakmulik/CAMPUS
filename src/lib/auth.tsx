@@ -8,6 +8,8 @@ import {
   type ReactNode,
 } from 'react'
 import { supabase, isSupabaseConfigured } from './supabase'
+import { publicWebOrigin } from '../platform/platform'
+import { cleanupNativePushOnLogout } from '../platform/nativePush'
 import * as db from './db'
 
 /**
@@ -246,6 +248,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 
   const signOut = useCallback(async () => {
+    // remove this device's push registration while the RPC is still authenticated
+    await cleanupNativePushOnLogout()
     if (supabase) await supabase.auth.signOut()
     setUser(null)
     setProfile(null)
@@ -258,7 +262,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!supabase) return 'CAMPUS is not connected.'
     if (!email.trim()) return 'Enter your email address first.'
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: window.location.origin,
+      redirectTo: publicWebOrigin(),
     })
     return error ? db.friendlyMessage(error) : null
   }, [])

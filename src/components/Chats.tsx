@@ -15,6 +15,7 @@ import {
   decodeVoiceMeta, pauseOtherVoices, unlinkVoiceAudio, voiceDurationLabel,
 } from '../lib/voiceAudio'
 import { useMenuDismiss } from '../lib/menuDismiss'
+import { onAppResume } from '../platform/lifecycle'
 import ReportDialog from './ReportDialog'
 import ChatSharedCard from './chat/ChatSharedCard'
 
@@ -65,6 +66,8 @@ export default function Chats({
   onMobileThreadChange, closeThreadRequest, requestThreadBack,
 }: Props) {
   const [conversations, setConversations] = useState<ChatSummary[]>([])
+  const conversationsRef = useRef<ChatSummary[]>([])
+  conversationsRef.current = conversations
   const [loadingList, setLoadingList] = useState(true)
   const [listError, setListError] = useState<string | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
@@ -451,6 +454,30 @@ export default function Chats({
         scheduledRefreshRef.current = null
       }
     }
+  }, [identity?.id, scheduleRefresh])
+
+  /* foreground resume: events missed while the socket was dead in the
+     background never arrive via realtime — re-read the inbox and merge the
+     open thread's latest page by id (keeps scroll position, older history
+     and the cleared-chat cutoff; server rows are authoritative). */
+  useEffect(() => {
+    if (!identity) return
+    return onAppResume(() => {
+      scheduleRefresh()
+      const id = openIdRef.current
+      if (!id) return
+      const cutoff = conversationsRef.current.find(c => c.id === id)?.clearedAt ?? null
+      void db.fetchChatMessages(id).then(rows => {
+        if (openIdRef.current !== id) return
+        const fresh = rows.filter(m => !cutoff || m.createdAt > cutoff)
+        fresh.forEach(row => seenIds.current.add(row.id))
+        setMessages(list => {
+          const map = new Map(list.map(item => [item.id, item]))
+          for (const row of fresh) map.set(row.id, row)
+          return [...map.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+        })
+      }).catch(() => { /* the thread keeps its last honest state */ })
+    })
   }, [identity?.id, scheduleRefresh])
 
   /* keep the newest message in view — WITHOUT destroying the reader's

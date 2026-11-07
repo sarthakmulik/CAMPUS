@@ -13,11 +13,16 @@ import { AuthProvider, hasSeenWelcome, markWelcomeSeen, useAuth } from './lib/au
 import { saveComposerDraft, loadComposerDraft, clearComposerDraft, type ComposerDraftMeta } from './lib/drafts'
 import { StaffConsole } from './components/StaffConsole'
 import { reconcilePush } from './lib/webPush'
+import { isNativeApp } from './platform/platform'
+import { initNativeNavigation } from './platform/nativeNavigation'
+import { initNativePush, reconcileNativePush } from './platform/nativePush'
+import { onAppResume } from './platform/lifecycle'
 import * as navHistory from './lib/navHistory'
 import * as db from './lib/db'
 import WelcomeScreen from './components/WelcomeScreen'
 import AuthModal, { type AuthMode } from './components/AuthModal'
 import SignUpPrompt from './components/SignUpPrompt'
+import AppDownloadBanner from './components/AppDownloadBanner'
 import OnboardingWizard from './components/OnboardingWizard'
 import SafetyCentre from './components/SafetyCentre'
 import ReelTrim from './components/ReelTrim'
@@ -474,6 +479,21 @@ function CAMPUSApp() {
     noticeTimer.current = window.setTimeout(() => setNotice(''), 3200)
   }
 
+  /* native shell: hardware back → the navHistory stack, campus:// links →
+     the same hash routes the web resolves (no-op in browsers) */
+  useEffect(() => {
+    initNativeNavigation(message => flash(message))
+    initNativePush()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /* native push self-heal: re-register opted-in devices on signed-in start
+     (no prompt; mirrors the web reconcilePush rule) */
+  useEffect(() => {
+    if (!isNativeApp || status !== 'member' || !user?.id) return
+    void reconcileNativePush()
+  }, [status, user?.id])
+
   /* ---- publish reliability: connectivity, drafts, exactly-once keys ------- */
 
   /* Announce real connectivity flips; the flag also drives the fast-fail on
@@ -860,9 +880,22 @@ function CAMPUSApp() {
       .catch(() => { /* keep the last honest value */ })
   }, [bellRefetch, status, user?.id, configured])
 
-  /* web-push plumbing: register the service worker once (secure contexts
-     only); permission is NEVER requested here — the center offers it. */
+  /* foreground resume: the realtime socket may have died in the background
+     and postgres_changes never replays missed rows — re-read the feed and
+     the bell badge from the DB (the same truth the realtime path uses). */
   useEffect(() => {
+    if (status !== 'member' && status !== 'visitor') return
+    return onAppResume(() => {
+      void loadFeed()
+      setBellRefetch(tick => tick + 1)
+    })
+  }, [status, loadFeed])
+
+  /* web-push plumbing: register the service worker once (secure contexts
+     only); permission is NEVER requested here — the center offers it.
+     Native WebViews have no PushManager — web push is web-only there. */
+  useEffect(() => {
+    if (isNativeApp) return
     if (typeof window === 'undefined' || !('serviceWorker' in window.navigator)) return
     const secure = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
     if (!secure) return
@@ -874,6 +907,7 @@ function CAMPUSApp() {
      Repair it on every signed-in start (no prompt, idempotent, and only
      for devices the user explicitly enabled). */
   useEffect(() => {
+    if (isNativeApp) return
     if (status !== 'member' || !user?.id) return
     void reconcilePush().catch(() => { /* best-effort only */ })
   }, [status, user?.id])
@@ -881,6 +915,7 @@ function CAMPUSApp() {
   /* push clicks navigate the app: the SW posts the deep link, we route it
      through the same hash handler every other entry point uses */
   useEffect(() => {
+    if (isNativeApp) return
     if (typeof window === 'undefined' || !('serviceWorker' in window.navigator)) return
     const handler = (event: MessageEvent) => {
       const data = event.data as { type?: string; url?: string } | null
@@ -2428,6 +2463,7 @@ function CAMPUSApp() {
       {bootVeil}
       {toast}
       {publishBanner}
+      <AppDownloadBanner />
       {gateInfo && (
         <SignUpPrompt
           reason={gateInfo.reason}

@@ -4,6 +4,7 @@ import {
   MessageCircle, Play, UserRound, UserPlus,
 } from 'lucide-react'
 import * as db from '../lib/db'
+import { publicWebOrigin } from '../platform/platform'
 import type { CampusPost, Caps, College, PersonResult, Profile as DbProfile, ProfileStats } from '../lib/db'
 import { friendlyMessage, initialsFor } from '../lib/db'
 import { useSignedMedia } from '../lib/signedMedia'
@@ -161,7 +162,7 @@ export default function Profile({ profileId, myUserId, colleges, isMember, caps,
   /** copy the #u/<username> deep link this app resolves in App.tsx:940 */
   async function copyProfileLink() {
     if (!profile) return
-    const base = `${window.location.origin}${window.location.pathname}`
+    const base = `${publicWebOrigin()}${window.location.pathname}`
     const link = profile.username ? `${base}#u/${profile.username}` : base
     try {
       await navigator.clipboard.writeText(link)

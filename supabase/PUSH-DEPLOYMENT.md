@@ -102,6 +102,60 @@ Every layer above is verified against the live project (see final
 report). `delivered` remains "accepted by the push service" until the
 device is checked by hand.
 
+## 6. Native (Capacitor) push — Android/iOS
+
+Native builds cannot use web push (no service worker in the WebView).
+The client registers a platform token (`src/platform/nativePush.ts`), stored
+in `device_tokens` (migration 0054), and `push-deliver` routes by platform:
+
+- **Android** tokens are FCM registration tokens → delivered over **FCM HTTP v1**
+  (one Firebase project).
+- **iOS** tokens are **raw APNs device tokens** — the Capacitor 8 iOS plugin
+  uses plain APNs, no Firebase — delivered over **APNs HTTP/2** with your .p8
+  auth key (ES256 provider JWT). Development builds register sandbox tokens;
+  the function falls back to the sandbox endpoint on `BadDeviceToken`, so dev
+  and TestFlight/App Store builds coexist.
+
+The queue, prefs, quiet hours and dedupe are unchanged.
+
+**Status: code complete, NOT live-verified.** Activation requires all of:
+
+1. SQL editor: run `supabase/migrations/0054_device_tokens.sql` once
+   (additive + idempotent; recreates `notifications_enqueue_push` with the
+   native-token gate — apply the whole file in one run).
+2. **Android:** Firebase console → create a project → add an Android app with
+   package `com.campus.app` → download `google-services.json` into
+   `android/app/`. Then Project settings → Service accounts → generate a
+   private key and set it as ONE secret (JSON, single line) — never in the repo:
+   ```bash
+   supabase secrets set FCM_SERVICE_ACCOUNT='<full service-account JSON>'
+   ```
+3. **iOS:** Apple Developer → Certificates, IDs & Profiles → Keys → create an
+   APNs auth key (.p8). Note the Key ID and your Team ID. No Firebase app is
+   needed for iOS. Set the secrets (the .p8 contents as one quoted value):
+   ```bash
+   supabase secrets set APNS_AUTH_KEY='<full AuthKey_XXXX.p8 contents>' \
+     APNS_KEY_ID=<10-char Key ID> APNS_TEAM_ID=<10-char Team ID>
+   # optional: APNS_TOPIC defaults to com.campus.app
+   ```
+   The iOS build needs the push entitlement (already wired:
+   `ios/App/App/App.entitlements`, `aps-environment=development`; Xcode flips it
+   to `production` for distribution) and a provisioning profile that includes
+   push.
+4. `supabase functions deploy push-deliver`, then rebuild the app
+   (`npm run cap:sync` + native build — the Android Firebase flag is baked at
+   `vite build` time), sign in, Notification settings → Push notifications →
+   Enable. `device_tokens` gains a row.
+5. Real-device test (emulator push is unreliable): from another account
+   send a DM; check `push_queue.status = delivered`, then confirm the OS
+   notification actually appeared and tapping it opens the chat.
+
+A platform whose provider secret is unset is skipped honestly (the in-app
+notification still exists); an Android build without `google-services.json`
+reports "not configured" and never calls the crash-prone native register().
+No push provider secret, service-account key or .p8 key ever ships inside the
+app bundle.
+
 ## Key rotation (service key leaked → rotated)
 
 1. Dashboard → Settings → API Keys → roll/rotate the service key.

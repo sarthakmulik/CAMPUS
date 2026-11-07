@@ -9,6 +9,10 @@ import type { NotificationPrefs } from '../lib/db'
 import {
   currentPermission, disablePush, enablePush, pushConfigured, pushSupported,
 } from '../lib/webPush'
+import { isNativeApp } from '../platform/platform'
+import {
+  currentNativeToken, disableNativePush, enableNativePush, nativePushActive, nativePushPermission,
+} from '../platform/nativePush'
 import { attachSheetDismiss } from '../lib/sheetDismiss'
 
 type Props = {
@@ -53,6 +57,20 @@ export default function NotificationSettings({ open, onClose, notify, userId }: 
   const [pushStatus, setPushStatus] = useState<PushStatus>('idle')
   const [devices, setDevices] = useState<db.PushSubscriptionRecord[]>([])
   const [devicesLoading, setDevicesLoading] = useState(false)
+  // native (Capacitor) push state — the browser card is swapped for this one
+  const [nativePerm, setNativePerm] = useState<'granted' | 'denied' | 'prompt' | null>(null)
+  const [nativeOn, setNativeOn] = useState(false)
+  const [nativeBusy, setNativeBusy] = useState(false)
+  const [nativeDevices, setNativeDevices] = useState<db.DeviceTokenRecord[]>([])
+
+  useEffect(() => {
+    if (!open) return
+    if (isNativeApp) {
+      setNativeOn(nativePushActive())
+      void nativePushPermission().then(setNativePerm).catch(() => setNativePerm(null))
+      db.fetchDeviceTokens().then(setNativeDevices).catch(() => setNativeDevices([]))
+    }
+  }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -160,6 +178,41 @@ export default function NotificationSettings({ open, onClose, notify, userId }: 
     notify('Browser notifications are off on this device.')
   }
 
+  const enableDevicePush = async () => {
+    setNativeBusy(true)
+    const result = await enableNativePush()
+    setNativeBusy(false)
+    if (result === 'granted') {
+      setNativeOn(true)
+      setNativePerm('granted')
+      db.fetchDeviceTokens().then(setNativeDevices).catch(() => {})
+      notify('Push notifications are on for your enabled categories.')
+    } else if (result === 'denied') {
+      setNativePerm('denied')
+      notify('Notifications are blocked — allow them for CAMPUS in the system settings anytime.')
+    } else if (result === 'no-key') {
+      notify('Push is not configured on this app build yet. In-app notifications still work fully.')
+    } else {
+      notify('Could not finish setting up push notifications. Try again in a moment.')
+    }
+  }
+
+  const turnOffDevicePush = async () => {
+    setNativeBusy(true)
+    await disableNativePush()
+    setNativeBusy(false)
+    setNativeOn(false)
+    setNativeDevices([])
+    notify('Push notifications are off on this device.')
+  }
+
+  const nativePushLabel =
+    nativePerm === 'denied'
+      ? 'Blocked in system settings'
+      : nativeOn && nativePerm === 'granted'
+        ? 'Enabled on this device'
+        : 'Off on this device'
+
   const pushEnabledLabel =
     !pushConfigured()
       ? 'Push is not configured on this deployment yet'
@@ -191,7 +244,62 @@ export default function NotificationSettings({ open, onClose, notify, userId }: 
             </p>
           )}
 
-          {/* browser push */}
+          {/* push: native system sheet inside the apps, browser push on web */}
+          {isNativeApp ? (
+            <section className="settings-card">
+              <h2><Bell size={17}/> Push notifications</h2>
+              <div className="settings-row">
+                <div>
+                  <b>{nativePushLabel}</b>
+                  <small>Get notified even when CAMPUS is closed. Only your enabled categories are delivered.</small>
+                </div>
+                {nativePerm !== 'denied' && (
+                  nativeOn && nativePerm === 'granted'
+                    ? (
+                      <button className="secondary-button" disabled={nativeBusy} onClick={() => void turnOffDevicePush()}>
+                        <BellOff size={15}/> Turn off
+                      </button>
+                    )
+                    : (
+                      <button className="primary-button" disabled={nativeBusy} onClick={() => void enableDevicePush()}>
+                        {nativeBusy ? <Loader2 size={15} className="spin"/> : <Bell size={15}/>} Enable
+                      </button>
+                    )
+                )}
+              </div>
+              {nativePerm === 'denied' && (
+                <p className="settings-hint">
+                  {'The system has blocked notifications for CAMPUS. Allow them in Settings → Apps → CAMPUS → Notifications — CAMPUS never re-prompts on its own.'}
+                </p>
+              )}
+              {nativeOn && nativePerm === 'granted' && (
+                <div className="nc-devices">
+                  <b className="nc-devices-title"><Smartphone size={14}/> Devices on your account</b>
+                  {nativeDevices.length === 0 && <p className="settings-hint">This device is being registered…</p>}
+                  {nativeDevices.map(device => (
+                    <div className="nc-device-row" key={device.id}>
+                      <span className="nc-device-name">
+                        {device.token === currentNativeToken() ? 'This device' : `${device.platform === 'ios' ? 'iOS' : 'Android'} device`}
+                      </span>
+                      <button
+                        className="linklike"
+                        onClick={() => {
+                          void db.removeDeviceToken(device.token).then(() => {
+                            if (device.token === currentNativeToken()) void disableNativePush().then(() => setNativeOn(false))
+                            return db.fetchDeviceTokens().then(setNativeDevices)
+                          }).then(() => {
+                            notify('This device will no longer receive push notifications.')
+                          }).catch(err => notify(err instanceof Error ? err.message : 'Could not remove the device.'))
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          ) : (
           <section className="settings-card">
             <h2><Bell size={17}/> Browser push</h2>
             <div className="settings-row">
@@ -247,11 +355,12 @@ export default function NotificationSettings({ open, onClose, notify, userId }: 
               </div>
             )}
           </section>
+          )}
 
           {/* per-category matrix */}
           <section className="settings-card">
             <h2><Settings2 size={17}/> What you receive</h2>
-            <p className="settings-hint">In-app = the bell list. Push = browser notifications. Important account notices are always delivered.</p>
+            <p className="settings-hint">In-app = the bell list. Push = {isNativeApp ? 'system notifications' : 'browser notifications'}. Important account notices are always delivered.</p>
             <div className="nc-cat-head" aria-hidden="true">
               <span>Category</span><span>In-app</span><span>Push</span>
             </div>

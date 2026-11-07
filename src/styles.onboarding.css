@@ -4666,20 +4666,23 @@
   .event-grid { grid-template-columns: 1fr; }
   .member-since { display: none; }
   /* Mobile Chat tab = a full-bleed chat screen. The detail root becomes a
-     height-100% flex column (same sizing mechanic as the DM chats page), so
-     the composer mathematically sits ABOVE the fixed bottom nav â€” independent
-     of header height, scroll position or keyboard (shell is 100dvh, so the
-     flex remainder shrinks with the keyboard). The desktop card skin (border,
-     radius, fixed height) is dropped: the conversation reads edge-to-edge
-     like the DM thread screen, and its own inner scroller keeps the tab
-     chrome (topbar + tabs) stationary. */
+     flex column (same sizing mechanic as the DM chats page) whose height
+     reserves the floating nav's 88px + safe-area zone (the same measure as
+     .main-column::after in ui4), so the composer sits ABOVE the fixed bottom
+     nav — independent of header height, scroll position or keyboard. The
+     desktop card skin (border, radius, fixed height) is dropped: the
+     conversation reads edge-to-edge like the DM thread screen, and its own
+     inner scroller keeps the tab chrome (topbar + tabs) stationary. */
   .chat-open.community-detail {
-    height: 100%;
+    height: calc(100% - 88px - env(safe-area-inset-bottom));
     display: flex;
     flex-direction: column;
     min-height: 0;
-    padding-bottom: 8px;   /* base has 90px for scroll pages â€” the chat fills the space itself */
+    padding-bottom: 8px;   /* base has 90px for scroll pages — the chat fills the space itself */
   }
+  /* keyboard focus slides the nav away (kb-away), so the composer drops to
+     the viewport's bottom edge — no dead band above the IME */
+  .app-shell.kb-away .chat-open.community-detail { height: 100%; }
   .chat-open .cc-holder {
     flex: 1;
     min-height: 0;

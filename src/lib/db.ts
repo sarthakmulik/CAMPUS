@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import { compressImage } from './media'
+import { publicWebOrigin } from '../platform/platform'
 
 /**
  * Typed data access for CAMPUS.
@@ -2093,7 +2094,7 @@ export async function fetchPostById(postId: string): Promise<CampusPost | null> 
 /** Shareable link for a post or reel — a hash the app reads on boot. */
 export function postLink(postId: string): string {
   if (typeof window === 'undefined') return `/#p/${postId}`
-  return `${window.location.origin}${window.location.pathname}#p/${postId}`
+  return `${publicWebOrigin()}${window.location.pathname}#p/${postId}`
 }
 
 /** Copy text to the clipboard; returns an error message or null. */
@@ -3231,6 +3232,47 @@ export async function removePushSubscription(endpoint: string): Promise<void> {
     p_endpoint: endpoint,
   })
   if (error) throw new Error(friendlyMessage(error))
+}
+
+/* Native push device tokens (FCM/APNs via Capacitor — migration 0054) */
+
+export type DeviceTokenRecord = {
+  id: string
+  token: string
+  platform: string
+  createdAt: string
+}
+
+export async function saveDeviceToken(token: string, platform: 'android' | 'ios'): Promise<string> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('save_device_token', {
+    p_token: token,
+    p_platform: platform,
+    p_user_agent: window.navigator.userAgent.slice(0, 180),
+  })
+  if (error) throw new Error(friendlyMessage(error))
+  return String(data ?? '')
+}
+
+export async function removeDeviceToken(token: string): Promise<void> {
+  if (!supabase) return
+  const { error } = await supabase.rpc('remove_device_token', { p_token: token })
+  if (error) throw new Error(friendlyMessage(error))
+}
+
+export async function fetchDeviceTokens(): Promise<DeviceTokenRecord[]> {
+  if (!supabase) return []
+  const { data, error } = await supabase
+    .from('device_tokens')
+    .select('id, token, platform, created_at')
+    .order('created_at', { ascending: false })
+  if (error) throw new Error(friendlyMessage(error))
+  return ((data ?? []) as Record<string, unknown>[]).map(row => ({
+    id: String(row.id ?? ''),
+    token: String(row.token ?? ''),
+    platform: String(row.platform ?? ''),
+    createdAt: String(row.created_at ?? ''),
+  }))
 }
 
 export async function fetchPushSubscriptions(): Promise<PushSubscriptionRecord[]> {

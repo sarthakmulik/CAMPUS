@@ -321,6 +321,38 @@ body { background: var(--soft) }
 }
 .publish-banner button:hover { background: #ffffff42; }
 
+/* ---- mobile-web "get the native app" card ----------------------------------
+   Shown only to phone browsers with a configured store link (see
+   src/lib/appDownload.ts). Quiet, dismissible, non-modal; floats above the
+   bottom nav like the publish pill. Desktop/native/unconfigured → not rendered. */
+.app-dl-banner {
+  position: fixed;
+  left: 50%;
+  bottom: calc(86px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: min(420px, calc(100vw - 24px));
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface-raised);
+  box-shadow: 0 10px 30px #1c244026;
+  animation: toast-rise var(--motion-slow) var(--ease-spring);
+}
+.app-dl-icon { flex: 0 0 auto; width: 44px; height: 44px; border-radius: 12px; object-fit: cover; }
+.app-dl-copy { flex: 1; min-width: 0; padding-right: 20px; }
+.app-dl-copy b { display: block; font-size: 13.5px; color: var(--ink-strong); }
+.app-dl-copy span { display: block; margin-top: 2px; font-size: 11.5px; line-height: 1.45; color: var(--muted); }
+.app-dl-cta {
+  display: inline-flex; align-items: center; margin-top: 9px;
+  height: 34px; padding: 0 16px; border-radius: 999px;
+  font-size: 12px; text-decoration: none; width: fit-content;
+}
+.app-dl-close { position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; background: transparent; color: var(--muted); }
+
 /* the edit-lock: while a publish is in flight the draft is literally the
    bytes being sent — frozen inputs make that honest and prevent edits that
    could never make it into the running attempt */
@@ -985,7 +1017,6 @@ textarea:disabled {
   border-radius: var(--r-full);
 }
 @media (hover: none) { .mcl-switch { min-height: 44px } }
-@media (max-width: 380px) { .mcl-switch { display: none } } /* chooser stays reachable via empty state? no — via header overflow: keep on ≥380px */
 
 /* ---- leaderboard strip ------------------------------------------------------ */
 
