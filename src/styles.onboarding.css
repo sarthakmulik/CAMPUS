@@ -1545,6 +1545,16 @@
   display: block;
 }
 
+/* viewport-deferred reel card: same dark box as the player, no video mounted */
+.reel-player-deferred {
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  max-height: 470px;
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.75);
+}
+
 .reel-big-play {
   position: absolute;
   top: 50%;

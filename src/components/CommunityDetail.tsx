@@ -8,6 +8,7 @@ import {
 import * as db from '../lib/db'
 import * as cm from '../lib/communities'
 import { friendlyMessage, initialsFor, relativeTime } from '../lib/db'
+import { useSignedMediaUrl } from '../lib/signedMedia'
 import { mapFeedRow } from '../lib/db'
 import type { CampusPost } from '../types'
 import * as bk from '../lib/bookmarks'
@@ -48,9 +49,13 @@ export default function CommunityDetail({
   const [loadError, setLoadError] = useState<string | null>(null)
   const [tab, setTab] = useState<DetailTab>('Feed')
   // once the Chat tab has been opened, the panel stays mounted but hidden
-  // while other tabs are up — drafts, scroll position and realtime history
+  // while other tabs are up - drafts, scroll position and realtime history
   // survive tab switches without refetching
   const [visitedChat, setVisitedChat] = useState(false)
+  // 0051: the media bucket is private - resolve the hero art through the
+  // signed layer (hooks stay above the early-return panel states)
+  const coverMedia = useSignedMediaUrl(detail?.cover_image_url)
+  const logoMedia = useSignedMediaUrl(detail?.logo_url)
 
   /* ---- membership-aware navigation --------------------------------------- */
   /** history keeps the tab so device Back walks it; parent reports/restores */
@@ -166,13 +171,13 @@ export default function CommunityDetail({
       {tab === 'About' && (
         <header className="community-hero about-hero">
           <div className="community-hero-cover">
-            {detail.cover_image_url
-              ? <img src={detail.cover_image_url} alt="" />
+            {coverMedia.ready && coverMedia.url
+              ? <img src={coverMedia.url} alt="" />
               : <span className="community-hero-cover-fallback"/>}
           </div>
           <div className="community-hero-bar">
             <span className="avatar community-hero-avatar">
-              {detail.logo_url ? <img src={detail.logo_url} alt=""/> : initialsFor(detail.name, detail.slug)}
+              {logoMedia.ready && logoMedia.url ? <img src={logoMedia.url} alt=""/> : initialsFor(detail.name, detail.slug)}
             </span>
             <div className="community-hero-id">
               <h1>

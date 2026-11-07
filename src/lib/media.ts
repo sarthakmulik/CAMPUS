@@ -179,6 +179,71 @@ export async function compressVideo(options: CompressOptions): Promise<File> {
   }
 }
 
+/* -------------------------------------------------------------------------- */
+/* Image compression: resize + WebP re-encode via canvas, no dependencies.    */
+/* -------------------------------------------------------------------------- */
+
+export type ImageCompressOptions = {
+  /** Long-edge cap in pixels. Default 1600 (feed/listing/cover size). */
+  maxEdge?: number
+  /** WebP quality 0..1. Default 0.82. */
+  quality?: number
+}
+
+const IMAGE_KEEP_BYTES = 300 * 1024 // already-small files at target size pass through
+
+async function decodeImage(file: File): Promise<{ source: CanvasImageSource; width: number; height: number; close: () => void }> {
+  try {
+    // imageOrientation honors EXIF so rotated phone photos land upright
+    const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
+    return { source: bitmap, width: bitmap.width, height: bitmap.height, close: () => bitmap.close() }
+  } catch {
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    try {
+      img.src = url
+      await img.decode()
+      return { source: img, width: img.naturalWidth, height: img.naturalHeight, close: () => URL.revokeObjectURL(url) }
+    } catch (err) {
+      URL.revokeObjectURL(url)
+      throw err
+    }
+  }
+}
+
+/**
+ * Shrink an image for upload: cap the long edge and re-encode as WebP.
+ * GIF/SVG pass through untouched (animation / vector). Already-small files,
+ * unsupported encoders and any failure all return the original — compression
+ * is best-effort and must never block an upload.
+ */
+export async function compressImage(file: File, options: ImageCompressOptions = {}): Promise<File> {
+  const { maxEdge = 1600, quality = 0.82 } = options
+  if (!file.type.startsWith('image/') || file.type === 'image/gif' || file.type === 'image/svg+xml') return file
+  let decoded: Awaited<ReturnType<typeof decodeImage>> | null = null
+  try {
+    decoded = await decodeImage(file)
+    const { source, width, height } = decoded
+    if (!width || !height) return file
+    if (Math.max(width, height) <= maxEdge && file.size <= IMAGE_KEEP_BYTES) return file
+    const scale = Math.min(1, maxEdge / Math.max(width, height))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(width * scale))
+    canvas.height = Math.max(1, Math.round(height * scale))
+    const context = canvas.getContext('2d', { alpha: true })
+    if (!context) return file
+    context.drawImage(source, 0, 0, canvas.width, canvas.height)
+    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/webp', quality))
+    if (!blob || blob.type !== 'image/webp' || blob.size >= file.size) return file
+    const name = `${file.name.replace(/\.[^.]+$/, '') || 'image'}.webp`
+    return new File([blob], name, { type: 'image/webp', lastModified: Date.now() })
+  } catch {
+    return file
+  } finally {
+    decoded?.close()
+  }
+}
+
 export function formatClipTime(seconds: number): string {
   const clamped = Math.max(0, seconds)
   const m = Math.floor(clamped / 60)

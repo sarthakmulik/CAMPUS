@@ -8,6 +8,7 @@ import * as cm from '../lib/communities'
 import { popSubviewEntry } from '../lib/navHistory'
 import CommunityDetail from './CommunityDetail'
 import { initialsFor, friendlyMessage } from '../lib/db'
+import { useSignedMediaUrl } from '../lib/signedMedia'
 
 type Identity = { id: string; name: string; username: string; initials: string }
 
@@ -368,17 +369,20 @@ function CommunityCard({ row, onOpen, onJoin, onCancel }: {
   const pending = row.my_status === 'pending'
   const banned = row.my_status === 'banned'
   const initials = initialsFor(row.name, row.slug)
+  // presentation-resolved sources (0051): the media bucket is private
+  const coverMedia = useSignedMediaUrl(row.cover_image_url)
+  const logoMedia = useSignedMediaUrl(row.logo_url)
 
   return (
     <article className="community-card">
       <button className="community-card-banner" onClick={member ? onOpen : undefined} tabIndex={member ? 0 : -1} aria-label={`Open ${row.name}`}>
-        {row.cover_image_url
-          ? <img src={row.cover_image_url} alt="" loading="lazy"/>
+        {coverMedia.ready && coverMedia.url
+          ? <img src={coverMedia.url} alt="" loading="lazy"/>
           : <span className="community-card-banner-fallback" style={{ background: bannerGradient(row.slug) }}/>}
       </button>
       <div className="community-card-row">
-        <span className="avatar community-avatar">{row.logo_url
-          ? <img src={row.logo_url} alt="" loading="lazy"/>
+        <span className="avatar community-avatar">{logoMedia.ready && logoMedia.url
+          ? <img src={logoMedia.url} alt="" loading="lazy"/>
           : initials}</span>
         <button className="community-card-title" onClick={() => { if (member || row.privacy !== 'hidden') onOpen() }}>
           <b>{row.name}</b>
@@ -493,7 +497,7 @@ function CreateCommunityModal({ identity, colleges, myCollegeId, onClose, onCrea
     setLogoBusy(true)
     setError(null)
     try {
-      const url = await db.uploadMedia(identity.id, file)
+      const url = await db.uploadMedia(identity.id, file, { maxEdge: 512 })
       setLogoUrl(url)
     } catch (err) {
       setError(friendlyMessage(err))

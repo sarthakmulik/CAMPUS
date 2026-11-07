@@ -5,6 +5,7 @@ import {
   Package, Plus, RotateCcw, Search, SlidersHorizontal, X,
 } from 'lucide-react'
 import * as mk from '../lib/marketplace'
+import { useSignedMediaUrl } from '../lib/signedMedia'
 import * as bk from '../lib/bookmarks'
 import * as db from '../lib/db'
 import type { ListingSummary, ListingScope, ListingSort } from '../lib/marketplace'
@@ -74,6 +75,8 @@ function ListingCard({ row, onOpen, onToggleSave }: {
   const [saving, setSaving] = useState(false)
   const price = mk.priceLine(row, 56)
   const scopeLabel = row.audience === 'global' ? 'All colleges' : (row.collegeName ?? 'College listing')
+  // 0051: private media bucket - listing photos resolve through the signed layer
+  const photoMedia = useSignedMediaUrl(row.images[0] ?? null)
 
   const toggleSave = async (event: React.MouseEvent) => {
     event.stopPropagation()
@@ -85,12 +88,12 @@ function ListingCard({ row, onOpen, onToggleSave }: {
     <article className="mk-card">
       <button
         className="mk-card-media"
-        style={{ background: row.images[0] ? undefined : categoryGradient(row.category) }}
+        style={{ background: photoMedia.ready && photoMedia.url ? undefined : categoryGradient(row.category) }}
         onClick={() => onOpen(row.slug)}
         aria-label={`View ${row.title}`}
       >
-        {row.images[0]
-          ? <img src={row.images[0]} alt="" loading="lazy" />
+        {photoMedia.ready && photoMedia.url
+          ? <img src={photoMedia.url} alt="" loading="lazy" />
           : <span className="mk-card-placeholder"><Package size={30} /></span>}
         <span className="mk-save" role="button" tabIndex={0} aria-label={row.savedByMe ? 'Remove from saved' : 'Save listing'}
           onClick={toggleSave}

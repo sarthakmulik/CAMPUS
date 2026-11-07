@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useSavedFlag } from '../lib/bookmarks'
 import {
   BadgeCheck, BookOpen, Bookmark, Building2, ChartNoAxesColumn, Check, EyeOff, Flag, Heart,
-  MessageCircle, MoreHorizontal, Pencil, Pin, Repeat2, Share2, Sparkles, Trash2, VolumeX,
+  MessageCircle, MoreHorizontal, Pencil, Pin, Play, Repeat2, Share2, Sparkles, Trash2, VolumeX,
 } from 'lucide-react'
 import { relativeTime } from '../lib/db'
 import { useSignedMedia } from '../lib/signedMedia'
@@ -191,9 +191,24 @@ export function PostCard({
 }: PostCardProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [slide, setSlide] = useState(0)
+  // Reel cards defer their video until the card nears the viewport: a long
+  // feed would otherwise mint + preload video bytes for every reel loaded.
+  // Latches once seen so scrolling back never re-mints or re-buffers.
+  const [seen, setSeen] = useState(post.kind !== 'reel')
+  const cardRef = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    if (seen) return
+    const node = cardRef.current
+    if (!node || typeof IntersectionObserver === 'undefined') { setSeen(true); return }
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) { setSeen(true); observer.disconnect() }
+    }, { rootMargin: '400px' })
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [seen])
   // 0051: media sources mint signed URLs per caller; hold a skeleton until
   // resolution settles so nothing flashes a broken image on the private bucket
-  const media = useSignedMedia(post.media ?? null)
+  const media = useSignedMedia(seen ? post.media ?? null : null)
   const slides = media.urls
   const canActOnAuthor = Boolean(post.handle) && !post.anonymous
   // the saved flag comes from the shared saved store (persisted through
@@ -211,7 +226,9 @@ export function PostCard({
     const track = trackRef.current
     if (track) track.scrollTo({ left: index * track.clientWidth, behavior: 'smooth' })
   }
-  const mediaBlock = !media.ready ? (
+  const mediaBlock = !seen ? (
+    <div className="reel-player reel-player-deferred" aria-hidden="true"><Play size={26}/></div>
+  ) : !media.ready ? (
     <div className="post-media media-loading" aria-label="Loading media"/>
   ) : slides.length === 1 ? (
     post.kind === 'reel'
@@ -236,7 +253,7 @@ export function PostCard({
         ? <p className="poll-hint">Poll results are unavailable right now.</p>
         : <PollBlock poll={poll} onVote={onVote}/>
   ) : null
-  return <article className="post-card">
+  return <article className="post-card" ref={cardRef}>
     <div className="post-head">
       <button
         className={`post-author-link${post.anonymous || !post.authorId ? ' static' : ''}`}

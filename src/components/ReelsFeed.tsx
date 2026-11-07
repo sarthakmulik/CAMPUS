@@ -214,6 +214,7 @@ export default function ReelsFeed({ userId, identity, requireAuth, flash, onRepo
               key={post.id}
               post={post}
               active={index === activeIndex}
+              near={Math.abs(index - activeIndex) <= 1}
               muted={muted}
               onToggleMute={() => setMuted(m => !m)}
               onLikeTap={forceLike => void likeReel(post, forceLike)}
@@ -254,6 +255,8 @@ function clampInt(value: number, min: number, max: number): number {
 type ReelSlideProps = {
   post: CampusPost
   active: boolean
+  /** within one slide of the active one — only these mint + mount video */
+  near: boolean
   muted: boolean
   onToggleMute: () => void
   onLikeTap: (forceLike: boolean) => void
@@ -270,7 +273,7 @@ type ReelSlideProps = {
 }
 
 function ReelSlide({
-  post, active, muted, onToggleMute, onLikeTap, onToggleLike, onSave,
+  post, active, near, muted, onToggleMute, onLikeTap, onToggleLike, onSave,
   onComment, onShare, onReport, menuOpen, onMenu, onMenuClose, onOpenAuthor,
 }: ReelSlideProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -283,8 +286,10 @@ function ReelSlide({
   // one truth for the saved state: the shared persisted saved store
   const saved = useSavedFlag('reel', post.id)
 
-  // 0051: private media bucket — resolve the reel source through a signed URL
-  const mediaSigned = useSignedMedia(post.media ?? null)
+  // 0051: private media bucket — resolve the reel source through a signed URL.
+  // Far slides never mint or mount a <video>: a page of 8 would otherwise hold
+  // 8 signed fetches open, growing with every page loaded.
+  const mediaSigned = useSignedMedia(near ? post.media ?? null : null)
   const src = mediaSigned.ready && mediaSigned.urls.length > 0 ? mediaSigned.urls[0] : ''
   const initials = post.anonymous ? '' : initialsFor(post.author, post.handle.replace('@', ''))
 
@@ -298,7 +303,9 @@ function ReelSlide({
     } else {
       video.pause()
     }
-  }, [active, muted])
+    // src dep: a slide deep-linked straight to active mounts its video only
+    // after the mint settles — autoplay must kick in then, not just on scroll
+  }, [active, muted, src])
 
   // Pause when the tab is hidden, resume the slide in view when it returns.
   useEffect(() => {
@@ -383,7 +390,9 @@ function ReelSlide({
               onPause={() => setPlaying(false)}
               onClick={onVideoTap}
             />
-          : <div className="reel-video-missing"><span>This reel has no video file.</span></div>}
+          : mediaSigned.ready && near
+            ? <div className="reel-video-missing"><span>This reel has no video file.</span></div>
+            : null}
 
         {!playing && src && <span className="reel-big-play" aria-hidden="true"><Play size={30}/></span>}
 

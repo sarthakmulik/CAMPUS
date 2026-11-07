@@ -9,6 +9,7 @@ import * as ev from '../lib/events'
 import * as bk from '../lib/bookmarks'
 import * as db from '../lib/db'
 import { friendlyMessage } from '../lib/db'
+import { useSignedMediaUrl } from '../lib/signedMedia'
 import EventDetail from './EventDetail'
 import CreateEventWizard from './CreateEventWizard'
 
@@ -788,11 +789,13 @@ function EventCalendar({ month, onMonthChange, rows, loading, selectedDay, onSel
 /* -------------------------------------------------------------------------- */
 
 function FeaturedCard({ row, onOpen }: { row: ev.EventSummary; onOpen: () => void }) {
+  // 0051: private media bucket - featured cover resolves through the signed layer
+  const coverMedia = useSignedMediaUrl(row.cover_url)
   return (
     <button className="featured-card" onClick={onOpen}>
       <span className="featured-banner">
-        {row.cover_url
-          ? <img src={row.cover_url} alt="" loading="lazy"/>
+        {coverMedia.ready && coverMedia.url
+          ? <img src={coverMedia.url} alt="" loading="lazy"/>
           : <span className="community-card-banner-fallback" style={{ background: categoryGradient(row.category) }}/>}
       </span>
       <span className="featured-body">
@@ -835,12 +838,14 @@ function EventCard({
   const manage = row.can_manage
   const isPast = new Date(row.ends_at ?? row.starts_at).getTime() < Date.now()
   const seats = Number(row.seats_taken ?? 0)
+  // 0051: private media bucket - covers resolve through the signed layer
+  const coverMedia = useSignedMediaUrl(row.cover_url)
 
   return (
     <article className="event-card">
       <button className="event-banner" onClick={onOpen} aria-label={`Open ${row.title}`}>
-        {row.cover_url
-          ? <img src={row.cover_url} alt="" loading="lazy"/>
+        {coverMedia.ready && coverMedia.url
+          ? <img src={coverMedia.url} alt="" loading="lazy"/>
           : <span className="community-card-banner-fallback" style={{ background: categoryGradient(row.category) }}/>}
         <span className="event-datechip">
           <b>{new Intl.DateTimeFormat(undefined, { month: 'short' }).format(new Date(row.starts_at))}</b>

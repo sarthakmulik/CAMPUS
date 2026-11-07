@@ -86,6 +86,15 @@ function enqueue(source: string): void {
 export type SignedMedia = { urls: string[]; ready: boolean; /** at least one source failed the gate */ blocked: boolean }
 
 /**
+ * Single-source variant for one-shot covers, logos and listing photos:
+ * same store and gating as useSignedMedia, shaped for a lone URL.
+ */
+export function useSignedMediaUrl(source: string | null | undefined): { url: string | null; ready: boolean } {
+  const resolved = useSignedMedia(source ? [source] : [])
+  return { url: resolved.urls[0] ?? null, ready: resolved.ready }
+}
+
+/**
  * React hook: return feed-shaped media, presentation-resolved. Sources that
  * are not media-bucket URLs pass through untouched. `ready` is true once
  * every media-bucket source has a usable (or definitively denied) outcome,

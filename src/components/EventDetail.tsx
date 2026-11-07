@@ -8,6 +8,7 @@ import * as ev from '../lib/events'
 import * as bk from '../lib/bookmarks'
 import * as db from '../lib/db'
 import { friendlyMessage } from '../lib/db'
+import { useSignedMediaUrl } from '../lib/signedMedia'
 import { registrationState } from './Events'
 import CreateEventWizard from './CreateEventWizard'
 import ShareContentSheet, { type ShareTarget } from './chat/ShareContentSheet'
@@ -38,6 +39,9 @@ export default function EventDetail({
   const [savedBusy, setSavedBusy] = useState(false)
   const [attending, setAttending] = useState<ev.AttendeeRow[] | null>(null)
   const [attendBusy, setAttendBusy] = useState<string | null>(null)
+  // 0051: private media bucket - the hero cover resolves through the signed
+  // layer (hook above the early-return panel states)
+  const coverMedia = useSignedMediaUrl(detail?.cover_url)
   const [reports, setReports] = useState<ev.EventReportRow[] | null>(null)
   const [editOpen, setEditOpen] = useState(false)
   const [confirmCancel, setConfirmCancel] = useState(false)
@@ -285,8 +289,8 @@ export default function EventDetail({
 
       <header className="event-hero">
         <div className="event-hero-banner">
-          {detail.cover_url
-            ? <img src={detail.cover_url} alt="" loading="lazy"/>
+          {coverMedia.ready && coverMedia.url
+            ? <img src={coverMedia.url} alt="" loading="lazy"/>
             : <span className="community-card-banner-fallback"/>}
         </div>
         <div className="event-hero-body">

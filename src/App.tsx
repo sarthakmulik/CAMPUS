@@ -251,6 +251,7 @@ function CAMPUSApp() {
   const [draftImages, setDraftImages] = useState<File[]>([])
   const [draftVideo, setDraftVideo] = useState<File | null>(null)
   const [reelDuration, setReelDuration] = useState(0)
+  const [reelDims, setReelDims] = useState<{ width: number; height: number } | null>(null)
   const [videoTrim, setVideoTrim] = useState<{ start: number; end: number } | null>(null)
   const [trimOpen, setTrimOpen] = useState(false)
   const [editingPost, setEditingPost] = useState<CampusPost | null>(null)
@@ -1522,20 +1523,33 @@ function CAMPUSApp() {
             return
           }
           const reelFile = draftVideo
-          const trimWindow = videoTrim ?? { start: 0, end: Math.min(reelDuration || REEL_WINDOW_SECONDS, REEL_WINDOW_SECONDS) }
-          const keepSeconds = Math.min(Math.max(trimWindow.end - trimWindow.start, 0.3), REEL_WINDOW_SECONDS)
-          setPublishProgress('Compressing video…')
-          const compressed = await media.compressVideo({
-            file: reelFile,
-            start: trimWindow.start,
-            keepSeconds,
-            onProgress: progress => {
-              if (progress.phase === 'encoding') setPublishProgress(`Compressing ${progress.percent}%…`)
-              else setPublishProgress('Uploading video…')
-            },
-          })
+          // Already reel-shaped sources (≤30 s, ≤720p, at/below the 2.2 Mbps
+          // encode target +20% headroom) upload as-is — re-encoding them only
+          // costs time and quality. Restored drafts have no probed dims, so
+          // they take the safe compress path.
+          const alreadyReelReady = !videoTrim && reelDuration > 0
+            && reelDuration <= REEL_WINDOW_SECONDS + 0.05
+            && reelDims !== null && Math.max(reelDims.width, reelDims.height) <= 720
+            && (reelFile.size * 8) / reelDuration <= 2_640_000
+          let reelPayload: File
+          if (alreadyReelReady) {
+            reelPayload = reelFile
+          } else {
+            const trimWindow = videoTrim ?? { start: 0, end: Math.min(reelDuration || REEL_WINDOW_SECONDS, REEL_WINDOW_SECONDS) }
+            const keepSeconds = Math.min(Math.max(trimWindow.end - trimWindow.start, 0.3), REEL_WINDOW_SECONDS)
+            setPublishProgress('Compressing video…')
+            reelPayload = await media.compressVideo({
+              file: reelFile,
+              start: trimWindow.start,
+              keepSeconds,
+              onProgress: progress => {
+                if (progress.phase === 'encoding') setPublishProgress(`Compressing ${progress.percent}%…`)
+                else setPublishProgress('Uploading video…')
+              },
+            })
+          }
           setPublishProgress('Uploading video…')
-          const leg = await raceStall(db.uploadMedia(user!.id, compressed), UPLOAD_STALL_MS)
+          const leg = await raceStall(db.uploadMedia(user!.id, reelPayload), UPLOAD_STALL_MS)
           if (!leg.done) {
             flash('Your connection stalled while uploading the video. Your draft and trims are kept — press Post again once the network returns (or keep the app open: it keeps trying).')
             return
@@ -2364,6 +2378,7 @@ function CAMPUSApp() {
       setDraftVideo(file)
       setVideoTrim(null)
       setReelDuration(info.duration)
+      setReelDims({ width: info.width, height: info.height })
       setDraftMediaUrls(null) // a new reel file — cached upload URLs are stale
       if (info.duration > media.REEL_WINDOW_SECONDS + 0.05) setTrimOpen(true)
     } catch (error) {

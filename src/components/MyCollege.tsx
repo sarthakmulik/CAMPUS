@@ -22,6 +22,7 @@ import * as db from '../lib/db'
 import * as ev from '../lib/events'
 import * as cm from '../lib/communities'
 import * as mk from '../lib/marketplace'
+import SignedImage from './SignedImage'
 import type { CampusPost, PollState } from '../types'
 import type { AccountStatus } from '../lib/auth'
 import PostCard from './PostCard'
@@ -978,7 +979,7 @@ export default function MyCollege({
             <div className="mcl-community" key={row.id}>
               <button className="mcl-community-main" onClick={() => onOpenCommunity(row.id)} aria-label={`Open ${row.name}`}>
                 <span className="mcl-community-logo" aria-hidden="true">
-                  {row.logo_url ? <img src={row.logo_url} alt="" loading="lazy"/> : <Users size={18}/>}
+                  <SignedImage src={row.logo_url} fallback={<Users size={18}/>}/>
                 </span>
                 <span className="mcl-community-copy">
                   <b>{row.name}</b>
@@ -1092,7 +1093,7 @@ export default function MyCollege({
         ? marketState.rows.map(row => (
             <button className="mcl-listing" key={row.id} onClick={() => onOpenListing(row.slug)}>
               {row.images[0]
-                ? <img className="mcl-listing-img" src={row.images[0]} alt="" loading="lazy"/>
+                ? <SignedImage className="mcl-listing-img" src={row.images[0]} fallback={<span className="mcl-listing-img mcl-listing-blank" aria-hidden="true"><CircleDollarSign size={20}/></span>}/>
                 : <span className="mcl-listing-img mcl-listing-blank" aria-hidden="true"><CircleDollarSign size={20}/></span>}
               <span className="mcl-listing-copy">
                 <b>{row.title}</b>
@@ -1390,7 +1391,7 @@ function EventRow({
     <div className="mcl-event">
       <button className="mcl-event-main" onClick={onOpen} aria-label={`Open ${row.title}`}>
         {row.cover_url
-          ? <img className="mcl-listing-img" src={row.cover_url} alt="" loading="lazy"/>
+          ? <SignedImage className="mcl-listing-img" src={row.cover_url} fallback={<span className="mcl-listing-img mcl-listing-blank" aria-hidden="true"><CalendarDays size={20}/></span>}/>
           : <span className="mcl-listing-img mcl-listing-blank" aria-hidden="true"><CalendarDays size={20}/></span>}
         <span className="mcl-listing-copy">
           <b>{row.title}</b>

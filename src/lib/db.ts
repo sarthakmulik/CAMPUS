@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { compressImage } from './media'
 
 /**
  * Typed data access for CAMPUS.
@@ -731,9 +732,10 @@ export function validateAvatarFile(file: File): string | null {
 
 export async function uploadAvatar(userId: string, file: File): Promise<string> {
   if (!supabase) throw new Error('CAMPUS is not connected.')
-  const extension = (file.name.split('.').pop() ?? 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg'
+  const payload = await compressImage(file, { maxEdge: 512, quality: 0.85 })
+  const extension = (payload.name.split('.').pop() ?? 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg'
   const path = `${userId}/avatar-${Date.now()}.${extension}`
-  const { error } = await supabase.storage.from('avatars').upload(path, file, { cacheControl: '3600', upsert: false })
+  const { error } = await supabase.storage.from('avatars').upload(path, payload, { cacheControl: '3600', upsert: false })
   if (error) throw new Error(friendlyMessage(error))
   const { data } = supabase.storage.from('avatars').getPublicUrl(path)
   return data.publicUrl
@@ -1524,15 +1526,20 @@ export async function uploadChatAttachment(conversationId: string, file: File): 
   if (!CHAT_ATTACHMENT_MIMES.has(file.type)) throw new Error('That file type is not supported.')
   if (file.size <= 0) throw new Error('That file is empty.')
   if (file.size > CHAT_ATTACHMENT_MAX_BYTES) throw new Error('Attachments can be at most 25 MB.')
+  // photos are resized + WebP-encoded before upload; GIFs keep their animation
+  // and every other attachment type passes through byte-for-byte
+  const payload = file.type === 'image/jpeg' || file.type === 'image/png' || file.type === 'image/webp'
+    ? await compressImage(file, { maxEdge: 1600 })
+    : file
   // keep the extension, sanitize the rest of the name into the stored path
   // (the human-visible name travels inside the message)
-  const dot = file.name.lastIndexOf('.')
-  const ext = dot > 0 ? file.name.slice(dot).toLowerCase().slice(0, 12) : ''
+  const dot = payload.name.lastIndexOf('.')
+  const ext = dot > 0 ? payload.name.slice(dot).toLowerCase().slice(0, 12) : ''
   const random = crypto.getRandomValues(new Uint32Array(1))[0].toString(36)
   const path = `${conversationId}/${Date.now()}-${random}${ext}`
-  const { error } = await supabase.storage.from('chat-media').upload(path, file, { cacheControl: '3600' })
+  const { error } = await supabase.storage.from('chat-media').upload(path, payload, { cacheControl: '3600' })
   if (error) throw new Error(friendlyMessage(error))
-  return { path, name: file.name.slice(0, 180), mime: file.type, size: file.size }
+  return { path, name: file.name.slice(0, 180), mime: payload.type, size: payload.size }
 }
 
 /** Short-lived signed URLs for private chat attachments (1 hour).
@@ -2720,13 +2727,18 @@ export function validateMediaFile(file: File, kind: 'image' | 'video'): string |
 
 /**
  * Upload a post image or reel video to the 'media' bucket (migration 0002)
- * and return its public URL.
+ * and return its public URL. Images are resized + WebP-encoded first (best
+ * effort — the original uploads when compression cannot help); videos pass
+ * through untouched (reels arrive pre-compressed from the composer).
  */
-export async function uploadMedia(userId: string, file: File): Promise<string> {
+export async function uploadMedia(userId: string, file: File, options: { maxEdge?: number } = {}): Promise<string> {
   if (!supabase) throw new Error('CAMPUS is not connected.')
-  const extension = (file.name.split('.').pop() ?? 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg'
+  const payload = file.type.startsWith('image/')
+    ? await compressImage(file, { maxEdge: options.maxEdge ?? 1600 })
+    : file
+  const extension = (payload.name.split('.').pop() ?? 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg'
   const path = `${userId}/${Date.now()}.${extension}`
-  const { error } = await supabase.storage.from('media').upload(path, file, { cacheControl: '3600', upsert: false })
+  const { error } = await supabase.storage.from('media').upload(path, payload, { cacheControl: '3600', upsert: false })
   if (error) throw new Error(friendlyMessage(error))
   const { data } = supabase.storage.from('media').getPublicUrl(path)
   return data.publicUrl

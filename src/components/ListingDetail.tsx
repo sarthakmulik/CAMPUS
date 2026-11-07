@@ -5,6 +5,7 @@ import {
   RefreshCcw, RotateCcw, Share2, ShieldAlert, Trash2, X,
 } from 'lucide-react'
 import * as mk from '../lib/marketplace'
+import { useSignedMedia } from '../lib/signedMedia'
 import * as bk from '../lib/bookmarks'
 import * as db from '../lib/db'
 import ShareContentSheet, { type ShareTarget } from './chat/ShareContentSheet'
@@ -53,6 +54,9 @@ export default function ListingDetail({
   const [reportReason, setReportReason] = useState<string>(mk.REPORT_REASONS[0])
   const [reportDetails, setReportDetails] = useState('')
   const [reporting, setReporting] = useState(false)
+  // 0051: private media bucket - gallery photos resolve through the signed
+  // layer (hook above the early-return panel states)
+  const gallery = useSignedMedia(row?.images ?? null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -195,7 +199,8 @@ export default function ListingDetail({
   const canContact = !owner && row.status === 'active'
   const price = mk.priceLine(row)
   const scopeLabel = row.audience === 'global' ? 'All colleges' : (row.collegeName ?? 'College listing')
-  const mainImage = row.images[photo] ?? row.images[0]
+  const resolvedImages = gallery.ready ? gallery.urls : []
+  const mainImage = resolvedImages[photo] ?? resolvedImages[0]
 
   const statusAction = row.status === 'draft'
     ? { label: 'Publish', run: () => changeStatus('active') }
@@ -217,20 +222,20 @@ export default function ListingDetail({
             <>
               <div className="mk-gallery-main">
                 <img src={mainImage} alt={row.title} />
-                {row.images.length > 1 && (
+                {resolvedImages.length > 1 && (
                   <>
-                    <button aria-label="Previous photo" onClick={() => setPhoto(p => (p - 1 + row.images.length) % row.images.length)}>
+                    <button aria-label="Previous photo" onClick={() => setPhoto(p => (p - 1 + resolvedImages.length) % resolvedImages.length)}>
                       <ChevronLeft size={18} />
                     </button>
-                    <button aria-label="Next photo" onClick={() => setPhoto(p => (p + 1) % row.images.length)}>
+                    <button aria-label="Next photo" onClick={() => setPhoto(p => (p + 1) % resolvedImages.length)}>
                       <ChevronRight size={18} />
                     </button>
                   </>
                 )}
               </div>
-              {row.images.length > 1 && (
+              {resolvedImages.length > 1 && (
                 <div className="mk-thumbs" data-no-page-swipe="true">
-                  {row.images.map((src, i) => (
+                  {resolvedImages.map((src, i) => (
                     <button key={src + i} className={i === photo ? 'on' : ''} onClick={() => setPhoto(i)}>
                       <img src={src} alt="" />
                     </button>
@@ -238,8 +243,10 @@ export default function ListingDetail({
                 </div>
               )}
             </>
-          ) : (
+          ) : gallery.ready ? (
             <div className="mk-gallery-empty"><Package size={34} /><span>No photo uploaded</span></div>
+          ) : (
+            <div className="mk-gallery-empty"><span>Photos…</span></div>
           )}
         </section>
 
