@@ -22,6 +22,8 @@ the only server behavior Pages needs is serving `dist/` as-is.
    - Framework preset: **Vite**
    - Build command: `npm run build`
    - Build output directory: `dist`
+   - Deploy command: `npx wrangler deploy` (the repo carries `wrangler.jsonc`,
+     so setup is deterministic — never interactive)
    - Environment variables (Production and Preview):
      - `VITE_SUPABASE_URL` = the URL from `.env`
      - `VITE_SUPABASE_ANON_KEY` = the anon key from `.env`
@@ -30,13 +32,32 @@ the only server behavior Pages needs is serving `dist/` as-is.
      lives in the repo, so no extra var is needed)
 4. Deploy. First build proves everything; later commits auto-deploy.
 
+## 2026-11-14 deploy-failure post-mortem (first attempt)
+
+The first deploy failed: `Invalid _redirects configuration ... Infinite loop
+detected` [code 100324]. Root cause: new Git-connected Pages projects deploy
+through **Workers static assets**, where
+
+- the SPA fallback is **native** (`assets.not_found_handling =
+  "single-page-application"` in `wrangler.jsonc`) — a Pages-style
+  `/* /index.html 200` `_redirects` rule is redundant AND rejected as an
+  infinite loop, so `public/_redirects` was removed;
+- `public/_headers` remains supported and kept (hashed bundles immutable,
+  index.html + sw.js revalidate).
+
+`wrangler.jsonc` is committed so CI never runs wrangler's interactive
+auto-setup (which was what silently generated its own config last time).
+No dashboard change is needed — pushing this commit redeploys and the
+build should pass.
+
 ## What ships with the repo for Pages
 
 - `public/_headers` — hashed bundles cached forever; `index.html`/`sw.js`
   revalidated so deploys propagate. (The service worker is push-only, it
   does not precache assets — these headers are authoritative.)
-- `public/_redirects` — SPA fallback (`/* /index.html 200`), belt-and-braces
-  on top of hash routing.
+- `wrangler.jsonc` — the deploy config: static assets from `./dist` with
+  **native** SPA fallback (`not_found_handling`). No `_redirects` exists on
+  purpose — see the post-mortem below.
 
 ## Verification checklist after the first deploy
 

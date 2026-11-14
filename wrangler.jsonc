@@ -1,0 +1,20 @@
+// Cloudflare deploy config (Workers static assets — the runtime every new
+// Git-connected Pages project uses). Committed so CI never runs interactive
+// auto-setup.
+//
+// - SPA fallback is NATIVE here: not_found_handling serves index.html for any
+//   stray path. A Pages-style _redirects fallback would be rejected as an
+//   infinite loop (it conflicts with this setting) — hence no _redirects.
+// - public/_headers still applies (supported by static assets): hashed
+//   bundles cache forever, index.html + sw.js revalidate.
+// - Vercel ignores this file; the Android build ignores it. Nothing else
+//   reads it.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "campus",
+  "compatibility_date": "2026-11-13",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}
