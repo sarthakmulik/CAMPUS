@@ -54,7 +54,7 @@ const FEED_PAGE_LIMIT = 20
 const TRENDING_WINDOW_HOURS = 72
 
 type TabKey =
-  | 'foryou' | 'following' | 'trending' | 'latest' | 'confessions'
+  | 'foryou' | 'following' | 'trending' | 'latest' | 'group' | 'confessions'
   | 'polls' | 'events' | 'communities' | 'students' | 'market' | 'search'
 
 const TABS: Array<{ key: TabKey; label: string }> = [
@@ -62,6 +62,7 @@ const TABS: Array<{ key: TabKey; label: string }> = [
   { key: 'following', label: 'Following' },
   { key: 'trending', label: 'Trending' },
   { key: 'latest', label: 'Latest' },
+  { key: 'group', label: 'Group' },
   { key: 'confessions', label: 'Confessions' },
   { key: 'polls', label: 'Polls' },
   { key: 'events', label: 'Events' },
@@ -73,6 +74,8 @@ const TABS: Array<{ key: TabKey; label: string }> = [
 
 /** tabs served by the shared post pipeline (their refresh = the feed refresh) */
 const FEED_TABS: TabKey[] = ['foryou', 'following', 'trending', 'latest', 'polls']
+/** 0059: the Group tab is its own RPC pipeline with this page size */
+const GROUP_PAGE_LIMIT = 12
 
 const TRENDING_NOTE =
   `Ranks the last ${TRENDING_WINDOW_HOURS}h by real engagement — likes, comments and reposts — ` +
@@ -336,6 +339,10 @@ export default function MyCollege({
       setExtra(current => current.map(p => (p.id === id ? { ...p, ...patch } : p)))
       setConfState(current => current
         ? { ...current, rows: current.rows.map(p => (p.id === id ? { ...p, ...patch } : p)) }
+        : current)
+      // 0059: the group tab owns its rows the same way the offset pages do
+      setGroupState(current => current
+        ? { rows: current.rows.map(p => (p.id === id ? { ...p, ...patch } : p)) }
         : current)
     },
     [],
@@ -604,6 +611,94 @@ export default function MyCollege({
     if (!ok) return // App flashed the failure; state stays exactly as it was
     void member // follows live in App's store — the prop re-renders the row
   }, [followBusy, following, onToggleFollow, requireAuth])
+
+  /* ---- group tab (0059): the institution-group discovery surfaces --------- */
+
+  /** the caller college's institution group, for honest tab copy */
+  const [myGroup, setMyGroup] = useState<{ id: string; name: string } | null>(null)
+  useEffect(() => {
+    if (!configured || !myCollegeId || !caps.groupDiscovery) { setMyGroup(null); return }
+    let cancelled = false
+    void db.fetchMyInstitutionGroup(myCollegeId)
+      .then(group => { if (!cancelled) setMyGroup(group) })
+      .catch(() => { if (!cancelled) setMyGroup(null) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configured, myCollegeId, caps.groupDiscovery])
+
+  type GroupState = { rows: CampusPost[] } | null
+  const [groupState, setGroupState] = useState<GroupState>(null)
+  const [groupLoading, setGroupLoading] = useState(false)
+  const [groupError, setGroupError] = useState<string | null>(null)
+  const groupLoadedRef = useRef(false)
+
+  const loadGroupPosts = useCallback(async (append = false) => {
+    if (!configured || !member || !caps.groupDiscovery) return
+    setGroupLoading(true)
+    setGroupError(null)
+    try {
+      const offset = append ? (groupState?.rows.length ?? 0) : 0
+      const rows = await db.fetchGroupPosts(offset, GROUP_PAGE_LIMIT)
+      setGroupState(current => {
+        const seen = new Set([...(current?.rows ?? []), ...extra].map(p => p.id))
+        const base = append ? current?.rows ?? [] : []
+        return { rows: [...base, ...rows.filter(r => !seen.has(r.id))] }
+      })
+    } catch (error) {
+      setGroupError(db.friendlyMessage(error))
+    } finally {
+      setGroupLoading(false)
+      groupLoadedRef.current = true
+    }
+  }, [configured, member, caps.groupDiscovery, groupState?.rows.length, extra])
+
+  useEffect(() => {
+    if (tab === 'group' && !groupLoadedRef.current && member && caps.groupDiscovery) void loadGroupPosts(false)
+  }, [tab, member, caps.groupDiscovery, loadGroupPosts])
+
+  /** peers from other colleges of the group — the Students tab gains a strip */
+  type PeerState = { rows: db.GroupPeer[]; hasMore: boolean; groupName?: string } | null
+  const [peerState, setPeerState] = useState<PeerState>(null)
+  const [peerLoading, setPeerLoading] = useState(false)
+  const [peerError, setPeerError] = useState<string | null>(null)
+  const peerLoadedRef = useRef(false)
+  const [peerFollowBusy, setPeerFollowBusy] = useState<string | null>(null)
+
+  const loadGroupPeers = useCallback(async (append = false) => {
+    if (!configured || !member || !caps.groupDiscovery) return
+    setPeerLoading(true)
+    setPeerError(null)
+    try {
+      const offset = append ? (peerState?.rows.length ?? 0) : 0
+      const rows = await db.fetchGroupPeers(24, offset)
+      setPeerState(current => {
+        const base = append ? current?.rows ?? [] : []
+        const rows2 = [...base, ...rows.filter(r => !base.some(x => x.id === r.id))]
+        return { rows: rows2, hasMore: rows.length >= 24, groupName: rows[0]?.groupName ?? current?.groupName }
+      })
+    } catch (error) {
+      setPeerError(db.friendlyMessage(error))
+    } finally {
+      setPeerLoading(false)
+      peerLoadedRef.current = true
+    }
+  }, [configured, member, caps.groupDiscovery, peerState?.rows.length])
+
+  useEffect(() => {
+    if (tab === 'students' && !peerLoadedRef.current && member && caps.groupDiscovery) void loadGroupPeers(false)
+  }, [tab, member, caps.groupDiscovery, loadGroupPeers])
+
+  const togglePeerFollow = useCallback(async (peer: db.GroupPeer) => {
+    if (!requireAuth('follow group students')) return
+    if (peerFollowBusy) return
+    setPeerFollowBusy(peer.id)
+    const handle = `@${peer.username}`
+    const current = following.includes(handle)
+    const ok = await onToggleFollow(peer.id, current, handle)
+    setPeerFollowBusy(null)
+    if (!ok) return
+    void member
+  }, [peerFollowBusy, following, onToggleFollow, requireAuth, member])
 
   /* ---- search tab (server-side search, scoped to the college) ---------------- */
 
@@ -1071,6 +1166,133 @@ export default function MyCollege({
           {studentLoading ? ' Loading…' : ' Show more classmates'}
         </button>
       )}
+
+      {/* 0059: discovery across the institution group — separate list, own
+          college first, so group browsing never dilutes the classmates feed */}
+      {caps.groupDiscovery && member && (
+        <>
+          <div className="mcl-rowhead" aria-label="Institution group students">
+            <p className="mcl-hint flex-1">
+              {myGroup?.name
+                ? `Students from other ${myGroup.name} institutes — same group, different colleges.`
+                : 'Students from other institutes in your institution group.'}
+            </p>
+          </div>
+          {peerError && (
+            <div className="mcl-error" role="status">
+              <p>{peerError}</p>
+              <button className="secondary-button" onClick={() => void loadGroupPeers(false)}>Try again</button>
+            </div>
+          )}
+          {peerLoading && !peerState && (
+            <div className="mcl-loading"><Loader2 size={16} className="mcl-spin"/> Finding group students…</div>
+          )}
+          {peerState?.rows.length
+            ? peerState.rows.map(s => (
+                <div className="mcl-student" key={`peer-${s.id}`}>
+                  <button className="mcl-student-main" onClick={() => onOpenProfile(s.id)} aria-label={`Open ${s.name}'s profile`}>
+                    <span className="mcl-student-avatar" aria-hidden="true">
+                      {s.avatarUrl
+                        ? <img src={s.avatarUrl} alt="" loading="lazy"/>
+                        : s.name.trim().slice(0, 1).toUpperCase()}
+                    </span>
+                    <span className="mcl-student-copy">
+                      <b>{s.name}{s.isVerified ? <ShieldCheck size={13} className="mcl-verified" aria-label="Verified account"/> : null}</b>
+                      <small>@{s.username}{s.collegeShort ? ` · ${s.collegeShort}` : ''}{s.course ? ` · ${s.course}` : ''}</small>
+                    </span>
+                  </button>
+                  <button
+                    className={following.includes(`@${s.username}`) ? 'secondary-button' : 'primary-button'}
+                    disabled={peerFollowBusy === s.id}
+                    onClick={() => void togglePeerFollow(s)}
+                    aria-label={following.includes(`@${s.username}`) ? `Unfollow @${s.username}` : `Follow @${s.username}`}
+                  >
+                    {peerFollowBusy === s.id
+                      ? <Loader2 size={14} className="mcl-spin"/>
+                      : following.includes(`@${s.username}`)
+                        ? <>Following <Check size={13}/></>
+                        : <><UserRound size={13}/> Follow</>}
+                  </button>
+                </div>
+              ))
+            : !peerLoading && !peerError && peerState && (
+              <p className="mcl-hint">
+                {myGroup
+                  ? 'No public profiles from other institutes in this group yet.'
+                  : 'Your institute is not part of an institution group — classmates above are your campus-wide directory.'}
+              </p>
+            )}
+          {peerState?.hasMore && (
+            <button className="secondary-button mcl-more" disabled={peerLoading} onClick={() => void loadGroupPeers(true)}>
+              {peerLoading ? <Loader2 size={15} className="mcl-spin"/> : null}
+              {peerLoading ? ' Loading…' : ' Show more group students'}
+            </button>
+          )}
+        </>
+      )}
+    </section>
+  )
+
+  /* 0059: the Group tab — discovery across the caller's institution group.
+   *  Institute-specific feeds stay separate: these rows are by definition
+   *  from OTHER colleges of the group, and visibility is whatever posts RLS
+   *  grants the reader (public audience posts; never another college's
+   *  college-audience posts). */
+  const groupPane = (
+    <section className="mcl-feed" aria-label="Institution group">
+      <p className="mcl-hint">
+        Public posts from other institutes in {myGroup?.name ?? 'your institution group'}.
+        Your college's own posts stay in the college tabs — the two feeds never mix.
+      </p>
+      {groupError && (
+        <div className="mcl-error" role="status">
+          <p>{groupError}</p>
+          <button className="secondary-button" onClick={() => void loadGroupPosts(false)}>Try again</button>
+        </div>
+      )}
+      {groupLoading && !groupState && (
+        <div className="mcl-loading"><Loader2 size={16} className="mcl-spin"/> Finding posts across the group…</div>
+      )}
+      {groupState?.rows.length
+        ? groupState.rows.map(post => (
+            <PostCard
+              key={`gp-${post.id}`}
+              post={post}
+              isOwn={false}
+              poll={pollFor(post)}
+              onVote={ids => onVote(post, ids)}
+              onLike={() => void likePost(post)}
+              onSave={() => onSave(post.id, post)}
+              onComment={() => onComment(post)}
+              onShare={() => onShare(post)}
+              onReport={() => onReport(post)}
+              onRepost={() => onRepost(post.id, post)}
+              onBlock={() => onRelation('user_blocks', post)}
+              onMute={() => onRelation('user_mutes', post)}
+              onEdit={() => onEdit(post)}
+              onDelete={() => onDelete(post)}
+              onMessage={() => onMessage(post)}
+              onOpenMention={onOpenProfile}
+              onOpenTag={onOpenTag}
+            />
+          ))
+        : !groupLoading && !groupError && groupState && (
+          <div className="mcl-empty mcl-empty-inner">
+            <Sparkles size={24} className="mcl-empty-icon"/>
+            <b>No group posts yet</b>
+            <span>
+              {myGroup?.name
+                ? `No public posts from other ${myGroup.name} institutes right now. They appear here the moment anyone posts.`
+                : 'Your institute is not part of an institution group yet — the college tabs have everything from your campus.'}
+            </span>
+          </div>
+        )}
+      {groupState && groupState.rows.length >= GROUP_PAGE_LIMIT && (
+        <button className="secondary-button mcl-more" disabled={groupLoading} onClick={() => void loadGroupPosts(true)}>
+          {groupLoading ? <Loader2 size={15} className="mcl-spin"/> : null}
+          {groupLoading ? ' Loading…' : ' Show more group posts'}
+        </button>
+      )}
     </section>
   )
 
@@ -1234,6 +1456,7 @@ export default function MyCollege({
       )
       case 'trending': return feedPane(trending, TRENDING_NOTE, 'tr')
       case 'latest': return feedPane(latest, 'Newest posts from your college, newest first.', 'lt')
+      case 'group': return groupPane
       case 'confessions': return confessionsPane
       case 'polls': return pollsPane
       case 'events': return eventsPane
@@ -1267,7 +1490,8 @@ export default function MyCollege({
       {leaderStrip}
 
       <nav className="mcl-tabs" role="tablist" aria-label="My College sections">
-        {TABS.map(t =>
+        {/* the Group tab exists only when 0059 is live and the caller is a member */}
+        {TABS.filter(t => t.key !== 'group' || (caps.groupDiscovery && member)).map(t =>
           <button
             key={t.key}
             role="tab"
@@ -1286,10 +1510,11 @@ export default function MyCollege({
           aria-label="Refresh this section"
           onClick={() => {
             if (FEED_TABS.includes(tab)) reloadFeed()
+            else if (tab === 'group') { groupLoadedRef.current = false; void loadGroupPosts(false) }
             else if (tab === 'confessions') void loadConfessions(false)
             else if (tab === 'events') void loadEvents()
             else if (tab === 'communities') void loadCommunities()
-            else if (tab === 'students') void loadStudents(false)
+            else if (tab === 'students') { void loadStudents(false); if (caps.groupDiscovery) void loadGroupPeers(false) }
             else if (tab === 'market') void loadListings()
           }}
         >

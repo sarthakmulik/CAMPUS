@@ -19,7 +19,29 @@ export type College = {
   short_name: string
   city: string
   verified: boolean
+  /** 0057: present when the caller selects the column */
+  locality?: string | null
+  institution_type?: string | null
 }
+
+/** One ranked row of the 0057 directory search (search_institutions RPC). */
+export type InstitutionHit = {
+  id: string
+  campus_id: string | null
+  name: string
+  short_name: string
+  institution_type: string | null
+  locality: string | null
+  campus_name: string | null
+  campus_locality: string | null
+  group_name: string | null
+  verified: boolean
+  rank: number
+}
+
+export type InstitutionDept = { id: string; name: string; abbreviation: string | null }
+export type InstitutionProgram = { id: string; name: string; level: string }
+
 
 export type Topic = { id: string; name: string; post_count: number }
 export type Club = { id: string; name: string; description: string }
@@ -46,6 +68,11 @@ export type Profile = {
   onboarding_completed_at: string | null
   /** 0009: last time the username changed — null until the first change */
   username_changed_at: string | null
+  /** 0057: structured academic identity — present when the caller selects them */
+  department_id?: string | null
+  campus_id?: string | null
+  academic_program_id?: string | null
+  semester?: number | null
 }
 
 export type Caps = {
@@ -68,6 +95,12 @@ export type Caps = {
   savedItems: boolean
   /** 0027: public.list_leaderboard exists (Leaderboard page) */
   leaderboard: boolean
+  /** 0057: profiles.department_id / campus_id / academic_program_id / semester exist */
+  institutionFields: boolean
+  /** 0057: public.search_institutions() exists (structured Pune directory) */
+  institutionSearch: boolean
+  /** 0059: public.list_group_posts / list_group_peers exist (group discovery) */
+  groupDiscovery: boolean
 }
 
 export const EMPTY_CAPS: Caps = {
@@ -81,6 +114,9 @@ export const EMPTY_CAPS: Caps = {
   avatars: false,
   savedItems: false,
   leaderboard: false,
+  institutionFields: false,
+  institutionSearch: false,
+  groupDiscovery: false,
 }
 
 export const PROFILE_BASE_COLUMNS =
@@ -163,13 +199,23 @@ export async function probeCaps(): Promise<Caps> {
     return !isMissingRelation(error) && !/PGRST2/.test(error.code ?? '')
   }
 
-  const [profileExtras, suggestions, interests, blocks, reports] = await Promise.all([
+  const [profileExtras, suggestions, interests, blocks, reports, institutionFields] = await Promise.all([
     hasColumn('profiles', 'onboarding_step'),
     hasRelation('college_suggestions'),
     hasRelation('profile_interests'),
     hasRelation('user_blocks'),
     hasRelation('reports'),
+    hasColumn('profiles', 'department_id'),
   ])
+
+  // 0057: the structured institution directory search
+  const { error: searchProbeError } = await client.rpc('search_institutions', { p_query: '', p_limit: 1 })
+  const institutionSearch = !searchProbeError || !isMissingFunction(searchProbeError)
+
+  // 0059: the group discovery RPCs (both empty-safe for visitors, so the
+  // probe is valid pre-login; anon callers get empty sets, never errors)
+  const { error: groupProbeError } = await client.rpc('list_group_posts', { p_limit: 1, p_offset: 0 })
+  const groupDiscovery = !groupProbeError || !isMissingFunction(groupProbeError)
 
   const { error: rpcError } = await client.rpc('username_available', { p_username: 'campus_probe_user' })
   const usernameRpc = !rpcError || !isMissingFunction(rpcError)
@@ -195,7 +241,7 @@ export async function probeCaps(): Promise<Caps> {
     avatars = false
   }
 
-  return { loaded: true, profileExtras, suggestions, interests, blocks, usernameRpc, reports, avatars, savedItems, leaderboard }
+  return { loaded: true, profileExtras, suggestions, interests, blocks, usernameRpc, reports, avatars, savedItems, leaderboard, institutionFields, institutionSearch, groupDiscovery }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -206,11 +252,96 @@ export async function loadColleges(): Promise<College[]> {
   if (!supabase) return []
   const { data, error } = await supabase
     .from('colleges')
-    .select('id, name, short_name, city, verified')
+    .select('id, name, short_name, city, verified, locality, institution_type')
     .order('name')
     .limit(500)
   if (error) throw new Error(friendlyMessage(error))
   return (data ?? []) as College[]
+}
+
+/**
+ * The signup college search: ranked, index-backed, alias/abbreviation/group/
+ * locality aware (0057). Only VERIFIED institutions come back for members and
+ * visitors; staff additionally see pending_review rows. Falls back to an
+ * in-memory filter over loadColleges when 0057 is not applied yet, so the
+ * wizard never hard-fails on an older schema.
+ */
+export async function searchInstitutions(
+  query: string,
+  caps: Caps,
+  limit = 25,
+): Promise<InstitutionHit[]> {
+  if (!supabase) return []
+  if (caps.institutionSearch) {
+    const { data, error } = await supabase.rpc('search_institutions', {
+      p_query: query,
+      p_limit: limit,
+    })
+    if (error) throw new Error(friendlyMessage(error))
+    return ((data ?? []) as Record<string, unknown>[]).map(row => ({
+      id: row.id as string,
+      campus_id: (row.campus_id as string | null) ?? null,
+      name: (row.name as string) ?? '',
+      short_name: (row.short_name as string) ?? '',
+      institution_type: (row.institution_type as string | null) ?? null,
+      locality: ((row.campus_locality ?? row.locality) as string | null) ?? null,
+      campus_name: (row.campus_name as string | null) ?? null,
+      campus_locality: (row.campus_locality as string | null) ?? null,
+      group_name: (row.group_name as string | null) ?? null,
+      verified: Boolean(row.verified),
+      rank: Number(row.rank ?? 0),
+    }))
+  }
+  // Pre-0057 fallback: the flat legacy list, filtered the old way.
+  const term = query.trim().toLowerCase()
+  const rows = await loadColleges()
+  const base = !term ? rows.slice(0, limit) : rows
+    .filter(college => `${college.name} ${college.short_name} ${college.city}`.toLowerCase().includes(term))
+    .slice(0, limit)
+  return base.map(college => ({
+    id: college.id,
+    campus_id: null,
+    name: college.name,
+    short_name: college.short_name,
+    institution_type: college.institution_type ?? null,
+    locality: college.locality ?? null,
+    campus_name: null,
+    campus_locality: null,
+    group_name: null,
+    verified: college.verified,
+    rank: 0,
+  }))
+}
+
+/** Institution-specific department list (0057); empty when none are seeded. */
+export async function listDepartments(collegeId: string): Promise<InstitutionDept[]> {
+  if (!supabase) return []
+  const { data, error } = await supabase.rpc('list_departments', { p_college: collegeId })
+  if (error) {
+    // Pre-0057 schema: the caller falls back to the legacy free-text list.
+    if (isMissingFunction(error)) return []
+    throw new Error(friendlyMessage(error))
+  }
+  return ((data ?? []) as Record<string, unknown>[]).map(row => ({
+    id: row.id as string,
+    name: (row.name as string) ?? '',
+    abbreviation: (row.abbreviation as string | null) ?? null,
+  }))
+}
+
+/** Institution-specific program/course list (0057); empty when none are seeded. */
+export async function listPrograms(collegeId: string): Promise<InstitutionProgram[]> {
+  if (!supabase) return []
+  const { data, error } = await supabase.rpc('list_programs', { p_college: collegeId })
+  if (error) {
+    if (isMissingFunction(error)) return []
+    throw new Error(friendlyMessage(error))
+  }
+  return ((data ?? []) as Record<string, unknown>[]).map(row => ({
+    id: row.id as string,
+    name: (row.name as string) ?? '',
+    level: (row.level as string) ?? 'undergraduate',
+  }))
 }
 
 export async function loadTopics(): Promise<Topic[]> {
@@ -239,7 +370,7 @@ export async function loadClubs(): Promise<Club[]> {
 /* -------------------------------------------------------------------------- */
 
 const selectProfile = () =>
-  `${PROFILE_BASE_COLUMNS}, ${PROFILE_EXTRA_COLUMNS}`
+  `${PROFILE_BASE_COLUMNS}, ${PROFILE_EXTRA_COLUMNS}, department_id, campus_id, academic_program_id, semester`
 
 export async function fetchProfile(userId: string): Promise<Profile | null> {
   if (!supabase) return null
@@ -249,9 +380,15 @@ export async function fetchProfile(userId: string): Promise<Profile | null> {
 
   // Migration 0001 not applied yet: retry with the columns that exist today.
   if (error && isMissingColumn(error)) {
-    const retry = await supabase.from('profiles').select(PROFILE_BASE_COLUMNS).eq('id', userId).maybeSingle()
+    const retry = await supabase.from('profiles').select(`${PROFILE_BASE_COLUMNS}, ${PROFILE_EXTRA_COLUMNS}`).eq('id', userId).maybeSingle()
     data = retry.data
     error = retry.error
+    // Migration 0057 not applied yet: drop the institution fields only.
+    if (error && isMissingColumn(error)) {
+      const retryBase = await supabase.from('profiles').select(PROFILE_BASE_COLUMNS).eq('id', userId).maybeSingle()
+      data = retryBase.data
+      error = retryBase.error
+    }
   }
   if (error) throw new Error(friendlyMessage(error))
   return (data as Profile | null) ?? null
@@ -284,6 +421,14 @@ export type ProfilePatch = Partial<{
   college_declared_at: string | null
   course: string | null
   department: string | null
+  /** 0057: institution-specific department (kept in sync with `department`) */
+  department_id: string | null
+  /** 0057: physical campus override for multi-campus institutions */
+  campus_id: string | null
+  /** 0057: structured program reference */
+  academic_program_id: string | null
+  /** 0057: semester 1-10 where the program needs it */
+  semester: number | null
   year_of_study: number | null
   is_private: boolean
   onboarding_step: number
@@ -302,12 +447,17 @@ export async function saveProfile(
 ): Promise<{ degraded: boolean }> {
   if (!supabase) throw new Error('CAMPUS is not connected. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env.')
   const extraKeys = ['first_name', 'last_name', 'department', 'onboarding_step', 'onboarding_completed_at', 'college_declared_at']
+  const instKeys = ['department_id', 'campus_id', 'academic_program_id', 'semester']
   const payload: Record<string, unknown> = {}
   let degraded = false
 
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined) continue
     if (extraKeys.includes(key) && !caps.profileExtras) {
+      degraded = true
+      continue
+    }
+    if (instKeys.includes(key) && !caps.institutionFields) {
       degraded = true
       continue
     }
@@ -572,13 +722,24 @@ export function fetchStaffPostContent(postId: string): Promise<StaffPostContent>
 /* College suggestions                                                         */
 /* -------------------------------------------------------------------------- */
 
-export async function submitCollegeSuggestion(name: string, city: string, caps: Caps): Promise<void> {
+export async function submitCollegeSuggestion(
+  name: string,
+  city: string,
+  caps: Caps,
+  details?: { locality?: string; website?: string; type?: string },
+): Promise<void> {
   if (!supabase) throw new Error('CAMPUS is not connected.')
   if (!caps.suggestions) {
     // Table missing: keep the request honest instead of faking success.
     throw new Error('College suggestions are not enabled yet. Apply supabase/migrations/0001_explore_first_onboarding.sql first.')
   }
-  const { error } = await supabase.rpc('request_college_suggestion', { p_name: name, p_city: city })
+  const { error } = await supabase.rpc('request_college_suggestion', {
+    p_name: name,
+    p_city: city,
+    p_locality: details?.locality ?? null,
+    p_website: details?.website ?? null,
+    p_type: details?.type ?? null,
+  })
   if (error) throw new Error(friendlyMessage(error))
 }
 
@@ -866,6 +1027,88 @@ export async function fetchFeedPage(offset = 0, limit = 20): Promise<CampusPost[
   if (error) throw new Error(friendlyMessage(error))
   const rows = (data ?? []) as FeedRow[]
   return rows.map(row => mapFeedRow(row))
+}
+
+/**
+ * The 0059 group feed: public posts from OTHER colleges of the caller's
+ * institution group (same row shape as list_public_posts, so mapFeedRow
+ * works unchanged). Visibility stays with posts RLS + post_visible_to —
+ * this RPC adds no audience of its own. Throws when 0059 is not applied;
+ * callers gate on caps.groupDiscovery.
+ */
+export async function fetchGroupPosts(offset = 0, limit = 20): Promise<CampusPost[]> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('list_group_posts', {
+    p_limit: Math.min(Math.max(limit, 1), 50),
+    p_offset: Math.max(offset, 0),
+  })
+  if (error) throw new Error(friendlyMessage(error))
+  const rows = (data ?? []) as FeedRow[]
+  return rows.map(row => mapFeedRow(row))
+}
+
+/** One public member of the caller's institution group (0059). */
+export type GroupPeer = {
+  id: string
+  username: string
+  name: string
+  avatarUrl: string | null
+  course: string | null
+  year: number | null
+  isVerified: boolean
+  collegeId: string | null
+  collegeShort: string | null
+  groupName: string | null
+}
+
+/**
+ * Students from OTHER colleges of the caller's group: public profiles only,
+ * blocks honoured both directions, self and own college excluded (0059).
+ */
+export async function fetchGroupPeers(limit = 24, offset = 0): Promise<GroupPeer[]> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.rpc('list_group_peers', {
+    p_limit: Math.min(Math.max(limit, 1), 50),
+    p_offset: Math.max(offset, 0),
+  })
+  if (error) throw new Error(friendlyMessage(error))
+  return ((data ?? []) as Record<string, unknown>[])
+    .map(row => {
+      const username = (row.username as string | null) ?? ''
+      const displayName = ((row.display_name as string | null) ?? '').trim()
+      return {
+        id: row.id as string,
+        username,
+        name: displayName || (username ? `@${username}` : 'Student'),
+        avatarUrl: (row.avatar_url as string | null) ?? null,
+        course: (row.course as string | null) ?? null,
+        year: (row.year_of_study as number | null) ?? null,
+        isVerified: Boolean(row.is_verified),
+        collegeId: (row.college_id as string | null) ?? null,
+        collegeShort: (row.college_short_name as string | null) ?? null,
+        groupName: (row.group_name as string | null) ?? null,
+      }
+    })
+    .filter(s => s.username)
+}
+
+/** The caller college's institution group (0057) — null when none is set. */
+export async function fetchMyInstitutionGroup(
+  collegeId: string,
+): Promise<{ id: string; name: string } | null> {
+  if (!supabase || !collegeId) return null
+  const { data, error } = await supabase
+    .from('colleges')
+    .select('id, institution_group_id, institution_groups(name)')
+    .eq('id', collegeId)
+    .maybeSingle()
+  if (error) throw new Error(friendlyMessage(error))
+  const row = data as { institution_group_id: string | null; institution_groups: { name: string } | null } | null
+  if (!row?.institution_group_id) return null
+  return {
+    id: row.institution_group_id,
+    name: row.institution_groups?.name ?? 'your institution group',
+  }
 }
 
 /** One public, non-staff profile of My College's People section. */

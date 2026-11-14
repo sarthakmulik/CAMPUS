@@ -203,13 +203,16 @@ export default function Profile({ profileId, myUserId, colleges, isMember, caps,
   }
 
   const locked = !isSelf && Boolean(profile.is_private) && !following
-  const college = colleges.find(c => c.id === profile.college_id)?.short_name
+  // 0057: the full directory row now carries locality + type
+  const collegeRow = colleges.find(c => c.id === profile.college_id)
+  const college = collegeRow?.short_name
 
   const display = profile.display_name?.trim() || (profile.username ? `@${profile.username}` : 'CAMPUS member')
 
   // academic line only from real fields, only when present
   const academic = [profile.course ?? profile.department ?? null,
-    profile.year_of_study ? `Year ${profile.year_of_study}` : null]
+    profile.year_of_study ? `Year ${profile.year_of_study}` : null,
+    profile.semester ? `Sem ${profile.semester}` : null]
     .filter(Boolean).join(' · ') as string
   const hasUsername = Boolean(profile.username)
 
@@ -237,7 +240,7 @@ export default function Profile({ profileId, myUserId, colleges, isMember, caps,
             </small>
             {(college || academic) && (
               <span className="profile-meta-chip">
-                {college ?? 'No college set'}{academic ? ` · ${academic}` : ''}
+                {college ?? 'No college set'}{collegeRow?.locality ? ` — ${collegeRow.locality}` : ''}{academic ? ` · ${academic}` : ''}
               </span>
             )}
           </div>

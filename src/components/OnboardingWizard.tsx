@@ -23,6 +23,22 @@ const DEPARTMENTS = [
   'Computer Science', 'Information Technology', 'Electronics & Telecommunication', 'Electrical',
   'Mechanical', 'Civil', 'Chemical', 'Biotechnology', 'Artificial Intelligence & Data Science', 'Other',
 ]
+/** 0057: institution types — labels mirror the directory's check constraint. */
+const TYPE_LABELS: Record<string, string> = {
+  university: 'University',
+  engineering: 'Engineering',
+  polytechnic: 'Polytechnic',
+  pharmacy: 'Pharmacy',
+  management: 'Management',
+  arts_science: 'Arts, Science & Commerce',
+  law: 'Law',
+  design: 'Design',
+  medical: 'Medical',
+  education: 'Education',
+  other: 'Institute',
+}
+/** 0057: optional browse chips — tapping one searches by group name. Skippable. */
+const GROUP_CHIPS = ['JSPM', 'TSSM', 'MIT', 'Symbiosis', 'Bharati Vidyapeeth', 'Sinhgad']
 const YEARS = [
   { value: '1', label: 'First year' },
   { value: '2', label: 'Second year' },
@@ -58,13 +74,25 @@ export default function OnboardingWizard() {
 
   const [collegeQuery, setCollegeQuery] = useState('')
   const [collegeId, setCollegeId] = useState(() => profile?.college_id ?? '')
+  // 0057: ranked directory search (JSPM Hadapsar prioritised on launch list)
+  const [instHits, setInstHits] = useState<db.InstitutionHit[]>([])
+  const [instLoading, setInstLoading] = useState(false)
+  const [instError, setInstError] = useState<string | null>(null)
   const [showSuggest, setShowSuggest] = useState(false)
   const [suggestName, setSuggestName] = useState('')
   const [suggestCity, setSuggestCity] = useState('')
+  const [suggestLocality, setSuggestLocality] = useState('')
+  const [suggestWebsite, setSuggestWebsite] = useState('')
+  const [suggestType, setSuggestType] = useState('')
   const [suggested, setSuggested] = useState<string | null>(null)
 
   const [course, setCourse] = useState(() => profile?.course ?? '')
   const [department, setDepartment] = useState(() => profile?.department ?? '')
+  const [departmentId, setDepartmentId] = useState(() => profile?.department_id ?? '')
+  const [programId, setProgramId] = useState(() => profile?.academic_program_id ?? '')
+  const [semester, setSemester] = useState(() => (profile?.semester ? String(profile.semester) : ''))
+  const [deptOptions, setDeptOptions] = useState<db.InstitutionDept[]>([])
+  const [programOptions, setProgramOptions] = useState<db.InstitutionProgram[]>([])
   const [year, setYear] = useState(() => (profile?.year_of_study ? String(profile.year_of_study) : ''))
 
   const [avatarPreview, setAvatarPreview] = useState<string | null>(() => profile?.avatar_url ?? null)
@@ -84,6 +112,65 @@ export default function OnboardingWizard() {
     () => colleges.find(college => college.id === collegeId) ?? null,
     [colleges, collegeId],
   )
+  // 0057: the same selection, with campus + group context when the structured
+  // search returned it (falls back to the flat legacy row otherwise).
+  const selectedHit = useMemo(
+    () => instHits.find(hit => hit.id === collegeId) ?? null,
+    [instHits, collegeId],
+  )
+
+  // Debounced, server-ranked institution search. An empty query shows the
+  // launch list (verified Hadapsar institutions first).
+  useEffect(() => {
+    if (step !== 2) return
+    let cancelled = false
+    setInstLoading(true)
+    const handle = window.setTimeout(() => {
+      void db.searchInstitutions(collegeQuery, caps, 25)
+        .then(hits => {
+          if (cancelled) return
+          setInstHits(hits)
+          setInstError(null)
+        })
+        .catch(searchError => {
+          if (cancelled) return
+          setInstError(db.friendlyMessage(searchError))
+        })
+        .finally(() => {
+          if (!cancelled) setInstLoading(false)
+        })
+    }, collegeQuery.trim() ? 250 : 0)
+    return () => {
+      cancelled = true
+      window.clearTimeout(handle)
+    }
+  }, [collegeQuery, step, caps])
+
+  // Institution-specific departments and programs (0057). Empty lists mean
+  // the legacy free-text fields stay in charge - never a hard failure.
+  useEffect(() => {
+    if (!collegeId) {
+      setDeptOptions([])
+      setProgramOptions([])
+      return
+    }
+    let cancelled = false
+    void Promise.all([db.listDepartments(collegeId), db.listPrograms(collegeId)])
+      .then(([depts, programs]) => {
+        if (cancelled) return
+        setDeptOptions(depts)
+        setProgramOptions(programs)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDeptOptions([])
+          setProgramOptions([])
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [collegeId])
 
   // Debounced username availability.
   useEffect(() => {
@@ -116,15 +203,7 @@ export default function OnboardingWizard() {
     return () => window.clearTimeout(handle)
   }, [username, caps, profile?.username])
 
-  const collegeMatches = useMemo(() => {
-    const query = collegeQuery.trim().toLowerCase()
-    if (!query) return colleges.slice(0, 8)
-    return colleges
-      .filter(college =>
-        `${college.name} ${college.short_name} ${college.city}`.toLowerCase().includes(query),
-      )
-      .slice(0, 8)
-  }, [colleges, collegeQuery])
+  const collegeMatches = useMemo(() => instHits, [instHits])
 
   const goTo = (next: number) => {
     setError(null)
@@ -161,6 +240,10 @@ export default function OnboardingWizard() {
         const value = Number(year)
         if (!Number.isFinite(value) || value < 1 || value > 6) return 'Choose a valid academic year.'
       }
+      if (semester) {
+        const value = Number(semester)
+        if (!Number.isFinite(value) || value < 1 || value > 8) return 'Choose a valid semester.'
+      }
       return null
     }
     if (step === 4) {
@@ -185,13 +268,25 @@ export default function OnboardingWizard() {
     }
     if (step === 2) {
       const now = new Date().toISOString()
-      const message = await patchProfile({ college_id: collegeId || null, college_declared_at: now })
+      const hit = selectedHit
+      const message = await patchProfile({
+        college_id: collegeId || null,
+        // 0057: campus rides along when the structured search provided it
+        // (saveProfile drops the key pre-0057, so old schemas stay safe).
+        campus_id: hit?.campus_id ?? undefined,
+        college_declared_at: now,
+      })
       if (message) return fail(message)
     }
     if (step === 3) {
+      const chosenDept = deptOptions.find(option => option.id === departmentId) ?? null
+      const chosenProgram = programOptions.find(option => option.id === programId) ?? null
       const message = await patchProfile({
-        course: clean(course) || null,
-        department: clean(department) || null,
+        course: chosenProgram ? chosenProgram.name : (clean(course) || null),
+        department: chosenDept ? chosenDept.name : (clean(department) || null),
+        department_id: chosenDept?.id ?? null,
+        academic_program_id: chosenProgram?.id ?? null,
+        semester: semester ? Number(semester) : null,
         year_of_study: year ? Number(year) : null,
       })
       if (message) return fail(message)
@@ -280,11 +375,18 @@ export default function OnboardingWizard() {
     setBusy(true)
     setError(null)
     try {
-      await db.submitCollegeSuggestion(suggestName, suggestCity, caps)
+      await db.submitCollegeSuggestion(suggestName, suggestCity, caps, {
+        locality: clean(suggestLocality) || undefined,
+        website: clean(suggestWebsite) || undefined,
+        type: suggestType || undefined,
+      })
       setSuggested(clean(suggestName))
       setShowSuggest(false)
       setSuggestName('')
       setSuggestCity('')
+      setSuggestLocality('')
+      setSuggestWebsite('')
+      setSuggestType('')
     } catch (suggestionError) {
       setError(db.friendlyMessage(suggestionError))
     } finally {
@@ -396,43 +498,84 @@ export default function OnboardingWizard() {
         {step === 2 && (
           <section className="wizard-step">
             <span className="section-hero-icon"><Building2 size={24} /></span>
-            <h2>Which college is yours?</h2>
+            <h2>Which institute is yours?</h2>
             <p className="wizard-lead">
-              This is a self-declared affiliation — CAMPUS does not verify enrolment and never asks for a student ID.
+              Search your exact college — not just its group. Launch week prioritises verified JSPM
+              Hadapsar institutes. This is a self-declared affiliation; CAMPUS never asks for a student ID.
             </p>
-            <label className="field-label">Search colleges
+
+            {!collegeQuery && (
+              <fieldset className="chip-fieldset">
+                <legend>Browse an institution group <span className="optional">optional — or just search below</span></legend>
+                <div className="chip-row">
+                  {GROUP_CHIPS.map(group => (
+                    <button key={group} type="button" className="chip" onClick={() => setCollegeQuery(group)}>
+                      {group}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+            )}
+
+            <label className="field-label">Search institutes
               <span className="input-with-action">
                 <Search size={16} />
                 <input
                   value={collegeQuery}
                   onChange={event => { setCollegeQuery(event.target.value); setShowSuggest(false) }}
-                  placeholder="College name or city"
+                  placeholder="Name, abbreviation, group or campus — try “JSPM”"
                   autoComplete="off"
+                  enterKeyHint="search"
                 />
+                {collegeQuery && (
+                  <button type="button" className="text-button" onClick={() => setCollegeQuery('')} aria-label="Clear search">Clear</button>
+                )}
               </span>
             </label>
 
-            <ul className="college-list">
-              {collegeMatches.map(college => (
-                <li key={college.id}>
-                  <button
-                    type="button"
-                    className={`college-option ${collegeId === college.id ? 'selected' : ''}`}
-                    onClick={() => { setCollegeId(college.id); setSuggested(null); setError(null) }}
-                  >
-                    <span className="college-seal"><Building2 size={17} /></span>
-                    <span className="college-option-copy">
-                      <b>{college.name}</b>
-                      <small>{college.short_name} · {college.city}{college.verified ? ' · listed' : ''}</small>
-                    </span>
-                    {collegeId === college.id && <Check size={17} />}
-                  </button>
-                </li>
-              ))}
-              {collegeMatches.length === 0 && !showSuggest && (
-                <li className="college-empty">No college matched “{collegeQuery}”. You can request it below.</li>
-              )}
-            </ul>
+            {selectedCollege && !collegeQuery && (
+              <p className="field-hint success" aria-live="polite">
+                Selected: {selectedCollege.name}
+                {selectedHit?.campus_locality || selectedHit?.locality
+                  ? ` — ${selectedHit?.campus_locality ?? selectedHit?.locality}, ${selectedCollege.city}`
+                  : ` — ${selectedCollege.city}`}
+              </p>
+            )}
+
+            {instError && (
+              <p className="form-error" role="alert"><AlertCircle size={15} /> {instError}</p>
+            )}
+
+            {instLoading ? (
+              <p className="field-hint" aria-live="polite">Searching the directory…</p>
+            ) : (
+              <ul className="college-list">
+                {collegeMatches.map(college => (
+                  <li key={college.id}>
+                    <button
+                      type="button"
+                      className={`college-option ${collegeId === college.id ? 'selected' : ''}`}
+                      onClick={() => { setCollegeId(college.id); setSuggested(null); setError(null) }}
+                    >
+                      <span className="college-seal"><Building2 size={17} /></span>
+                      <span className="college-option-copy">
+                        <b>{college.name}</b>
+                        <small>
+                          {college.short_name} · {college.campus_locality || college.locality || 'Pune'}
+                          {college.institution_type ? ` · ${TYPE_LABELS[college.institution_type] ?? 'Institute'}` : ''}
+                          {college.group_name ? ` · ${college.group_name}` : ''}
+                          {college.verified ? ' · listed' : ''}
+                        </small>
+                      </span>
+                      {collegeId === college.id && <Check size={17} />}
+                    </button>
+                  </li>
+                ))}
+                {collegeMatches.length === 0 && !showSuggest && (
+                  <li className="college-empty">No institute matched “{collegeQuery}”. You can request it below.</li>
+                )}
+              </ul>
+            )}
 
             {suggested && (
               <p className="field-hint success">
@@ -449,8 +592,22 @@ export default function OnboardingWizard() {
                 <label className="field-label">College name
                   <input value={suggestName} onChange={event => setSuggestName(event.target.value)} placeholder="For example, Symbiosis Institute of Technology" maxLength={120} />
                 </label>
+                <label className="field-label">Campus / locality <span className="optional">optional</span>
+                  <input value={suggestLocality} onChange={event => setSuggestLocality(event.target.value)} placeholder="Hadapsar" maxLength={60} />
+                </label>
                 <label className="field-label">City <span className="optional">optional</span>
                   <input value={suggestCity} onChange={event => setSuggestCity(event.target.value)} placeholder="Pune" maxLength={60} />
+                </label>
+                <label className="field-label">Official website <span className="optional">optional</span>
+                  <input value={suggestWebsite} onChange={event => setSuggestWebsite(event.target.value)} placeholder="https://…" inputMode="url" maxLength={200} />
+                </label>
+                <label className="field-label">Institute type <span className="optional">optional</span>
+                  <select value={suggestType} onChange={event => setSuggestType(event.target.value)}>
+                    <option value="">Not sure</option>
+                    {Object.entries(TYPE_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
                 </label>
                 <div className="wizard-actions inline">
                   <button className="secondary-button" onClick={() => setShowSuggest(false)} disabled={busy}>Cancel</button>
@@ -468,18 +625,66 @@ export default function OnboardingWizard() {
             <span className="section-hero-icon"><BookOpen size={24} /></span>
             <h2>Your course and year</h2>
             <p className="wizard-lead">All optional. These help CAMPUS suggest relevant clubs, events and placements.</p>
-            <label className="field-label">Course or degree <span className="optional">optional</span>
-              <input value={course} onChange={event => setCourse(event.target.value)} list="course-options" placeholder="B.Tech" maxLength={60} />
-              <datalist id="course-options">{COURSES.map(item => <option key={item} value={item} />)}</datalist>
-            </label>
-            <label className="field-label">Department or branch <span className="optional">optional</span>
-              <input value={department} onChange={event => setDepartment(event.target.value)} list="dept-options" placeholder="Computer Science" maxLength={80} />
-              <datalist id="dept-options">{DEPARTMENTS.map(item => <option key={item} value={item} />)}</datalist>
-            </label>
+
+            {programOptions.length > 0 ? (
+              <label className="field-label">Course / program <span className="optional">at {selectedCollege?.short_name ?? 'your institute'}</span>
+                <select
+                  value={programId}
+                  onChange={event => {
+                    setProgramId(event.target.value)
+                    const chosen = programOptions.find(option => option.id === event.target.value)
+                    setCourse(chosen ? chosen.name : '')
+                  }}
+                >
+                  <option value="">Prefer not to say</option>
+                  {programOptions.map(option => (
+                    <option key={option.id} value={option.id}>{option.name}</option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <label className="field-label">Course or degree <span className="optional">optional</span>
+                <input value={course} onChange={event => setCourse(event.target.value)} list="course-options" placeholder="B.Tech" maxLength={60} />
+                <datalist id="course-options">{COURSES.map(item => <option key={item} value={item} />)}</datalist>
+              </label>
+            )}
+
+            {deptOptions.length > 0 ? (
+              <label className="field-label">Department / branch <span className="optional">at {selectedCollege?.short_name ?? 'your institute'}</span>
+                <select
+                  value={departmentId}
+                  onChange={event => {
+                    setDepartmentId(event.target.value)
+                    const chosen = deptOptions.find(option => option.id === event.target.value)
+                    setDepartment(chosen ? chosen.name : '')
+                  }}
+                >
+                  <option value="">Prefer not to say</option>
+                  {deptOptions.map(option => (
+                    <option key={option.id} value={option.id}>{option.name}</option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <label className="field-label">Department or branch <span className="optional">optional</span>
+                <input value={department} onChange={event => setDepartment(event.target.value)} list="dept-options" placeholder="Computer Science" maxLength={80} />
+                <datalist id="dept-options">{DEPARTMENTS.map(item => <option key={item} value={item} />)}</datalist>
+              </label>
+            )}
+
             <label className="field-label">Academic year <span className="optional">optional</span>
               <select value={year} onChange={event => setYear(event.target.value)}>
                 <option value="">Prefer not to say</option>
                 {YEARS.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
+              </select>
+            </label>
+
+            <label className="field-label">Semester <span className="optional">optional</span>
+              <select value={semester} onChange={event => setSemester(event.target.value)}>
+                <option value="">Prefer not to say</option>
+                {[1, 2, 3, 4, 5, 6, 7, 8].map(value => (
+                  <option key={value} value={value}>Semester {value}</option>
+                ))}
               </select>
             </label>
           </section>
@@ -580,9 +785,12 @@ export default function OnboardingWizard() {
             </p>
             <ul className="welcome-summary">
               <li><b>Username</b><span>@{db.normalizeUsername(username) || profile?.username || '—'}</span></li>
-              <li><b>College</b><span>{selectedCollege ? `${selectedCollege.name} (${selectedCollege.short_name})` : suggested ? `${suggested} — requested` : 'Not set'}</span></li>
-              {(clean(course) || department || year) && (
-                <li><b>Course</b><span>{[clean(course), clean(department), YEARS.find(item => item.value === year)?.label].filter(Boolean).join(' · ')}</span></li>
+              <li><b>Institute</b><span>{selectedCollege ? `${selectedCollege.name} (${selectedCollege.short_name})` : suggested ? `${suggested} — requested` : 'Not set'}</span></li>
+              {(selectedHit?.campus_locality || selectedHit?.locality) && (
+                <li><b>Campus</b><span>{selectedHit.campus_locality ?? selectedHit.locality}, {selectedCollege?.city ?? 'Pune'}</span></li>
+              )}
+              {(clean(course) || department || year || semester) && (
+                <li><b>Course</b><span>{[clean(course), clean(department), YEARS.find(item => item.value === year)?.label, semester ? `Semester ${semester}` : ''].filter(Boolean).join(' · ')}</span></li>
               )}
               {bio && <li><b>Bio</b><span>{clean(bio)}</span></li>}
             </ul>

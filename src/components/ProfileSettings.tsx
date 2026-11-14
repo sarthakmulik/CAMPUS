@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   ArrowLeft, BadgeCheck, Camera, Eye, FileText, KeyRound, Loader2, Lock, LogOut,
-  ShieldAlert, UserCog, VolumeX, X,
+  Search, ShieldAlert, UserCog, VolumeX, X,
 } from 'lucide-react'
 import * as db from '../lib/db'
 import type { Caps, Profile as DbProfile, RelationRow, ReportRow, UsernameCheck } from '../lib/db'
@@ -46,6 +46,21 @@ export default function ProfileSettings({ profile, userId, caps, patchProfile, r
   // data
   const [reports, setReports] = useState<ReportRow[] | null>(null)
 
+  // 0057: institute & class editing (existing users can change institution)
+  const [instQuery, setInstQuery] = useState('')
+  const [instHits, setInstHits] = useState<db.InstitutionHit[]>([])
+  const [pendingCollegeId, setPendingCollegeId] = useState<string | null>(null)
+  const [pendingCampusId, setPendingCampusId] = useState<string | null>(null)
+  const [deptOptions, setDeptOptions] = useState<db.InstitutionDept[]>([])
+  const [pendingDepartmentId, setPendingDepartmentId] = useState<string | null>(null)
+  const [pendingProgramId, setPendingProgramId] = useState<string | null>(null)
+  const [pendingPrograms, setPendingPrograms] = useState<db.InstitutionProgram[]>([])
+  const [pendingCourse, setPendingCourse] = useState(profile.course ?? '')
+  const [pendingYear, setPendingYear] = useState(profile.year_of_study ? String(profile.year_of_study) : '')
+  const [pendingSemester, setPendingSemester] = useState(profile.semester ? String(profile.semester) : '')
+
+  const effectiveCollegeId = pendingCollegeId ?? profile.college_id ?? ''
+
   function note(ok: boolean, text: string) {
     setMessage({ ok, text })
     if (typeof window !== 'undefined') window.scrollTo?.({ top: 0, behavior: 'smooth' })
@@ -84,6 +99,62 @@ export default function ProfileSettings({ profile, userId, caps, patchProfile, r
     if (view === 'account' && email === null) void db.currentEmail().then(address => setEmail(address ?? 'unavailable')).catch(() => setEmail('unavailable'))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view])
+
+  // 0057: debounced directory search while the account view is open
+  useEffect(() => {
+    if (view !== 'account') return
+    let cancelled = false
+    const handle = window.setTimeout(() => {
+      void db.searchInstitutions(instQuery, caps, 12)
+        .then(hits => { if (!cancelled) setInstHits(hits) })
+        .catch(() => { if (!cancelled) setInstHits([]) })
+    }, instQuery.trim() ? 250 : 0)
+    return () => { cancelled = true; window.clearTimeout(handle) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [instQuery, view])
+
+  // 0057: departments + programs of the effective (pending or current) college
+  useEffect(() => {
+    if (!effectiveCollegeId) { setDeptOptions([]); setPendingPrograms([]); return }
+    let cancelled = false
+    void Promise.all([db.listDepartments(effectiveCollegeId), db.listPrograms(effectiveCollegeId)])
+      .then(([depts, programs]) => {
+        if (!cancelled) { setDeptOptions(depts); setPendingPrograms(programs) }
+      })
+      .catch(() => { if (!cancelled) { setDeptOptions([]); setPendingPrograms([]) } })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveCollegeId])
+
+  async function saveInstitute() {
+    const chosenDept = deptOptions.find(option => option.id === pendingDepartmentId) ?? null
+    const chosenProgram = pendingPrograms.find(option => option.id === pendingProgramId) ?? null
+    setBusy(true)
+    setMessage(null)
+    try {
+      const failure = await patchProfile({
+        college_id: pendingCollegeId ?? profile.college_id ?? null,
+        campus_id: pendingCampusId,
+        department_id: chosenDept?.id ?? null,
+        department: chosenDept ? chosenDept.name : profile.department ?? null,
+        academic_program_id: chosenProgram?.id ?? null,
+        course: chosenProgram ? chosenProgram.name : (pendingCourse.trim() || null),
+        year_of_study: pendingYear ? Number(pendingYear) : null,
+        semester: pendingSemester ? Number(pendingSemester) : null,
+      })
+      reloadProfile()
+      if (failure) note(false, failure)
+      else {
+        setPendingCollegeId(null)
+        setPendingCampusId(null)
+        setPendingDepartmentId(null)
+        setPendingProgramId(null)
+        note(true, 'Institute details saved.')
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
 
   // username live check
   useEffect(() => {
@@ -238,6 +309,74 @@ export default function ProfileSettings({ profile, userId, caps, patchProfile, r
         <small>Signed in as</small>
         <b>{email ?? '…'}</b>
       </div>
+      <div className="settings-section-title">Institute &amp; class</div>
+      <label className="settings-field">
+        <span>Change institute</span>
+        <span className="input-with-action">
+          <Search size={15} />
+          <input
+            value={instQuery}
+            maxLength={80}
+            autoComplete="off"
+            placeholder={profile.college_id ? 'Search to switch, or leave as is' : 'Search your college'}
+            onChange={event => { setInstQuery(event.target.value); setPendingCollegeId(null); setPendingCampusId(null) }}
+          />
+        </span>
+      </label>
+      {instHits.length > 0 && instQuery.trim() && (
+        <ul className="college-list" role="listbox" aria-label="Institution results">
+          {instHits.map(hit => (
+            <li key={hit.id}>
+              <button
+                type="button"
+                className={`college-option ${effectiveCollegeId === hit.id ? 'selected' : ''}`}
+                onClick={() => { setPendingCollegeId(hit.id); setPendingCampusId(hit.campus_id); setInstQuery(hit.name) }}
+              >
+                <span className="college-option-copy">
+                  <b>{hit.name}</b>
+                  <small>
+                    {hit.short_name} · {hit.campus_locality || hit.locality || 'Pune'}
+                    {hit.institution_type ? ` · ${hit.institution_type.replace('_', ' ')}` : ''}
+                  </small>
+                </span>
+                {effectiveCollegeId === hit.id && <BadgeCheck size={16} />}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {deptOptions.length > 0 && (
+        <label className="settings-field">
+          <span>Department</span>
+          <select value={pendingDepartmentId ?? ''} onChange={event => setPendingDepartmentId(event.target.value || null)}>
+            <option value="">Not set</option>
+            {deptOptions.map(option => <option key={option.id} value={option.id}>{option.name}</option>)}
+          </select>
+        </label>
+      )}
+      <label className="settings-field">
+        <span>Course</span>
+        <input value={pendingCourse} maxLength={60} placeholder="B.Tech" onChange={event => setPendingCourse(event.target.value)}/>
+      </label>
+      <label className="settings-field">
+        <span>Year</span>
+        <select value={pendingYear} onChange={event => setPendingYear(event.target.value)}>
+          <option value="">Not set</option>
+          {[1, 2, 3, 4, 5].map(value => <option key={value} value={value}>Year {value}</option>)}
+          <option value="6">Postgraduate</option>
+        </select>
+      </label>
+      <label className="settings-field">
+        <span>Semester</span>
+        <select value={pendingSemester} onChange={event => setPendingSemester(event.target.value)}>
+          <option value="">Not set</option>
+          {[1, 2, 3, 4, 5, 6, 7, 8].map(value => <option key={value} value={value}>Semester {value}</option>)}
+        </select>
+      </label>
+      <button className="settings-primary" disabled={busy} onClick={() => void saveInstitute()}>
+        {busy ? <Loader2 size={15} className="spinner-ic"/> : <BadgeCheck size={15}/>} Save institute details
+      </button>
+
       <div className="settings-section-title">Your profile</div>
       <label className="settings-field">
         <span>Name</span>
