@@ -25,7 +25,7 @@ export const EVENT_CATEGORIES = [
   'Other',
 ] as const
 
-export type EventAudience = 'public' | 'college' | 'community'
+export type EventAudience = 'public' | 'college' | 'community' | 'group' | 'campus'
 export type EventEligibility = 'everyone' | 'college' | 'community'
 export type EventRegType = 'rsvp' | 'registration'
 export type EventFormat = 'offline' | 'online' | 'hybrid'
@@ -112,7 +112,7 @@ export interface ListEventsParams {
   query?: string
   category?: string
   format?: 'any' | EventFormat
-  scope?: 'any' | 'global' | 'college' | 'community'
+  scope?: 'any' | 'global' | 'college' | 'community' | 'group' | 'campus'
   month?: string
   sort?: EventSort
   limit?: number

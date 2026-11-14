@@ -22,6 +22,8 @@ type Props = {
 const CATEGORIES: { key: LeaderboardCategory; label: string; hint: string }[] = [
   { key: 'overall', label: 'Overall', hint: 'Every scored contribution across CAMPUS.' },
   { key: 'college', label: 'My College', hint: 'Rankings for students of your college.' },
+  { key: 'group', label: 'My Group', hint: 'Every college in your institution group, ranked together.' },
+  { key: 'campus', label: 'My Campus', hint: 'Every college sharing one of your campuses.' },
   { key: 'community', label: 'Communities', hint: 'Students shaping community discussions and resources.' },
   { key: 'creators', label: 'Creators', hint: 'Posts and reels that genuinely engage classmates.' },
   { key: 'events', label: 'Events', hint: 'Event organizers and verified attendees.' },
@@ -212,8 +214,10 @@ export default function Leaderboard({ identity, configured, requireAuth, notify,
             <div className="lb-mine-card">
               <div className="lb-mine-avatar">{identity.initials}</div>
               <div className="lb-mine-body">
-                <b>Your college rank is unavailable</b>
-                <span>Pick your college in your profile to appear on the “My College” board.</span>
+                <b>Your rank is unavailable</b>
+                <span>{category === 'overall' || category === 'community' || category === 'creators' || category === 'events'
+                  ? 'Contribute to appear on this board.'
+                  : 'Pick your college in your profile — the college, group and campus boards are built from it.'}</span>
               </div>
               <button className="lb-mine-side" onClick={() => onOpenProfile(identity.id)}>Set it up<ChevronRight size={14}/></button>
             </div>

@@ -90,7 +90,7 @@ export default function Events({
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [category, setCategory] = useState('All')
   const [format, setFormat] = useState<'any' | ev.EventFormat>('any')
-  const [scope, setScope] = useState<'any' | 'global' | 'college' | 'community'>('any')
+  const [scope, setScope] = useState<'any' | 'global' | 'college' | 'community' | 'group' | 'campus'>('any')
   const [sort, setSort] = useState<ev.EventSort>('recommended')
   const [month, setMonth] = useState(() => ym(new Date()))
   const [rows, setRows] = useState<ev.EventSummary[]>([])
@@ -408,11 +408,13 @@ export default function Events({
           </label>
           <label>
             <span>Scope</span>
-            <select value={scope} onChange={event => setScope(event.target.value as 'any' | 'global' | 'college' | 'community')}>
+            <select value={scope} onChange={event => setScope(event.target.value as 'any' | 'global' | 'college' | 'community' | 'group' | 'campus')}>
               <option value="any">Any</option>
               <option value="global">Global</option>
               <option value="college">College</option>
               <option value="community">Community</option>
+              <option value="group">Institution group</option>
+              <option value="campus">Shared campus</option>
             </select>
           </label>
           <label>
@@ -573,11 +575,11 @@ function EventFilterSheet({
   tab: EventTab
   category: string
   format: 'any' | ev.EventFormat
-  scope: 'any' | 'global' | 'college' | 'community'
+  scope: 'any' | 'global' | 'college' | 'community' | 'group' | 'campus'
   sort: ev.EventSort
   setCategory: (item: string) => void
   setFormat: (value: 'any' | ev.EventFormat) => void
-  setScope: (value: 'any' | 'global' | 'college' | 'community') => void
+  setScope: (value: 'any' | 'global' | 'college' | 'community' | 'group' | 'campus') => void
   setSort: (value: ev.EventSort) => void
   onReset: () => void
   onClose: () => void
@@ -652,11 +654,13 @@ function EventFilterSheet({
             <label className={onDiscover ? '' : 'disabled'}>
               <span>Scope</span>
               <select value={scope} disabled={!onDiscover}
-                onChange={event => setScope(event.target.value as 'any' | 'global' | 'college' | 'community')}>
+                onChange={event => setScope(event.target.value as 'any' | 'global' | 'college' | 'community' | 'group' | 'campus')}>
                 <option value="any">Any</option>
                 <option value="global">Global</option>
                 <option value="college">College</option>
                 <option value="community">Community</option>
+                <option value="group">Institution group</option>
+                <option value="campus">Shared campus</option>
               </select>
             </label>
           </div>

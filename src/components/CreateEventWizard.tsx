@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useBodyScrollLock } from '../lib/scrollLock'
 import {
   CalendarDays, Check, ChevronLeft, ChevronRight, Globe2, Image as ImageIcon,
-  Loader2, Lock, MapPin, Users, X, Video,
+  Loader2, Lock, MapPin, Users, Building2, X, Video,
 } from 'lucide-react'
 import * as ev from '../lib/events'
 import * as db from '../lib/db'
@@ -95,6 +95,14 @@ export default function CreateEventWizard({
   const [detailSnapshot, setDetailSnapshot] = useState<Snapshot | null>(null)
   const [managed, setManaged] = useState<ManagedCommunity[]>([])
   const [coverBusy, setCoverBusy] = useState(false)
+
+  // 0062: group / campus scopes come from the caller's OWN college row — the
+  // database re-derives them (colleges.institution_group_id, campus sets) and
+  // refuses an event whose college has neither, so nothing here can overstate
+  // reach.
+  const myCollegeRow = colleges.find(c => c.id === myCollegeId) ?? null
+  const myGroup = myCollegeRow?.group_name?.trim() || null
+  const myCampus = myCollegeRow?.locality?.trim() || null
 
   /* Editing: the summary rows lack the description/restricted fields, so the
      full detail is loaded (the viewer manages this event — fields unhide). */
@@ -226,6 +234,10 @@ export default function CreateEventWizard({
     if (index === 3) {
       if (state.audience === 'community' && !state.clubId) return 'Choose the community this event belongs to — only ones you own or moderate can host.'
       if (state.audience === 'college' && !myCollegeId) return 'Add your college on your profile first — college events need a declared college.'
+      if (state.audience === 'group' && !myCollegeId) return 'Add your college on your profile first — a group event is posted from your college.'
+      if (state.audience === 'group' && !myGroup) return 'Your college is not part of an institution group, so a group-wide event is not possible.'
+      if (state.audience === 'campus' && !myCollegeId) return 'Add your college on your profile first — a campus event is posted from your college.'
+      if (state.audience === 'campus' && !myCampus) return 'Your college has no verified campus, so a campus-wide event is not possible.'
       return null
     }
     if (index === 4) {
@@ -272,10 +284,10 @@ export default function CreateEventWizard({
     category: state.category,
     tags: state.tags.split(',').map(tag => tag.trim()).filter(Boolean),
     coverUrl: state.coverUrl || null,
-    collegeId: state.audience === 'college' ? myCollegeId : null,
+    collegeId: ['college', 'group', 'campus'].includes(state.audience) ? myCollegeId : null,
     clubId: state.audience === 'community' ? state.clubId : null,
     audience: state.audience,
-    regEligibility: state.audience === 'community' ? 'community' : state.regEligibility,
+    regEligibility: state.audience === 'community' ? 'community' : (state.audience === 'group' || state.audience === 'campus' ? 'everyone' : state.regEligibility),
     regType: state.regType,
     format: state.format,
     venue: state.venue.trim() || '',
@@ -539,6 +551,18 @@ export default function CreateEventWizard({
                     <Users size={16}/><b>Community</b>
                     <span>Members of one of your communities only.</span>
                   </button>
+                  {myGroup && (
+                    <button className={`scope-card${state.audience === 'group' ? ' on' : ''}`} onClick={() => set('audience', 'group')}>
+                      <Building2 size={16}/><b>{myGroup} group</b>
+                      <span>Every student whose college belongs to {myGroup} — individual colleges stay separate.</span>
+                    </button>
+                  )}
+                  {myCampus && (
+                    <button className={`scope-card${state.audience === 'campus' ? ' on' : ''}`} onClick={() => set('audience', 'campus')}>
+                      <MapPin size={16}/><b>{myCampus} campus</b>
+                      <span>Colleges that share the {myCampus} campus.</span>
+                    </button>
+                  )}
                 </div>
               </div>
               {state.audience === 'community' && (

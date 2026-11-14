@@ -3340,7 +3340,7 @@ export async function deletePost(postId: string): Promise<void> {
 /* Leaderboard (migration 0027)                                                */
 /* -------------------------------------------------------------------------- */
 
-export type LeaderboardCategory = 'overall' | 'college' | 'community' | 'creators' | 'events'
+export type LeaderboardCategory = 'overall' | 'college' | 'group' | 'campus' | 'community' | 'creators' | 'events'
 export type LeaderboardPeriod = 'week' | 'month' | 'all'
 
 export type LeaderboardEntry = {
