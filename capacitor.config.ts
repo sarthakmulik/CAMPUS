@@ -30,6 +30,19 @@ const config: CapacitorConfig = {
       overlaysWebView: true,
       style: 'DEFAULT',
     },
+    // Capacitor 8 core plugin that owns Android window insets. It reads its
+    // config from `plugins.SystemBars`, NOT from `plugins.StatusBar`.
+    SystemBars: {
+      // index.html already ships viewport-fit=cover, but Capacitor only reads
+      // it after the first page commit. Passing the value up front makes the
+      // WebView pass real cutout insets through to env(safe-area-inset-*) from
+      // the first frame instead of padding the decor and then correcting.
+      initialViewportFitValueHint: 'cover',
+      // 'css' is the default and also injects --safe-area-inset-* custom
+      // properties; stated explicitly so a future default cannot silently take
+      // the insets away from the shell's env() padding.
+      insetsHandling: 'css',
+    },
     Keyboard: {
       // iOS WKWebView ignores interactive-widget=resizes-content; resizing
       // the native WebView reproduces the Android/web keyboard behaviour

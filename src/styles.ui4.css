@@ -1849,12 +1849,51 @@ textarea:disabled {
   .main-column:has(> .reels-stage)::after { display: none }
   .toast { bottom: calc(84px + env(safe-area-inset-bottom)) }
 
+  /* ---- display cutout (camera notch / punch-hole) --------------------------
+     Two gaps, both about SPACING only — no visual change on a device with no
+     cutout, where every env() below is 0px:
+
+     1. .mobile-header carried the right height (calc(50px + inset)) but the
+        `padding: 0 14px` shorthand later in the same rule reset the authored
+        `padding-top` back to 0, so the brand and the action icons rendered in
+        the strip the notch owns and were half-hidden. The inset is restored
+        here, in the last stylesheet, where it cannot be clobbered again.
+     2. Only the vertical axis was ever reserved. In landscape a notch sits on
+        the LEFT/RIGHT edge, and the fixed chrome (header, floating nav, open
+        drawer) pinned itself to 10-14px from a screen edge that is not there.
+     env(safe-area-inset-left/right) is 0 in portrait and on desktop, so these
+     max()/calc() guards are inert until a device actually reports a cutout. */
+  .app-shell {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+  .mobile-header {
+    padding-top: env(safe-area-inset-top);
+    padding-left: max(14px, env(safe-area-inset-left));
+    padding-right: max(14px, env(safe-area-inset-right));
+  }
+  .mobile-bottom-nav {
+    left: calc(10px + env(safe-area-inset-left));
+    right: calc(10px + env(safe-area-inset-right));
+  }
+  .left-sidebar.mobile-open {
+    padding-left: max(14px, env(safe-area-inset-left));
+    padding-right: max(14px, env(safe-area-inset-right));
+  }
+  .toast {
+    left: max(14px, env(safe-area-inset-left));
+    right: max(14px, env(safe-area-inset-right));
+  }
+
   /* ---- hide states -------------------------------------------------------
      chrome-away frees the 50px header strip (padding-top -> 0 animates the
      page up in lockstep with the header slide) — sticky page headers like
-     .feed-tabs then take the vacated top edge, exactly as native apps do. */
+     .feed-tabs then take the vacated top edge, exactly as native apps do.
+     On a cutout device the strip cannot go fully to 0: the camera notch still
+     owns that band, so the shell stops at the inset and nothing renders under
+     it. 0px on every device that reports no cutout. */
   .app-shell { transition: padding-top .26s var(--ease-out) }
-  .app-shell.chrome-away { padding-top: 0 }
+  .app-shell.chrome-away { padding-top: env(safe-area-inset-top) }
   .app-shell.chrome-away .mobile-header {
     transform: translateY(-118%);
     opacity: 0; visibility: hidden; pointer-events: none;
