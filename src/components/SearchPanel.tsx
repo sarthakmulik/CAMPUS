@@ -7,9 +7,11 @@ import type { CampusPost } from '../types'
 import { initialsFor } from '../lib/db'
 
 type Props = {
-  /** All loaded colleges/clubs are filtered locally — no extra RPC needed. */
+  /** Loaded directory rows: the offline fallback when 0057 search is absent. */
   colleges: College[]
   clubs: Club[]
+  /** 0057 capability probe — enables the ranked directory search below. */
+  caps: db.Caps
   blockedHandles: string[]
   mutedHandles: string[]
   /** Pre-filled query (e.g. a hashtag clicked in the right panel); empty = fresh start. */
@@ -29,19 +31,45 @@ const KIND_LABEL: Record<string, string> = {
   reel: 'Reel',
 }
 
-export default function SearchPanel({ colleges, clubs, blockedHandles, mutedHandles, initialQuery, onClose, onOpenProfile, onMessagePerson, onNavigate }: Props) {
+export default function SearchPanel({ colleges, clubs, caps, blockedHandles, mutedHandles, initialQuery, onClose, onOpenProfile, onMessagePerson, onNavigate }: Props) {
   const [query, setQuery] = useState(initialQuery ?? '')
   const [people, setPeople] = useState<PersonResult[]>([])
   const [posts, setPosts] = useState<CampusPost[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [searched, setSearched] = useState(false)
+  // 0057: ranked directory search (abbreviations, aliases, group, locality).
+  // Falls back to the local substring filter when the RPC is not applied.
+  const [collegeHits, setCollegeHits] = useState<db.InstitutionHit[]>([])
 
-  const filteredColleges = colleges.filter(college =>
-    query.trim().length >= 2 &&
-    (college.name.toLowerCase().includes(query.trim().toLowerCase()) ||
-     college.short_name.toLowerCase().includes(query.trim().toLowerCase())),
-  ).slice(0, 5)
+  useEffect(() => {
+    const trimmed = query.trim()
+    if (trimmed.length < 2 || !caps.institutionSearch) { setCollegeHits([]); return }
+    let cancelled = false
+    const handle = window.setTimeout(() => {
+      void db.searchInstitutions(trimmed, caps, 5)
+        .then(hits => { if (!cancelled) setCollegeHits(hits) })
+        .catch(() => { if (!cancelled) setCollegeHits([]) })
+    }, 200)
+    return () => { cancelled = true; window.clearTimeout(handle) }
+  }, [query, caps])
+
+  const filteredColleges = query.trim().length >= 2 && caps.institutionSearch
+    ? collegeHits.map(hit => ({
+      id: hit.id,
+      name: hit.name,
+      short_name: hit.short_name,
+      city: hit.campus_locality ?? hit.locality ?? '',
+      verified: hit.verified,
+      locality: hit.locality,
+      institution_type: hit.institution_type,
+      group_name: hit.group_name,
+    }))
+    : colleges.filter(college =>
+      query.trim().length >= 2 &&
+      (college.name.toLowerCase().includes(query.trim().toLowerCase()) ||
+       college.short_name.toLowerCase().includes(query.trim().toLowerCase())),
+    ).slice(0, 5)
 
   const filteredClubs = clubs.filter(club =>
     query.trim().length >= 2 &&

@@ -122,6 +122,12 @@ export default function OnboardingWizard() {
     () => instHits.find(hit => hit.id === collegeId) ?? null,
     [instHits, collegeId],
   )
+  // 0060: the campus row the student actually chose (only meaningful when the
+  // institution operates more than one; a single campus is auto-selected).
+  const selectedCampus = useMemo(
+    () => campusOptions.find(option => option.id === campusId) ?? null,
+    [campusOptions, campusId],
+  )
 
   // Debounced, server-ranked institution search. An empty query shows the
   // launch list (verified Hadapsar institutions first).
@@ -150,30 +156,52 @@ export default function OnboardingWizard() {
     }
   }, [collegeQuery, step, caps])
 
-  // Institution-specific departments and programs (0057). Empty lists mean
-  // the legacy free-text fields stay in charge - never a hard failure.
+  // Institution-specific departments, programs and campuses (0057/0060).
+  // Empty lists mean the legacy free-text fields stay in charge - never a
+  // hard failure. Campus rules: exactly one verified campus auto-selects;
+  // several campuses ask the user (primary pre-highlighted only via the
+  // search hit, never silently saved).
   useEffect(() => {
     if (!collegeId) {
       setDeptOptions([])
       setProgramOptions([])
+      setCampusOptions([])
       return
     }
     let cancelled = false
-    void Promise.all([db.listDepartments(collegeId), db.listPrograms(collegeId)])
-      .then(([depts, programs]) => {
+    void Promise.all([db.listDepartments(collegeId), db.listPrograms(collegeId), db.listInstitutionCampuses(collegeId)])
+      .then(([depts, programs, campuses]) => {
         if (cancelled) return
         setDeptOptions(depts)
         setProgramOptions(programs)
+        setCampusOptions(campuses)
+        if (campuses.length === 1) setCampusId(campuses[0].id)
+        else if (campuses.length > 1) {
+          setCampusId(current => campuses.some(c => c.id === current) ? current : '')
+        }
+        // An id picked under a DIFFERENT college must never survive the switch:
+        // profiles.department_id / academic_program_id would point at another
+        // institution's row (the lists are per-college by design).
+        if (departmentId && !depts.some(option => option.id === departmentId)) {
+          setDepartmentId('')
+          setDepartment('')
+        }
+        if (programId && !programs.some(option => option.id === programId)) {
+          setProgramId('')
+          setCourse('')
+        }
       })
       .catch(() => {
         if (!cancelled) {
           setDeptOptions([])
           setProgramOptions([])
+          setCampusOptions([])
         }
       })
     return () => {
       cancelled = true
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collegeId])
 
   // Debounced username availability.
@@ -271,13 +299,17 @@ export default function OnboardingWizard() {
       if (message) return fail(message)
     }
     if (step === 2) {
+      if (campusOptions.length > 1 && !campusId) {
+        return fail(`Choose which ${selectedCollege?.short_name ?? 'institute'} campus you attend.`)
+      }
       const now = new Date().toISOString()
       const hit = selectedHit
       const message = await patchProfile({
         college_id: collegeId || null,
-        // 0057: campus rides along when the structured search provided it
+        // 0057/0060: the campus of the academic tree - explicit choice when
+        // the institution operates several, verified primary otherwise
         // (saveProfile drops the key pre-0057, so old schemas stay safe).
-        campus_id: hit?.campus_id ?? undefined,
+        campus_id: (campusId || hit?.campus_id) || undefined,
         college_declared_at: now,
       })
       if (message) return fail(message)
@@ -540,14 +572,24 @@ export default function OnboardingWizard() {
             {selectedCollege && !collegeQuery && (
               <p className="field-hint success" aria-live="polite">
                 Selected: {selectedCollege.name}
-                {selectedHit?.campus_locality || selectedHit?.locality
-                  ? ` — ${selectedHit?.campus_locality ?? selectedHit?.locality}, ${selectedCollege.city}`
-                  : ` — ${selectedCollege.city}`}
+                {selectedCampus
+                  ? ` — ${selectedCampus.locality || selectedCampus.name}, ${selectedCampus.city}`
+                  : (selectedHit?.campus_locality || selectedHit?.locality)
+                    ? ` — ${selectedHit?.campus_locality ?? selectedHit?.locality}, ${selectedCollege.city}`
+                    : ` — ${selectedCollege.city}`}
               </p>
             )}
 
             {instError && (
               <p className="form-error" role="alert"><AlertCircle size={15} /> {instError}</p>
+            )}
+
+            {!caps.campusStep && caps.institutionSearch && (
+              <p className="wizard-note">
+                <AlertCircle size={14} /> Campus-level choices and feeds need
+                <code> supabase/migrations/0060_institution_campus_step.sql </code>
+                applied — your college, department and year are still saved.
+              </p>
             )}
 
             {instLoading ? (
@@ -559,7 +601,7 @@ export default function OnboardingWizard() {
                     <button
                       type="button"
                       className={`college-option ${collegeId === college.id ? 'selected' : ''}`}
-                      onClick={() => { setCollegeId(college.id); setSuggested(null); setError(null) }}
+                      onClick={() => { setCollegeId(college.id); setCampusId(college.campus_id ?? ''); setSuggested(null); setError(null) }}
                     >
                       <span className="college-seal"><Building2 size={17} /></span>
                       <span className="college-option-copy">
@@ -579,6 +621,42 @@ export default function OnboardingWizard() {
                   <li className="college-empty">No institute matched “{collegeQuery}”. You can request it below.</li>
                 )}
               </ul>
+            )}
+
+            {/* 0060: only institutions with a real campus choice ask. One verified
+                campus is auto-selected by the loader above, so this block stays
+                out of the way for every single-campus college. */}
+            {campusOptions.length > 1 && (
+              <fieldset className="chip-fieldset campus-fieldset">
+                <legend>
+                  Which campus?{' '}
+                  <span className="optional">{selectedCollege?.short_name ?? 'This institute'} runs {campusOptions.length} campuses</span>
+                </legend>
+                <ul className="college-list campus-list">
+                  {campusOptions.map(option => (
+                    <li key={option.id}>
+                      <button
+                        type="button"
+                        className={`college-option ${campusId === option.id ? 'selected' : ''}`}
+                        aria-pressed={campusId === option.id}
+                        onClick={() => { setCampusId(option.id); setError(null) }}
+                      >
+                        <span className="college-seal"><Building2 size={17} /></span>
+                        <span className="college-option-copy">
+                          <b>{option.name}</b>
+                          <small>
+                            {[option.locality, option.city].filter(Boolean).join(', ')}
+                            {option.is_primary ? ' · main campus' : ''}
+                          </small>
+                          {option.address && <small className="college-option-address">{option.address}</small>}
+                        </span>
+                        {campusId === option.id && <Check size={17} />}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                {!campusId && <p className="field-hint">Pick the campus you attend — it decides your campus-level feeds.</p>}
+              </fieldset>
             )}
 
             {suggested && (
@@ -789,9 +867,16 @@ export default function OnboardingWizard() {
             </p>
             <ul className="welcome-summary">
               <li><b>Username</b><span>@{db.normalizeUsername(username) || profile?.username || '—'}</span></li>
+              {selectedHit?.group_name && (
+                <li><b>Institution group</b><span>{selectedHit.group_name}</span></li>
+              )}
               <li><b>Institute</b><span>{selectedCollege ? `${selectedCollege.name} (${selectedCollege.short_name})` : suggested ? `${suggested} — requested` : 'Not set'}</span></li>
-              {(selectedHit?.campus_locality || selectedHit?.locality) && (
-                <li><b>Campus</b><span>{selectedHit.campus_locality ?? selectedHit.locality}, {selectedCollege?.city ?? 'Pune'}</span></li>
+              {(selectedCampus || selectedHit?.campus_locality || selectedHit?.locality) && (
+                <li><b>Campus</b><span>{
+                  selectedCampus
+                    ? `${selectedCampus.name}${selectedCampus.locality ? `, ${selectedCampus.locality}` : ''}`
+                    : `${selectedHit?.campus_locality ?? selectedHit?.locality}, ${selectedCollege?.city ?? 'Pune'}`
+                }</span></li>
               )}
               {(clean(course) || department || year || semester) && (
                 <li><b>Course</b><span>{[clean(course), clean(department), YEARS.find(item => item.value === year)?.label, semester ? `Semester ${semester}` : ''].filter(Boolean).join(' · ')}</span></li>

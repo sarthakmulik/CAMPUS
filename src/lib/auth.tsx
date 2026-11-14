@@ -273,6 +273,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         await db.saveProfile(user.id, patch, caps)
         const merged = profile ? ({ ...profile, ...patch } as db.Profile) : null
+        // The resolved academic names are a read-time projection: writing a new
+        // college / campus / department / program invalidates them instead of
+        // leaving the old college's name on screen until the next reload.
+        if (merged && ('college_id' in patch || 'campus_id' in patch
+          || 'department_id' in patch || 'academic_program_id' in patch
+          || 'course' in patch || 'department' in patch)) {
+          merged.academic = null
+        }
         if (merged) setProfile(merged)
         // Profile changes can change the account state itself — finishing
         // onboarding must move the member from the wizard into the app.

@@ -731,10 +731,13 @@ function CAMPUSApp() {
     const username = profile?.username || (user?.email ? user.email.split('@')[0] : '')
     const initials = name.split(/\s+/).filter(Boolean).map(part => part[0]).slice(0, 2).join('').toUpperCase() || 'CM'
     // Staff (admin / super_admin) are platform-level: no college fallback,
-    // no fake affiliation chip anywhere they appear.
+    // no fake affiliation chip anywhere they appear. Members without a college
+    // get NO college — the old `colleges[0] ?? 'SPPU'` fallback invented an
+    // affiliation and made another college's content look like their own.
     const staff = profile?.role === 'admin' || profile?.role === 'super_admin'
     const college = colleges.find(item => item.id === profile?.college_id)?.short_name
-      ?? (staff ? '' : (colleges[0]?.short_name ?? 'SPPU'))
+      ?? profile?.academic?.collegeShortName
+      ?? ''
     return { name, username, initials, college, handle: username ? `@${username}` : '@campus' }
   }, [profile, user, colleges])
 
@@ -742,10 +745,16 @@ function CAMPUSApp() {
     () => {
       const staff = profile?.role === 'admin' || profile?.role === 'super_admin'
       return colleges.find(item => item.id === profile?.college_id)
-        ?? (staff ? null : (colleges[0] ?? null))
+        ?? (staff ? null : null)
     },
     [colleges, profile?.college_id, profile?.role],
   )
+
+  // The member's own institution, resolved through the profile when the flat
+  // directory row is unavailable (e.g. its verification is still pending).
+  const myInstitutionShort = activeCollege?.short_name ?? profile?.academic?.collegeShortName ?? ''
+  const myInstitutionName = activeCollege?.name
+    ?? profile?.academic?.officialName ?? profile?.academic?.collegeName ?? ''
 
   /** 0043: staff = admin or super_admin — the platform identity tiers. */
   const isStaff = profile?.role === 'admin' || profile?.role === 'super_admin'
@@ -987,6 +996,12 @@ function CAMPUSApp() {
 
   const visiblePosts = useMemo(() => {
     let result = [...posts]
+    // College membership is an ID relationship (profiles.college_id ->
+    // colleges.id). Name comparison was the old shortcut and it leaked: two
+    // institutions can share a short name, and rows with no college id at all
+    // used to match on display text.
+    const myCollegeId = profile?.college_id ?? null
+    const isMine = (post: CampusPost) => Boolean(myCollegeId) && post.collegeId === myCollegeId
     if (feedTab === 'For You') {
       // Instagram-style: connection first, then recency, engagement and college
       const followSet = new Set(following)
@@ -995,7 +1010,7 @@ function CAMPUSApp() {
         score: db.forYouScore(
           post,
           followSet.has(post.handle),
-          Boolean(identity.college) && post.college === identity.college,
+          isMine(post),
         ),
       }))
       scored.sort((a, b) => b.score - a.score)
@@ -1008,14 +1023,16 @@ function CAMPUSApp() {
       })
     }
     if (feedTab === 'Following') result = result.filter(p => following.includes(p.handle) || p.author === 'Campus Bot')
-    if (feedTab === 'My College') result = result.filter(p => (p.collegeId && p.collegeId === profile?.college_id) || p.college === identity.college || p.college === 'Your college')
+    // Only rows that really belong to the member's own institution: no name
+    // match, and no 'Your college' placeholder rows from the sample data.
+    if (feedTab === 'My College') result = result.filter(isMine)
     if (feedTab === 'Latest') result = result.reverse()
     if (blockedHandles.length || mutedHandles.length) {
       const hidden = new Set([...blockedHandles, ...mutedHandles])
       result = result.filter(p => !hidden.has(p.handle))
     }
     return result
-  }, [posts, feedTab, following, blockedHandles, mutedHandles, identity.college])
+  }, [posts, feedTab, following, blockedHandles, mutedHandles, profile?.college_id])
 
   /* ---- first-party sponsored placements ---------------------------------- */
   /* Admin-managed ads. The SERVER decides who sees an ad (college targeting,
@@ -2555,8 +2572,8 @@ function CAMPUSApp() {
         <button className="icon-button sidebar-close" aria-label="Close menu" onClick={() => setMobileMenu(false)}><X size={20}/></button>
         <button className="brand" onClick={() => navigate('Home')}><span className="brand-mark">C</span><span>CAMPUS</span></button>
         <div className="sidebar-campus-card">
-          <div className="sidebar-campus-art"><Building2 size={28}/><span>{activeCollege?.short_name ?? (isStaff ? 'HQ' : 'SPPU')}</span></div>
-          <div className="sidebar-campus-info"><b>{activeCollege?.short_name ?? 'SPPU'}</b><small>{activeCollege?.name ?? 'Savitribai Phule Pune University'}</small></div>
+          <div className="sidebar-campus-art"><Building2 size={28}/><span>{myInstitutionShort || (isStaff ? 'HQ' : '—')}</span></div>
+          <div className="sidebar-campus-info"><b>{myInstitutionShort || (isStaff ? 'CAMPUS HQ' : 'No college yet')}</b><small>{myInstitutionName || (isStaff ? 'Platform team — all colleges' : 'Pick your institute to unlock your campus')}</small></div>
           <button onClick={() => navigate('My College')}>Change college <ArrowLeft size={13}/></button>
         </div>
         <nav className="primary-nav" ref={glideNavRef}>
@@ -2609,7 +2626,7 @@ function CAMPUSApp() {
           </div>
         )}
 
-        {searchOpen && <SearchPanel colleges={colleges} clubs={clubs} blockedHandles={blockedHandles} mutedHandles={mutedHandles} initialQuery={searchSeed} onClose={() => { setSearchOpen(false); setSearchSeed('') }} onOpenProfile={personId => { setViewingProfileId(personId); navigate('Profile') }} onMessagePerson={personId => void messagePerson(personId)} onNavigate={navigate} />}
+        {searchOpen && <SearchPanel colleges={colleges} clubs={clubs} caps={caps} blockedHandles={blockedHandles} mutedHandles={mutedHandles} initialQuery={searchSeed} onClose={() => { setSearchOpen(false); setSearchSeed('') }} onOpenProfile={personId => { setViewingProfileId(personId); navigate('Profile') }} onMessagePerson={personId => void messagePerson(personId)} onNavigate={navigate} />}
         {activeNav === 'Home' && confessionsOpen ? (
           /* dedicated Confessions destination — Home as a subview, real
              history entry, shares the composer + all post interactions */
@@ -2638,7 +2655,7 @@ function CAMPUSApp() {
           />
         ) : activeNav === 'Home' ? <>
           <div className="desktop-topbar"><div className="desktop-search-trigger" onClick={() => setSearchOpen(true)} role="button" tabIndex={0}><Search size={18}/><span>Search for people, posts, colleges, clubs...</span></div><div className="topbar-actions"><button className="icon-button" aria-label="Notifications" onClick={() => navigate('Notifications')}><Bell size={20}/>{unreadNotifs > 0 && <i className="notification-dot"/>}</button><button className="icon-button" aria-label="My profile" onClick={() => navigate('Profile')}><UserRound size={20}/></button></div></div>
-          <section className="campus-hero-banner"><div className="hero-copy"><span className="hero-eyebrow">YOUR PEOPLE. YOUR PLACE.</span><h2>Same Campus,<br/><em>Bigger Dreams.</em></h2><span className="hero-swish"/><p>Connect · Share · Grow</p></div><div className="hero-campus-art" aria-hidden="true"><div className="art-sun"/><div className="art-building"><span/><span/><span/><span/><b/></div><div className="art-hill"/></div><button className="college-pill" onClick={() => navigate('My College')}><span className="college-seal"><Building2 size={22}/></span><span><b>{activeCollege?.short_name ?? (isStaff ? 'CAMPUS HQ' : 'SPPU')}</b><small>{activeCollege?.name ?? (isStaff ? 'Platform team — all colleges' : 'Savitribai Phule Pune University')}</small></span><ChevronDown size={16}/></button></section>
+          <section className="campus-hero-banner"><div className="hero-copy"><span className="hero-eyebrow">YOUR PEOPLE. YOUR PLACE.</span><h2>Same Campus,<br/><em>Bigger Dreams.</em></h2><span className="hero-swish"/><p>Connect · Share · Grow</p></div><div className="hero-campus-art" aria-hidden="true"><div className="art-sun"/><div className="art-building"><span/><span/><span/><span/><b/></div><div className="art-hill"/></div><button className="college-pill" onClick={() => navigate('My College')}><span className="college-seal"><Building2 size={22}/></span><span><b>{myInstitutionShort || (isStaff ? 'CAMPUS HQ' : 'Pick your college')}</b><small>{myInstitutionName || (isStaff ? 'Platform team — all colleges' : 'JSPM, COEP, Fergusson and more across Pune')}</small></span><ChevronDown size={16}/></button></section>
           <div className="feed-tabs" role="tablist">
             {['For You','Following','My College','Trending','Latest'].map(tab => <button key={tab} role="tab" aria-selected={feedTab===tab} className={feedTab===tab?'selected':''} onClick={() => setFeedTab(tab)}>{tab}</button>)}
           </div>
@@ -2836,6 +2853,7 @@ function CAMPUSApp() {
                       colleges={colleges}
                       caps={caps}
                       myCollegeId={profile?.college_id ?? null}
+                      profile={profile}
                       following={following}
                       posts={posts}
                       pollStateMap={pollStateMap}

@@ -102,6 +102,7 @@ export default function MyCollege({
   colleges,
   caps,
   myCollegeId,
+  profile,
   following,
   posts,
   feedLoading,
@@ -142,6 +143,9 @@ export default function MyCollege({
   colleges: db.College[]
   caps: db.Caps
   myCollegeId: string | null
+  /** the signed-in member's own profile — carries the resolved 0057 academic
+   *  identity (institution, campus, department, program) for the header */
+  profile: db.Profile | null
   /** handles the member follows (App-owned store, "@username") */
   following: string[]
   /** page-0 buffer — the SAME store the Home feed renders from */
@@ -190,6 +194,22 @@ export default function MyCollege({
     [colleges, myCollegeId],
   )
   const myShort = collegeRow?.short_name ?? identity?.college ?? ''
+  // 0057: the header speaks the student's ACTUAL institution — group, campus,
+  // program and department come from the profile's resolved academic identity
+  // (its own FKs), never from the group name standing in for a college.
+  const academicInfo = profile?.academic ?? null
+  const myInstitutionName = academicInfo?.officialName ?? collegeRow?.name ?? myShort
+  const myGroupLabel = academicInfo?.groupName ?? collegeRow?.group_name ?? null
+  const myCampusLabel = [
+    academicInfo?.campusName ?? null,
+    academicInfo?.campusLocality ?? academicInfo?.collegeLocality ?? collegeRow?.locality ?? null,
+  ].filter(Boolean).join(', ')
+  const myClassLabel = [
+    academicInfo?.programName ?? profile?.course ?? null,
+    academicInfo?.departmentName ?? profile?.department ?? null,
+    profile?.year_of_study ? `Year ${profile.year_of_study}` : null,
+    profile?.semester ? `Sem ${profile.semester}` : null,
+  ].filter(Boolean).join(' · ')
 
   /* ---- tab state (first — several effects below read it) ------------------ */
 
@@ -763,34 +783,66 @@ export default function MyCollege({
   const [choosing, setChoosing] = useState(false)
   const [collegeQuery, setCollegeQuery] = useState('')
   const [savingCollege, setSavingCollege] = useState(false)
+  // 0057/0060: the SAME ranked directory search the signup wizard uses. The old
+  // client-side filter read the whole colleges table, which offered
+  // pending_review (unverified) institutions and ranked nothing.
+  const [collegeHits, setCollegeHits] = useState<db.InstitutionHit[]>([])
+  const [collegeSearchBusy, setCollegeSearchBusy] = useState(false)
+  const [collegeSearchError, setCollegeSearchError] = useState<string | null>(null)
 
-  const collegeOptions = useMemo(() => {
-    const q = collegeQuery.trim().toLowerCase()
-    const base = q
-      ? colleges.filter(c => c.name.toLowerCase().includes(q) || c.short_name.toLowerCase().includes(q) || (c.city ?? '').toLowerCase().includes(q))
-      : colleges
-    return base.slice(0, 12)
-  }, [colleges, collegeQuery])
+  useEffect(() => {
+    if (!choosing) return
+    let cancelled = false
+    setCollegeSearchBusy(true)
+    const handle = window.setTimeout(() => {
+      void db.searchInstitutions(collegeQuery, caps, 20)
+        .then(hits => {
+          if (cancelled) return
+          setCollegeHits(hits)
+          setCollegeSearchError(null)
+        })
+        .catch(error => {
+          if (cancelled) return
+          setCollegeHits([])
+          setCollegeSearchError(db.friendlyMessage(error))
+        })
+        .finally(() => { if (!cancelled) setCollegeSearchBusy(false) })
+    }, collegeQuery.trim() ? 250 : 0)
+    return () => { cancelled = true; window.clearTimeout(handle) }
+  }, [choosing, collegeQuery, caps])
 
-  const pickCollege = useCallback(async (row: db.College) => {
+  const pickCollege = useCallback(async (hit: db.InstitutionHit) => {
     if (!identity?.id || savingCollege) return
     setSavingCollege(true)
     try {
       // the canonical save path the onboarding wizard already uses — same
-      // service, same columns; nothing new is invented
-      await db.saveProfile(identity.id, {
-        college_id: row.id,
+      // service, same columns; nothing new is invented.
+      //
+      // A department / program / campus id from a DIFFERENT institution must
+      // not survive the switch: those FKs belong to that college's own rows,
+      // so they are cleared rather than silently kept (the student re-picks
+      // them from Profile -> Institute details).
+      const switching = Boolean(profile?.college_id) && profile?.college_id !== hit.id
+      const patch: db.ProfilePatch = {
+        college_id: hit.id,
+        campus_id: hit.campus_id ?? undefined,
         college_declared_at: caps.profileExtras ? new Date().toISOString() : undefined,
-      }, caps)
+      }
+      if (switching) {
+        patch.department_id = null
+        patch.academic_program_id = null
+        patch.semester = null
+      }
+      await db.saveProfile(identity.id, patch, caps)
       onProfilePatched()
       setChoosing(false)
-      notify(`Your college is now ${row.short_name}.`)
+      notify(`Your college is now ${hit.short_name || hit.name}.`)
     } catch (error) {
       notify(db.friendlyMessage(error))
     } finally {
       setSavingCollege(false)
     }
-  }, [identity?.id, savingCollege, caps, onProfilePatched, notify])
+  }, [identity?.id, savingCollege, profile?.college_id, caps, onProfilePatched, notify])
 
   /* ---- render -------------------------------------------------------------------- */
 
@@ -851,11 +903,13 @@ export default function MyCollege({
         <CollegeChooser
           show={choosing}
           saving={savingCollege}
+          busy={collegeSearchBusy}
+          error={collegeSearchError}
           query={collegeQuery}
           setQuery={setCollegeQuery}
-          options={collegeOptions}
+          hits={collegeHits}
           onClose={() => setChoosing(false)}
-          onPick={row => void pickCollege(row)}
+          onPick={hit => void pickCollege(hit)}
         />
       </div>
     )
@@ -1471,13 +1525,16 @@ export default function MyCollege({
     <div className="mcl-page">
       {/* compact college header — one band; identity from the canonical row */}
       <header className="mcl-hero">
-        <span className="mcl-seal" aria-hidden="true">{myShort.slice(0, 8) || <BuildingMark/>}</span>
+        <span className="mcl-seal" aria-hidden="true">{(myShort || myInstitutionName).slice(0, 8) || <BuildingMark/>}</span>
         <span className="mcl-hero-copy">
           <b>
-            {collegeRow?.name ?? myShort}
+            {myInstitutionName || 'Your college'}
             {collegeRow?.verified ? <ShieldCheck size={14} className="mcl-verified" aria-label="Verified college"/> : null}
           </b>
-          <small>{collegeRow?.city ? `${collegeRow.city} · ` : ''}Your campus community on CAMPUS</small>
+          <small>
+            {[myCampusLabel, myGroupLabel, myClassLabel || (collegeRow?.city ? `${collegeRow.city} · Your campus community on CAMPUS` : 'Your campus community on CAMPUS')]
+              .filter(Boolean).join(' · ')}
+          </small>
         </span>
         <button className="icon-button" aria-label="Open notifications" onClick={() => onNavigate('Notifications')}>
           <Bell size={18}/>
@@ -1530,11 +1587,13 @@ export default function MyCollege({
       <CollegeChooser
         show={choosing}
         saving={savingCollege}
+        busy={collegeSearchBusy}
+        error={collegeSearchError}
         query={collegeQuery}
         setQuery={setCollegeQuery}
-        options={collegeOptions}
+        hits={collegeHits}
         onClose={() => setChoosing(false)}
-        onPick={row => void pickCollege(row)}
+        onPick={hit => void pickCollege(hit)}
       />
     </div>
   )
@@ -1550,15 +1609,19 @@ function BuildingIcon() {
 }
 
 function CollegeChooser({
-  show, saving, query, setQuery, options, onClose, onPick,
+  show, saving, busy, error, query, setQuery, hits, onClose, onPick,
 }: {
   show: boolean
   saving: boolean
+  busy: boolean
+  error: string | null
   query: string
   setQuery: (value: string) => void
-  options: db.College[]
+  /** 0057 ranked directory hits — verified institutions only, each with its
+   *  campus locality, type and institution group already resolved */
+  hits: db.InstitutionHit[]
   onClose: () => void
-  onPick: (row: db.College) => void
+  onPick: (hit: db.InstitutionHit) => void
 }) {
   if (!show) return null
   return (
@@ -1573,23 +1636,34 @@ function CollegeChooser({
         className="mcl-chooser-input"
         value={query}
         onChange={e => setQuery(e.target.value)}
-        placeholder="Search colleges by name or city"
-        aria-label="Search colleges"
+        placeholder="Institute name, abbreviation, group or locality"
+        aria-label="Search institutes"
         maxLength={60}
+        enterKeyHint="search"
       />
       <div className="mcl-chooser-list">
-        {options.map(row => (
-          <button key={row.id} className="mcl-chooser-row" disabled={saving} onClick={() => onPick(row)}>
-            <span className="mcl-seal small" aria-hidden="true">{row.short_name.slice(0, 6)}</span>
+        {busy && <div className="mcl-loading"><Loader2 size={14} className="mcl-spin"/> Searching the directory…</div>}
+        {!busy && error && <p className="mcl-hint">{error}</p>}
+        {!busy && !error && hits.map(hit => (
+          <button
+            key={hit.id}
+            className="mcl-chooser-row"
+            disabled={saving}
+            onClick={() => onPick(hit)}
+          >
+            <span className="mcl-seal small" aria-hidden="true">{(hit.short_name || hit.name).slice(0, 6)}</span>
             <span className="mcl-chooser-copy">
-              <b>{row.name}</b>
-              <small>{row.city}</small>
+              <b>{hit.name}</b>
+              <small>
+                {[hit.short_name, hit.campus_locality || hit.locality || hit.campus_name, hit.group_name]
+                  .filter(Boolean).join(' · ')}
+              </small>
             </span>
-            {row.verified ? <ShieldCheck size={14} className="mcl-verified" aria-label="Verified college"/> : null}
+            {hit.verified ? <ShieldCheck size={14} className="mcl-verified" aria-label="Verified college"/> : null}
           </button>
         ))}
-        {options.length === 0 && (
-          <p className="mcl-hint">No match here. New colleges are suggested via onboarding — ask your classmates to add yours from the profile flow.</p>
+        {!busy && !error && hits.length === 0 && (
+          <p className="mcl-hint">No institute matched. Only listed institutes appear here — request yours from the signup screen and the CAMPUS team adds it. Nothing about you is verified or checked.</p>
         )}
         {saving && <div className="mcl-loading"><Loader2 size={14} className="mcl-spin"/> Saving…</div>}
       </div>

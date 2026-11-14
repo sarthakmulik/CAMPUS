@@ -83,6 +83,28 @@ export type Profile = {
   campus_id?: string | null
   academic_program_id?: string | null
   semester?: number | null
+  /**
+   * 0057: the same academic identity RESOLVED to names, read through the
+   * profile's own foreign keys. Present on a 0057 database; null when the
+   * directory tables are missing or the member has no college yet. Never
+   * persisted — a stale value is dropped by patchProfile.
+   */
+  academic?: ProfileAcademic | null
+}
+
+/** Resolved institution / campus / department / program names for display. */
+export type ProfileAcademic = {
+  collegeName: string | null
+  collegeShortName: string | null
+  officialName: string | null
+  collegeLocality: string | null
+  institutionType: string | null
+  groupName: string | null
+  campusName: string | null
+  campusLocality: string | null
+  departmentName: string | null
+  programName: string | null
+  programLevel: string | null
 }
 
 export type Caps = {
@@ -109,6 +131,10 @@ export type Caps = {
   institutionFields: boolean
   /** 0057: public.search_institutions() exists (structured Pune directory) */
   institutionSearch: boolean
+  /** 0057: departments / academic_programs / campuses / institution_groups readable */
+  institutionTables: boolean
+  /** 0060: public.list_institution_campuses() exists (campus step in the wizard) */
+  campusStep: boolean
   /** 0059: public.list_group_posts / list_group_peers exist (group discovery) */
   groupDiscovery: boolean
 }
@@ -126,6 +152,8 @@ export const EMPTY_CAPS: Caps = {
   leaderboard: false,
   institutionFields: false,
   institutionSearch: false,
+  institutionTables: false,
+  campusStep: false,
   groupDiscovery: false,
 }
 
@@ -171,6 +199,11 @@ export function friendlyMessage(error: unknown): string {
     // which is what honest diagnosis of RLS failures needs
     return raw
   }
+  if (/PGRST203|could not choose the best candidate function/i.test(raw)) {
+    // two overloads of the same RPC name: the older signature is still in the
+    // database (0061 drops it). Say so instead of "something went wrong".
+    return 'College requests need supabase/migrations/0061_directory_flow_repairs.sql applied — the database still has an older duplicate of the request function.'
+  }
   if (/does not exist|schema cache|PGRST20|PGRST3/i.test(raw)) {
     return 'A required database piece is missing. Apply supabase/migrations/0001_explore_first_onboarding.sql and 0002_real_feed.sql in the Supabase SQL editor.'
   }
@@ -209,18 +242,28 @@ export async function probeCaps(): Promise<Caps> {
     return !isMissingRelation(error) && !/PGRST2/.test(error.code ?? '')
   }
 
-  const [profileExtras, suggestions, interests, blocks, reports, institutionFields] = await Promise.all([
+  const [profileExtras, suggestions, interests, blocks, reports, institutionFields, departmentsTable, programsTable, campusesTable] = await Promise.all([
     hasColumn('profiles', 'onboarding_step'),
     hasRelation('college_suggestions'),
     hasRelation('profile_interests'),
     hasRelation('user_blocks'),
     hasRelation('reports'),
     hasColumn('profiles', 'department_id'),
+    hasRelation('departments'),
+    hasRelation('academic_programs'),
+    hasRelation('campuses'),
   ])
+  const institutionTables = departmentsTable && programsTable && campusesTable
 
   // 0057: the structured institution directory search
   const { error: searchProbeError } = await client.rpc('search_institutions', { p_query: '', p_limit: 1 })
   const institutionSearch = !searchProbeError || !isMissingFunction(searchProbeError)
+
+  // 0060: the campus step read (absent on a database where only 0057-0059 landed)
+  const { error: campusProbeError } = await client.rpc('list_institution_campuses', {
+    p_college: '00000000-0000-0000-0000-000000000000',
+  })
+  const campusStep = !campusProbeError || !isMissingFunction(campusProbeError)
 
   // 0059: the group discovery RPCs (both empty-safe for visitors, so the
   // probe is valid pre-login; anon callers get empty sets, never errors)
@@ -251,24 +294,49 @@ export async function probeCaps(): Promise<Caps> {
     avatars = false
   }
 
-  return { loaded: true, profileExtras, suggestions, interests, blocks, usernameRpc, reports, avatars, savedItems, leaderboard, institutionFields, institutionSearch, groupDiscovery }
+  return { loaded: true, profileExtras, suggestions, interests, blocks, usernameRpc, reports, avatars, savedItems, leaderboard, institutionFields, institutionSearch, institutionTables, campusStep, groupDiscovery }
 }
 
 /* -------------------------------------------------------------------------- */
 /* Public directory data (readable by everyone)                                */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * The flat directory list used for DISPLAY fallbacks and pickers.
+ *
+ * 0057 rule: a `pending_review` institution is never a selectable, publicly
+ * listed college, so it is excluded here (search_institutions() already
+ * enforces the same rule server-side). The signed-in member's OWN college is
+ * resolved through their profile embed instead, so excluding unverified rows
+ * can never blank out a member who was attached to one before it was verified.
+ * Staff moderation uses `loadDirectoryForStaff()`.
+ */
 export async function loadColleges(): Promise<College[]> {
+  return loadCollegeRows(false)
+}
+
+/** Staff view: every directory row, including pending_review (0057/0061). */
+export async function loadDirectoryForStaff(): Promise<College[]> {
+  return loadCollegeRows(true)
+}
+
+async function loadCollegeRows(includePending: boolean): Promise<College[]> {
   if (!supabase) return []
   // 0057: the group embed shows the full tree on profiles (derived, never
   // duplicated onto profiles themselves). Older schemas fall back cleanly.
   const full = await supabase
     .from('colleges')
-    .select('id, name, short_name, city, verified, locality, institution_type, institution_groups(name)')
+    .select('id, name, short_name, city, verified, locality, institution_type, verification_status, institution_groups(name)')
     .order('name')
     .limit(500)
   if (!full.error) {
-    return ((full.data ?? []) as Array<Record<string, unknown>>).map(row => {
+    const rows = ((full.data ?? []) as Array<Record<string, unknown>>)
+      // pending_review stays out of the public directory; rows that predate
+      // 0057 carry no status and keep their legacy `verified` meaning.
+      .filter(row => includePending
+        || row.verification_status == null
+        || row.verification_status === 'verified')
+    return rows.map(row => {
       const group = row.institution_groups as { name: string } | null
       return {
         id: row.id as string,
@@ -289,6 +357,7 @@ export async function loadColleges(): Promise<College[]> {
   const { data, error } = await supabase
     .from('colleges')
     .select('id, name, short_name, city, verified')
+    .eq('verified', true)
     .order('name')
     .limit(500)
   if (error) throw new Error(friendlyMessage(error))
@@ -449,7 +518,52 @@ export async function fetchProfile(userId: string): Promise<Profile | null> {
     }
   }
   if (error) throw new Error(friendlyMessage(error))
-  return (data as Profile | null) ?? null
+  const profile = (data as Profile | null) ?? null
+  return profile ? { ...profile, academic: await resolveAcademic(profile) } : null
+}
+
+/**
+ * Resolve a profile's academic identity to names in ONE read through the
+ * profile's own foreign keys (0057). Any failure degrades to nulls: the caller
+ * then falls back to the flat `course` / `department` text and the directory
+ * list, which is exactly the pre-0057 behaviour. Nothing is invented.
+ */
+async function resolveAcademic(profile: Profile): Promise<ProfileAcademic | null> {
+  if (!supabase || !profile.college_id) return null
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('colleges(name, official_name, short_name, locality, institution_type, institution_groups(name)),'
+      + ' departments(name), academic_programs(name, level), campuses(name, locality)')
+    .eq('id', profile.id)
+    .maybeSingle()
+  if (error || !data) return null
+
+  const row = data as unknown as Record<string, unknown>
+  const one = (value: unknown): Record<string, unknown> | null => {
+    const item = Array.isArray(value) ? value[0] : value
+    return item && typeof item === 'object' ? item as Record<string, unknown> : null
+  }
+  const college = one(row.colleges)
+  const group = one(college?.institution_groups)
+  const department = one(row.departments)
+  const program = one(row.academic_programs)
+  const campus = one(row.campuses)
+  if (!college) return null
+
+  const text = (value: unknown) => (typeof value === 'string' && value.trim() ? value : null)
+  return {
+    collegeName: text(college.name),
+    collegeShortName: text(college.short_name),
+    officialName: text(college.official_name),
+    collegeLocality: text(college.locality),
+    institutionType: text(college.institution_type),
+    groupName: text(group?.name),
+    campusName: text(campus?.name),
+    campusLocality: text(campus?.locality),
+    departmentName: text(department?.name) ?? text(profile.department),
+    programName: text(program?.name) ?? text(profile.course),
+    programLevel: text(program?.level),
+  }
 }
 
 /**
@@ -799,6 +913,137 @@ export async function submitCollegeSuggestion(
     p_type: details?.type ?? null,
   })
   if (error) throw new Error(friendlyMessage(error))
+}
+
+/* -------------------------------------------------------------------------- */
+/* Staff: institution directory + college-request review (0061)                */
+/* -------------------------------------------------------------------------- */
+
+export type DirectoryStats = {
+  collegesTotal: number
+  verified: number
+  pendingReview: number
+  groups: number
+  campuses: number
+  departments: number
+  programs: number
+  pendingRequests: number
+}
+
+/** Exact directory counts (0061). Null when the RPC is not applied yet. */
+export async function fetchDirectoryStats(): Promise<DirectoryStats | null> {
+  if (!supabase) return null
+  const { data, error } = await supabase.rpc('institution_directory_stats')
+  if (error || !Array.isArray(data) || data.length === 0) return null
+  const row = data[0] as Record<string, unknown>
+  const num = (value: unknown) => Number(value ?? 0)
+  return {
+    collegesTotal: num(row.colleges_total),
+    verified: num(row.verified),
+    pendingReview: num(row.pending_review),
+    groups: num(row.groups),
+    campuses: num(row.campuses),
+    departments: num(row.departments),
+    programs: num(row.programs),
+    pendingRequests: num(row.pending_requests),
+  }
+}
+
+export type CollegeRequest = {
+  id: string
+  name: string
+  city: string | null
+  locality: string | null
+  website: string | null
+  institutionType: string | null
+  status: string
+  statusNote: string | null
+  createdAt: string | null
+  requesterName: string | null
+  requesterHandle: string | null
+  /** the directory row this request already produced, when there is one */
+  collegeId: string | null
+  collegeShortName: string | null
+}
+
+/** Pending (or decided) student college requests — staff only (0061). */
+export async function listCollegeRequests(status = 'pending', limit = 50): Promise<CollegeRequest[]> {
+  if (!supabase) return []
+  const { data, error } = await supabase.rpc('list_college_suggestions', {
+    p_status: status,
+    p_limit: limit,
+  })
+  if (error) throw new Error(friendlyMessage(error))
+  return ((data ?? []) as Record<string, unknown>[]).map(row => ({
+    id: row.id as string,
+    name: (row.name as string) ?? '',
+    city: (row.city as string | null) ?? null,
+    locality: (row.locality as string | null) ?? null,
+    website: (row.official_website as string | null) ?? null,
+    institutionType: (row.institution_type as string | null) ?? null,
+    status: (row.status as string) ?? 'pending',
+    statusNote: (row.status_note as string | null) ?? null,
+    createdAt: (row.created_at as string | null) ?? null,
+    requesterName: (row.requester_name as string | null) ?? null,
+    requesterHandle: (row.requester_handle as string | null) ?? null,
+    collegeId: (row.college_id as string | null) ?? null,
+    collegeShortName: (row.college_short_name as string | null) ?? null,
+  }))
+}
+
+/**
+ * Approve (adds the institution as pending_review) / approve and publish /
+ * reject a student request. The RPC reuses an existing directory row instead
+ * of creating a duplicate, and refuses non-staff callers.
+ */
+export async function reviewCollegeRequest(
+  id: string,
+  decision: 'approved' | 'rejected',
+  options?: { publish?: boolean; note?: string },
+): Promise<void> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { error } = await supabase.rpc('review_college_suggestion', {
+    p_id: id,
+    p_decision: decision,
+    p_publish: options?.publish ?? false,
+    p_note: options?.note ?? null,
+  })
+  if (error) throw new Error(friendlyMessage(error))
+}
+
+/** Full directory read for staff moderation (includes pending_review rows). */
+export async function fetchDirectoryForStaff(limit = 200): Promise<Array<{
+  id: string
+  name: string
+  officialName: string | null
+  shortName: string
+  city: string
+  locality: string | null
+  institutionType: string | null
+  groupName: string | null
+  verificationStatus: string | null
+}>> {
+  if (!supabase) return []
+  const { data, error } = await supabase
+    .from('colleges')
+    .select('id, name, official_name, short_name, city, locality, institution_type, verification_status, institution_groups(name)')
+    .order('name')
+    .limit(limit)
+  if (error) throw new Error(friendlyMessage(error))
+  return ((data ?? []) as Array<Record<string, unknown>>).map(row => {
+    const group = row.institution_groups as { name: string } | null
+    return {
+      id: row.id as string,
+      name: row.name as string,
+      officialName: (row.official_name as string | null) ?? null,
+      shortName: row.short_name as string,
+      city: row.city as string,
+      locality: (row.locality as string | null) ?? null,
+      institutionType: (row.institution_type as string | null) ?? null,
+      groupName: group?.name ?? null,
+      verificationStatus: (row.verification_status as string | null) ?? null,
+    }
+  })
 }
 
 /* -------------------------------------------------------------------------- */

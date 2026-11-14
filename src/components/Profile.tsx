@@ -203,17 +203,26 @@ export default function Profile({ profileId, myUserId, colleges, isMember, caps,
   }
 
   const locked = !isSelf && Boolean(profile.is_private) && !following
-  // 0057: the full directory row now carries locality + type
+  // 0057: the academic identity comes from the profile's own foreign keys
+  // (group -> institution -> campus -> program -> department). The flat
+  // directory list is only a fallback for databases without 0057.
+  const academicInfo = profile.academic ?? null
   const collegeRow = colleges.find(c => c.id === profile.college_id)
-  const college = collegeRow?.short_name
+  const college = academicInfo?.collegeShortName ?? collegeRow?.short_name
+  const institutionName = academicInfo?.officialName ?? academicInfo?.collegeName ?? collegeRow?.name ?? college ?? null
+  const locality = academicInfo?.campusLocality ?? academicInfo?.collegeLocality ?? collegeRow?.locality ?? null
+  const campusName = academicInfo?.campusName ?? null
 
   const display = profile.display_name?.trim() || (profile.username ? `@${profile.username}` : 'CAMPUS member')
 
-  // academic line only from real fields, only when present
-  const academic = [profile.course ?? profile.department ?? null,
+  // Academic line from the structured fields first, legacy free text second.
+  const academicDetails = [
+    academicInfo?.programName ?? profile.course ?? null,
+    academicInfo?.departmentName ?? profile.department ?? null,
     profile.year_of_study ? `Year ${profile.year_of_study}` : null,
-    profile.semester ? `Sem ${profile.semester}` : null]
-    .filter(Boolean).join(' · ') as string
+    profile.semester ? `Sem ${profile.semester}` : null,
+  ].filter(Boolean).join(' · ') as string
+  const academic = academicDetails || null
   const hasUsername = Boolean(profile.username)
 
   const kindLabel = (post: CampusPost) => post.kind === 'confession' ? 'Confession'
@@ -238,9 +247,14 @@ export default function Profile({ profileId, myUserId, colleges, isMember, caps,
             <small className={hasUsername ? undefined : 'profile-username-empty'}>
               {hasUsername ? `@${profile.username}` : 'no username yet'}
             </small>
-            {(college || academic) && (
+            {(institutionName || academic) && (
+              <span className="profile-institution" title={institutionName ?? undefined}>
+                {institutionName ?? 'No college set'}
+              </span>
+            )}
+            {(campusName || locality || academicInfo?.groupName || academic) && (
               <span className="profile-meta-chip">
-                {college ?? 'No college set'}{collegeRow?.locality ? ` — ${collegeRow.locality}` : ''}{academic ? ` · ${academic}` : ''}
+                {[campusName, locality, academicInfo?.groupName, academic].filter(Boolean).join(' · ')}
               </span>
             )}
           </div>

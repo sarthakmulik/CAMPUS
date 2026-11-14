@@ -114,6 +114,9 @@
 .staff-person-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .staff-person-copy b { font-size: 12.5px; display: flex; align-items: center; gap: 4px; }
 .staff-person-copy small { color: var(--muted); font-size:11px; }
+/* 0061: college-request review actions wrap instead of overflowing at 320px */
+.staff-request-actions { flex-direction: row; flex-wrap: wrap; gap: 6px; }
+.staff-request-actions .secondary-button { padding: 5px 9px; font-size: 11px; }
 .staff-person-actions { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
 .staff-person-actions input {
   width: 100%; max-width: 220px;

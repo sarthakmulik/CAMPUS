@@ -55,6 +55,9 @@ export default function ProfileSettings({ profile, userId, caps, patchProfile, r
   const [pendingDepartmentId, setPendingDepartmentId] = useState<string | null>(null)
   const [pendingProgramId, setPendingProgramId] = useState<string | null>(null)
   const [pendingPrograms, setPendingPrograms] = useState<db.InstitutionProgram[]>([])
+  /** 0060: campuses of the effective college — only a real choice when the
+   *  institution operates more than one */
+  const [campusOptions, setCampusOptions] = useState<db.InstitutionCampus[]>([])
   const [pendingCourse, setPendingCourse] = useState(profile.course ?? '')
   const [pendingYear, setPendingYear] = useState(profile.year_of_study ? String(profile.year_of_study) : '')
   const [pendingSemester, setPendingSemester] = useState(profile.semester ? String(profile.semester) : '')
@@ -113,15 +116,38 @@ export default function ProfileSettings({ profile, userId, caps, patchProfile, r
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instQuery, view])
 
-  // 0057: departments + programs of the effective (pending or current) college
+  // 0057/0060: departments, programs and campuses of the effective college
   useEffect(() => {
-    if (!effectiveCollegeId) { setDeptOptions([]); setPendingPrograms([]); return }
+    if (!effectiveCollegeId) {
+      setDeptOptions([])
+      setPendingPrograms([])
+      setCampusOptions([])
+      return
+    }
     let cancelled = false
-    void Promise.all([db.listDepartments(effectiveCollegeId), db.listPrograms(effectiveCollegeId)])
-      .then(([depts, programs]) => {
-        if (!cancelled) { setDeptOptions(depts); setPendingPrograms(programs) }
+    void Promise.all([
+      db.listDepartments(effectiveCollegeId),
+      db.listPrograms(effectiveCollegeId),
+      db.listInstitutionCampuses(effectiveCollegeId),
+    ])
+      .then(([depts, programs, campuses]) => {
+        if (cancelled) return
+        setDeptOptions(depts)
+        setPendingPrograms(programs)
+        setCampusOptions(campuses)
+        // a single campus is not a question worth asking; several are
+        setPendingCampusId(current => {
+          if (current && campuses.some(c => c.id === current)) return current
+          if (campuses.length === 1) return campuses[0].id
+          return campuses.some(c => c.id === profile.campus_id) ? profile.campus_id ?? null : null
+        })
       })
-      .catch(() => { if (!cancelled) { setDeptOptions([]); setPendingPrograms([]) } })
+      .catch(() => {
+        if (cancelled) return
+        setDeptOptions([])
+        setPendingPrograms([])
+        setCampusOptions([])
+      })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveCollegeId])
@@ -129,16 +155,23 @@ export default function ProfileSettings({ profile, userId, caps, patchProfile, r
   async function saveInstitute() {
     const chosenDept = deptOptions.find(option => option.id === pendingDepartmentId) ?? null
     const chosenProgram = pendingPrograms.find(option => option.id === pendingProgramId) ?? null
+    // Changing the college invalidates every child FK: another institution's
+    // department / program / campus must never survive the switch. Editing
+    // details WITHOUT switching keeps whatever is already stored.
+    const switched = Boolean(pendingCollegeId) && pendingCollegeId !== profile.college_id
+    const nextDeptId = chosenDept?.id ?? (switched ? null : profile.department_id ?? null)
+    const nextProgramId = chosenProgram?.id ?? (switched ? null : profile.academic_program_id ?? null)
+    const nextCampusId = pendingCampusId ?? (switched ? null : profile.campus_id ?? null)
     setBusy(true)
     setMessage(null)
     try {
       const failure = await patchProfile({
         college_id: pendingCollegeId ?? profile.college_id ?? null,
-        campus_id: pendingCampusId,
-        department_id: chosenDept?.id ?? null,
-        department: chosenDept ? chosenDept.name : profile.department ?? null,
-        academic_program_id: chosenProgram?.id ?? null,
-        course: chosenProgram ? chosenProgram.name : (pendingCourse.trim() || null),
+        campus_id: nextCampusId,
+        department_id: nextDeptId,
+        department: chosenDept ? chosenDept.name : (switched ? null : profile.department ?? null),
+        academic_program_id: nextProgramId,
+        course: chosenProgram ? chosenProgram.name : (pendingCourse.trim() || (switched ? null : profile.course ?? null)),
         year_of_study: pendingYear ? Number(pendingYear) : null,
         semester: pendingSemester ? Number(pendingSemester) : null,
       })
@@ -149,7 +182,7 @@ export default function ProfileSettings({ profile, userId, caps, patchProfile, r
         setPendingCampusId(null)
         setPendingDepartmentId(null)
         setPendingProgramId(null)
-        note(true, 'Institute details saved.')
+        note(true, switched ? 'Institute changed. Add your department for the new college.' : 'Institute details saved.')
       }
     } finally {
       setBusy(false)
@@ -330,7 +363,17 @@ export default function ProfileSettings({ profile, userId, caps, patchProfile, r
               <button
                 type="button"
                 className={`college-option ${effectiveCollegeId === hit.id ? 'selected' : ''}`}
-                onClick={() => { setPendingCollegeId(hit.id); setPendingCampusId(hit.campus_id); setInstQuery(hit.name) }}
+                onClick={() => {
+                  setPendingCollegeId(hit.id)
+                  setPendingCampusId(hit.campus_id)
+                  setInstQuery(hit.name)
+                  // a different institution has different departments and
+                  // programs: the old picks are dropped, not silently kept
+                  if (hit.id !== profile.college_id) {
+                    setPendingDepartmentId(null)
+                    setPendingProgramId(null)
+                  }
+                }}
               >
                 <span className="college-option-copy">
                   <b>{hit.name}</b>
@@ -344,6 +387,36 @@ export default function ProfileSettings({ profile, userId, caps, patchProfile, r
             </li>
           ))}
         </ul>
+      )}
+      {campusOptions.length > 1 && (
+        <label className="settings-field">
+          <span>Campus</span>
+          <select value={pendingCampusId ?? ''} onChange={event => setPendingCampusId(event.target.value || null)}>
+            <option value="">Not set</option>
+            {campusOptions.map(option => (
+              <option key={option.id} value={option.id}>
+                {[option.name, option.locality].filter(Boolean).join(', ')}{option.is_primary ? ' (main)' : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {pendingPrograms.length > 0 && (
+        <label className="settings-field">
+          <span>Course / program</span>
+          <select
+            value={pendingProgramId ?? ''}
+            onChange={event => {
+              const value = event.target.value || null
+              setPendingProgramId(value)
+              const chosen = pendingPrograms.find(option => option.id === value)
+              if (chosen) setPendingCourse(chosen.name)
+            }}
+          >
+            <option value="">Not set</option>
+            {pendingPrograms.map(option => <option key={option.id} value={option.id}>{option.name}</option>)}
+          </select>
+        </label>
       )}
       {deptOptions.length > 0 && (
         <label className="settings-field">

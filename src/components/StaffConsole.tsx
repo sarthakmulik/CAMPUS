@@ -11,8 +11,9 @@ import { AdsAdmin } from './AdsAdmin'
 import { useSignedMedia } from '../lib/signedMedia'
 import {
   StaffAccountRow, StaffAuditRow, Profile, ModerationReportRow,
-  loadStaffRoster, loadStaffAudit, loadColleges, findStaffTargets, staffRpc,
+  loadStaffRoster, loadStaffAudit, findStaffTargets, staffRpc,
   loadStaffReports, loadStaffReportCounts, fetchStaffPostContent, StaffPostContent,
+  DirectoryStats, CollegeRequest, fetchDirectoryStats, listCollegeRequests, reviewCollegeRequest,
 } from '../lib/db'
 
 /**
@@ -138,7 +139,7 @@ export function StaffConsole({ flash }: { flash: (message: string) => void }) {
       {tab === 'pulse' && (ops?.pulse
         ? <div className="staff-embed"><PulseAdminTab busy={busy} setBusy={setBusy} flash={flash} bump={() => setRefreshTick(t => t + 1)}/></div>
         : <div className="staff-empty">Your staff scopes do not include the pulse namespace.</div>)}
-      {tab === 'colleges' && <CollegesTab/>}
+      {tab === 'colleges' && <CollegesTab flash={flash}/>}
       {tab === 'staff' && (ops?.provision || ops
         ? <StaffTab
             isSuper={isSuper}
@@ -668,33 +669,132 @@ function errText(err: unknown): string {
 
 /* ---- colleges ------------------------------------------------------------ */
 
-function CollegesTab() {
-  const [colleges, setColleges] = useState<Array<{ id: string; name: string; short_name: string; city: string; verified: boolean }> | null>(null)
+function CollegesTab({ flash }: { flash: (message: string) => void }) {
+  const [stats, setStats] = useState<DirectoryStats | null>(null)
+  const [requests, setRequests] = useState<CollegeRequest[] | null>(null)
+  const [requestError, setRequestError] = useState<string | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [filter, setFilter] = useState<'pending' | 'approved' | 'rejected'>('pending')
+  const [tick, setTick] = useState(0)
+
   useEffect(() => {
+    let cancelled = false
     void (async () => {
-      try { setColleges(await loadColleges()) }
-      catch { setColleges([]) }
+      try { const row = await fetchDirectoryStats(); if (!cancelled) setStats(row) }
+      catch { if (!cancelled) setStats(null) }
+      try {
+        const rows = await listCollegeRequests(filter, 50)
+        if (!cancelled) { setRequests(rows); setRequestError(null) }
+      } catch (error) {
+        if (!cancelled) { setRequests([]); setRequestError(errText(error)) }
+      }
     })()
-  }, [])
-  const verified = colleges?.filter(c => c.verified).length ?? 0
+    return () => { cancelled = true }
+  }, [filter, tick])
+
+  async function decide(request: CollegeRequest, publish: boolean) {
+    setBusyId(request.id)
+    setRequestError(null)
+    try {
+      await reviewCollegeRequest(request.id, 'approved', { publish })
+      flash(publish
+        ? `${request.name} added to the directory and published.`
+        : `${request.name} added as pending review.`)
+      setTick(value => value + 1)
+    } catch (error) {
+      setRequestError(errText(error))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function reject(request: CollegeRequest) {
+    setBusyId(request.id)
+    setRequestError(null)
+    try {
+      await reviewCollegeRequest(request.id, 'rejected')
+      flash(`${request.name} request rejected.`)
+      setTick(value => value + 1)
+    } catch (error) {
+      setRequestError(errText(error))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   return (
     <div className="staff-colleges">
       <div className="staff-card wide">
         <small>DIRECTORY SNAPSHOT</small>
         <p className="staff-muted">
-          {colleges === null ? 'Loading…' : `${colleges.length} colleges · ${verified} verified`}
+          {stats
+            ? `${stats.collegesTotal} institutions · ${stats.verified} listed · ${stats.pendingReview} pending review`
+            : 'Exact counts need supabase/migrations/0061_directory_flow_repairs.sql applied.'}
         </p>
-        <p className="staff-muted">The colleges manager (create / edit / verify / merge) ships with 0045 — the data is live, the console surface is next.</p>
+        {stats && (
+          <p className="staff-muted">
+            {stats.groups} groups · {stats.campuses} campuses · {stats.departments} departments · {stats.programs} programs
+          </p>
+        )}
+        <p className="staff-muted">
+          Approving a request only ADDS the institution — it stays pending review until someone publishes it,
+          so an unverified college never becomes publicly selectable by accident.
+        </p>
       </div>
-      {colleges?.slice(0, 12).map(c => (
-        <div key={c.id} className="staff-person">
-          <span className="avatar small"><Building2 size={14}/></span>
-          <div className="staff-person-copy">
-            <b>{c.name}</b>
-            <small>{c.short_name} · {c.city || '—'}{c.verified ? ' · verified' : ''}</small>
-          </div>
+
+      <div className="staff-card wide">
+        <small>COLLEGE REQUESTS FROM STUDENTS</small>
+        <div className="staff-filterrow" role="tablist" aria-label="Request status">
+          {(['pending', 'approved', 'rejected'] as const).map(value => (
+            <button
+              key={value}
+              role="tab"
+              aria-selected={filter === value}
+              className={`staff-chip clickable ${filter === value ? 'selected' : ''}`}
+              onClick={() => setFilter(value)}
+            >
+              {value[0].toUpperCase() + value.slice(1)}
+            </button>
+          ))}
         </div>
-      ))}
+        {requestError && <div className="staff-error" role="alert"><span>{requestError}</span></div>}
+        {requests === null && <p className="staff-muted">Loading…</p>}
+        {requests?.length === 0 && <p className="staff-muted">Nothing {filter} right now.</p>}
+        {requests?.map(request => (
+          <div key={request.id} className="staff-person">
+            <span className="avatar small"><Building2 size={14}/></span>
+            <div className="staff-person-copy">
+              <b>{request.name}</b>
+              <small>
+                {[request.locality, request.city, request.institutionType?.replace('_', ' '),
+                  request.collegeShortName ? `listed as ${request.collegeShortName}` : null]
+                  .filter(Boolean).join(' · ') || 'No location given'}
+              </small>
+              <small>
+                {request.requesterName
+                  ? `${request.requesterName}${request.requesterHandle ? ` (@${request.requesterHandle})` : ''}`
+                  : 'Unknown member'}
+                {request.createdAt ? ` · ${timeAgo(request.createdAt)}` : ''}
+              </small>
+              {request.website && <small>{request.website}</small>}
+              {request.statusNote && <small>Note: {request.statusNote}</small>}
+            </div>
+            {filter === 'pending' && (
+              <span className="staff-person-actions staff-request-actions">
+                <button className="secondary-button" disabled={busyId === request.id} onClick={() => void decide(request, false)}>
+                  Approve
+                </button>
+                <button className="secondary-button" disabled={busyId === request.id} onClick={() => void decide(request, true)}>
+                  Approve &amp; publish
+                </button>
+                <button className="secondary-button" disabled={busyId === request.id} onClick={() => void reject(request)}>
+                  Reject
+                </button>
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
