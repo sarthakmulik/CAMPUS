@@ -22,6 +22,8 @@ export type College = {
   /** 0057: present when the caller selects the column */
   locality?: string | null
   institution_type?: string | null
+  /** 0057 hierarchy: derived group of this institution (for profile display) */
+  group_name?: string | null
 }
 
 /** One ranked row of the 0057 directory search (search_institutions RPC). */
@@ -41,6 +43,14 @@ export type InstitutionHit = {
 
 export type InstitutionDept = { id: string; name: string; abbreviation: string | null }
 export type InstitutionProgram = { id: string; name: string; level: string }
+export type InstitutionCampus = {
+  id: string
+  name: string
+  locality: string
+  city: string
+  address: string | null
+  is_primary: boolean
+}
 
 
 export type Topic = { id: string; name: string; post_count: number }
@@ -250,9 +260,35 @@ export async function probeCaps(): Promise<Caps> {
 
 export async function loadColleges(): Promise<College[]> {
   if (!supabase) return []
+  // 0057: the group embed shows the full tree on profiles (derived, never
+  // duplicated onto profiles themselves). Older schemas fall back cleanly.
+  const full = await supabase
+    .from('colleges')
+    .select('id, name, short_name, city, verified, locality, institution_type, institution_groups(name)')
+    .order('name')
+    .limit(500)
+  if (!full.error) {
+    return ((full.data ?? []) as Array<Record<string, unknown>>).map(row => {
+      const group = row.institution_groups as { name: string } | null
+      return {
+        id: row.id as string,
+        name: row.name as string,
+        short_name: row.short_name as string,
+        city: row.city as string,
+        verified: Boolean(row.verified),
+        locality: (row.locality as string | null) ?? null,
+        institution_type: (row.institution_type as string | null) ?? null,
+        group_name: group?.name ?? null,
+      }
+    })
+  }
+  if (!isMissingColumn(full.error) && !isMissingFunction(full.error)) {
+    throw new Error(friendlyMessage(full.error))
+  }
+  // Pre-0057 fallback: the flat legacy columns only.
   const { data, error } = await supabase
     .from('colleges')
-    .select('id, name, short_name, city, verified, locality, institution_type')
+    .select('id, name, short_name, city, verified')
     .order('name')
     .limit(500)
   if (error) throw new Error(friendlyMessage(error))
@@ -341,6 +377,28 @@ export async function listPrograms(collegeId: string): Promise<InstitutionProgra
     id: row.id as string,
     name: (row.name as string) ?? '',
     level: (row.level as string) ?? 'undergraduate',
+  }))
+}
+
+/**
+ * Verified campuses of one institution (0060). Empty means the caller falls
+ * back to the institution's primary campus from the search hit — the wizard
+ * only ASKS for a campus when this returns more than one.
+ */
+export async function listInstitutionCampuses(collegeId: string): Promise<InstitutionCampus[]> {
+  if (!supabase) return []
+  const { data, error } = await supabase.rpc('list_institution_campuses', { p_college: collegeId })
+  if (error) {
+    if (isMissingFunction(error)) return []
+    throw new Error(friendlyMessage(error))
+  }
+  return ((data ?? []) as Record<string, unknown>[]).map(row => ({
+    id: row.id as string,
+    name: (row.name as string) ?? '',
+    locality: (row.locality as string) ?? '',
+    city: (row.city as string) ?? 'Pune',
+    address: (row.address as string | null) ?? null,
+    is_primary: Boolean(row.is_primary),
   }))
 }
 

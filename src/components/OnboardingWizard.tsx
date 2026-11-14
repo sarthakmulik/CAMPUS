@@ -74,6 +74,10 @@ export default function OnboardingWizard() {
 
   const [collegeQuery, setCollegeQuery] = useState('')
   const [collegeId, setCollegeId] = useState(() => profile?.college_id ?? '')
+  // 0060: the physical campus — auto-selected when the institution has exactly
+  // one verified campus, a real choice when it operates more than one
+  const [campusId, setCampusId] = useState(() => profile?.campus_id ?? '')
+  const [campusOptions, setCampusOptions] = useState<db.InstitutionCampus[]>([])
   // 0057: ranked directory search (JSPM Hadapsar prioritised on launch list)
   const [instHits, setInstHits] = useState<db.InstitutionHit[]>([])
   const [instLoading, setInstLoading] = useState(false)
