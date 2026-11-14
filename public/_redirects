@@ -1,0 +1,4 @@
+# SPA safety net: any stray path serves the app shell. CAMPUS routes are
+# hash-based (#p/..., #e/...), so this is belt-and-braces - Cloudflare Pages
+# serves real files first and only falls back here for 404s.
+/* /index.html 200

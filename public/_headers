@@ -1,0 +1,26 @@
+# Cloudflare Pages cache rules (served verbatim alongside dist assets).
+# Vite emits content-hashed bundles under /assets - safe to cache forever.
+# index.html must revalidate so a new deploy is picked up on next load;
+# sw.js must never be cached (service worker update checks must see fresh).
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/
+  Cache-Control: public, max-age=0, must-revalidate
+
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate
+
+/sw.js
+  Cache-Control: no-cache
+
+/manifest.webmanifest
+  Cache-Control: public, max-age=3600
+
+/campus-icon.png
+/campus-icon-512.png
+/campus-maskable-192.png
+/campus-maskable-512.png
+/campus-badge.png
+  Cache-Control: public, max-age=86400

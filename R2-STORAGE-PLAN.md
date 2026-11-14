@@ -122,8 +122,8 @@ routeForUpload(kind, size) → 'supabase' | 'r2'
 
 | Artifact | What it does |
 |---|---|
-| `0054_r2_media.sql` | extends `post_media_gate_sync` + backfill-safe wrapper `can_view_media_source(p_key, p_action)` (wraps today's `can_view_media_object` logic; adds `chat` gate rows via `messages.media` join + conversation membership; adds `club resources` membership path for R2 resource keys). Include the RPC the edge function calls, service-role-executable. |
-| Edge Function `r2-sign` | verifies JWT, calls the wrapper, SigV4-presigns GET (15 min) / PUT (10 min) with `aws4fetch`; R2 keys never leave server secrets. Reuses the anon JWT the client already sends (standard `Authorization: Bearer` handling = `verify_jwt = true`). |
+| `0055_r2_media.sql` | (renamed from 0054 - device tokens took that number) the two gate wrappers `can_view_media_source(ns,key)` / `can_write_media_source(ns,key)` with **exact parity** to today's storage policies: `media` → the 0051/0053 `can_view_media_object` gate; `chat` → `is_conversation_member(folder1)` (0020 parity); `resource` → `is_club_active_member` + own uploader folder (0016a parity). Plus: `post_media_gate_sync()` now strips the `r2://<bucket>/` scheme so R2 media referenced from `posts.media_urls` flows into the same gate table. **Written and committed; apply when deploying.** |
+| Edge Function `r2-sign` | **Written and committed** (`supabase/functions/r2-sign/index.ts`): verifies the caller JWT (platform `verify_jwt`), asks the 0055 gate wrappers **with the caller's own token** (so `auth.uid()` resolves exactly like a storage policy run), enforces the 25 MB PUT ceiling, then SigV4-presigns GET (15 min) / PUT (10 min) with `aws4fetch` (R2 needs explicit `service:'s3', region:'auto'`; `X-Amz-Expires` is pre-set before signing). **Stub mode** (`R2_SIGN_STUB='true'`, also the default while credentials are missing) runs the full gate live but returns a marked dummy URL - the authorization matrix can be probed before a Cloudflare account exists. GET denies return a uniform `404 not_available` - no existence leak. |
 | Secrets (server only) | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` set via `supabase secrets set`. **Never in `.env`, never in the client bundle.** |
 
 Open question to resolve at build time: whether chat attachments live in
@@ -132,9 +132,10 @@ the migration reads the real chat schema first.
 
 ## 6. Rollout phases (mirror the isolation rounds' discipline)
 
-1. **0054 + edge function**, no client switch — deploy dark; probe the function
+1. **0055 + edge function**, no client switch — deploy dark; probe the function
    with the probe account: allowed mint ✓, outsider/anon on college object ✗
    (404-equivalent "no existence leak"), staff mint of hidden object ✓.
+   Stub mode makes this runnable before R2 credentials exist.
 2. **Client routing switch** behind one constant (`MEDIA_SPLIT_V1 = true`):
    new reels + chat uploads go R2; post images follow after the first day's
    smoke test. tsc/build/22 pulse tests + full signed-media in-app pass.
