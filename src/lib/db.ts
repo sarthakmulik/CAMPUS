@@ -204,6 +204,17 @@ export function friendlyMessage(error: unknown): string {
     // database (0061 drops it). Say so instead of "something went wrong".
     return 'College requests need supabase/migrations/0061_directory_flow_repairs.sql applied — the database still has an older duplicate of the request function.'
   }
+  // 0060-0064: the client is newer than the deployed database. PGRST205 is a
+  // missing table/view, PGRST202 a missing function, PGRST204 a missing column
+  // - for every flow added by these migrations they all mean the same thing:
+  // the SQL editor has not been given the migrations yet. Naming the chain is
+  // the difference between a 20-second fix and guessing which file to apply.
+  if (anyError?.code === 'PGRST205'
+    || anyError?.code === 'PGRST202'
+    || anyError?.code === 'PGRST204'
+    || /could not find the (table|function|column)/i.test(raw)) {
+    return 'This version of CAMPUS needs the database migrated: apply every file in supabase/migrations from 0060_institution_campus_step.sql through 0064_communities_group_department_scope.sql in the Supabase SQL editor, in numeric order, then reload.'
+  }
   if (/does not exist|schema cache|PGRST20|PGRST3/i.test(raw)) {
     return 'A required database piece is missing. Apply supabase/migrations/0001_explore_first_onboarding.sql and 0002_real_feed.sql in the Supabase SQL editor.'
   }

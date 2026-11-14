@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Building2, Check, ChevronRight, EyeOff, Globe, Globe2, Lock, Plus, Search,
-  Users, X, Loader2, RefreshCw, Sparkles, Clock, UserPlus,
+  Building2, Check, ChevronRight, EyeOff, Globe, Globe2, GraduationCap, Lock,
+  Network, Plus, Search, Users, X, Loader2, RefreshCw, Sparkles, Clock, UserPlus,
 } from 'lucide-react'
 import * as db from '../lib/db'
 import * as cm from '../lib/communities'
@@ -389,7 +389,11 @@ function CommunityCard({ row, onOpen, onJoin, onCancel }: {
           <span className="community-card-scope">
             {row.scope === 'college'
               ? <><Building2 size={12}/>{row.college_short_name ?? 'College'}</>
-              : <><Globe2 size={12}/>Global</>}
+              : row.scope === 'group'
+                ? <><Network size={12}/>Institution group</>
+                : row.scope === 'department'
+                  ? <><GraduationCap size={12}/>Department</>
+                  : <><Globe2 size={12}/>Global</>}
           </span>
         </button>
         {member && <span className="community-joined-chip"><Check size={12}/> Member</span>}
@@ -454,6 +458,7 @@ function CreateCommunityModal({ identity, colleges, myCollegeId, onClose, onCrea
   const [category, setCategory] = useState<typeof cm.COMMUNITY_CATEGORIES[number]>('Other')
   const [scope, setScope] = useState<cm.CommunityScope | null>(null)
   const [collegeId, setCollegeId] = useState<string>(myCollegeId ?? '')
+  const [myDepartment, setMyDepartment] = useState<{ id: string; name: string } | null>(null)
   const [privacy, setPrivacy] = useState<cm.CommunityPrivacy | null>(null)
   const [rules, setRules] = useState('')
   const [logoUrl, setLogoUrl] = useState<string | null>(null)
@@ -467,6 +472,25 @@ function CreateCommunityModal({ identity, colleges, myCollegeId, onClose, onCrea
 
   const effectiveSlug = slugTouched ? slugify(slug) : slugify(name)
 
+  // 0064: the department scope is anchored on the caller's OWN department —
+  // the server re-derives it and refuses anyone who is not in one.
+  useEffect(() => {
+    if (!identity) return
+    let live = true
+    void (async () => {
+      try {
+        const profile = await db.fetchProfile(identity.id)
+        if (!live || !profile) return
+        const id = profile.department_id ?? null
+        const label = profile.academic?.departmentName ?? null
+        if (id && label) setMyDepartment({ id, name: label })
+      } catch {
+        /* scope choice degrades to the other three options */
+      }
+    })()
+    return () => { live = false }
+  }, [identity])
+
   const localError = (): string | null => {
     const trimmedName = name.trim()
     if (trimmedName.length < 3 || trimmedName.length > 60) return 'Community name must be 3-60 characters.'
@@ -474,6 +498,9 @@ function CreateCommunityModal({ identity, colleges, myCollegeId, onClose, onCrea
     if (scope === 'college') {
       if (!collegeId) return 'Pick the college this community belongs to.'
       if (myCollegeId && collegeId !== myCollegeId) return 'College communities belong to your own declared college.'
+    }
+    if (scope === 'department' && !myDepartment) {
+      return 'Add your department on your profile first — department communities belong to a declared department.'
     }
     return null
   }
@@ -537,7 +564,8 @@ function CreateCommunityModal({ identity, colleges, myCollegeId, onClose, onCrea
         description: description.trim(),
         category,
         scope,
-        collegeId: scope === 'college' ? collegeId : null,
+        collegeId: scope === 'college' || scope === 'group' || scope === 'department' ? collegeId : null,
+        departmentId: scope === 'department' ? (myDepartment?.id ?? null) : null,
         privacy,
         rules: rules.trim(),
         logoUrl,
@@ -638,7 +666,7 @@ function CreateCommunityModal({ identity, colleges, myCollegeId, onClose, onCrea
                 <p>{myCollegeId
                   ? 'Belongs to your declared college. Classmates of that college join; other colleges cannot.'
                   : 'Add your college on your profile first — college communities belong to a declared college.'}</p>
-                {colleges.length > 0 && myCollegeId && (
+            {colleges.length > 0 && myCollegeId && (
                   <select value={collegeId} onChange={event => setCollegeId(event.target.value)} aria-label="College">
                     {colleges.map(college => (
                       <option key={college.id} value={college.id} disabled={college.id !== myCollegeId}>
@@ -647,6 +675,24 @@ function CreateCommunityModal({ identity, colleges, myCollegeId, onClose, onCrea
                     ))}
                   </select>
                 )}
+              </div>
+            </button>
+            <button className={`scope-choice${scope === 'group' ? ' on' : ''}`} onClick={() => setScope('group')} disabled={!myCollegeId}>
+              <Network size={22}/>
+              <div>
+                <b>Institution group community</b>
+                <p>{myCollegeId
+                  ? 'Every verified college of your institution group joins. Reaches further than one campus, tighter than global.'
+                  : 'Add your college on your profile first — group communities follow your college\'s institution group.'}</p>
+              </div>
+            </button>
+            <button className={`scope-choice${scope === 'department' ? ' on' : ''}`} onClick={() => setScope('department')} disabled={!myDepartment}>
+              <GraduationCap size={22}/>
+              <div>
+                <b>Department community</b>
+                <p>{myDepartment
+                  ? `Belongs to ${myDepartment.name} on your declared college. Classmates of that department join; nobody else.`
+                  : 'Add your department on your profile first — department communities belong to a declared department.'}</p>
               </div>
             </button>
           </div>
@@ -685,7 +731,10 @@ function CreateCommunityModal({ identity, colleges, myCollegeId, onClose, onCrea
               <div><dt>Name</dt><dd>{name.trim()}</dd></div>
               <div><dt>Slug</dt><dd>/communities/{effectiveSlug}</dd></div>
               <div><dt>Category</dt><dd>{category}</dd></div>
-              <div><dt>Scope</dt><dd>{scope === 'college' ? `College — ${colleges.find(c => c.id === collegeId)?.name ?? 'your college'}` : scope === 'global' ? 'Global' : 'Not chosen yet'}</dd></div>
+              <div><dt>Scope</dt><dd>{scope === 'college' ? `College — ${colleges.find(c => c.id === collegeId)?.name ?? 'your college'}`
+              : scope === 'group' ? `Institution group — ${colleges.find(c => c.id === collegeId)?.name ?? 'your college'}`
+              : scope === 'department' ? `Department — ${myDepartment?.name ?? 'your department'}`
+              : scope === 'global' ? 'Global' : 'Not chosen yet'}</dd></div>
               <div><dt>Privacy</dt><dd className="capitalize">{privacy ?? 'Not chosen yet'}</dd></div>
             </dl>
           </div>

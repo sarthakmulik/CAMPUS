@@ -12,7 +12,7 @@ import { friendlyMessage } from './db'
  * and every error surfaces raw here — the UI never pretends a write succeeded.
  */
 
-export type CommunityScope = 'global' | 'college'
+export type CommunityScope = 'global' | 'college' | 'group' | 'department'
 export type CommunityPrivacy = 'public' | 'private' | 'hidden'
 
 export const COMMUNITY_CATEGORIES = [
@@ -229,6 +229,8 @@ export interface CreateCommunityInput {
   category: string
   scope: CommunityScope
   collegeId: string | null
+  /** 0064: required for scope 'department' — the creator's own department */
+  departmentId?: string | null
   privacy: CommunityPrivacy
   rules?: string
   logoUrl?: string | null
@@ -242,11 +244,17 @@ export async function createCommunity(input: CreateCommunityInput): Promise<stri
     p_slug: input.slug ?? '',
     p_description: input.description ?? '',
     p_category: input.category,
-    p_college_id: input.scope === 'college' ? input.collegeId : null,
+    p_college_id: input.scope === 'college' || input.scope === 'group' || input.scope === 'department'
+      ? input.collegeId
+      : null,
     p_privacy: input.privacy,
     p_rules: input.rules ?? '',
     p_logo_url: input.logoUrl ?? null,
     p_cover_url: input.coverUrl ?? null,
+    // 0064: the server re-derives and validates this from the caller's own
+    // declared college/department; it is never trusted as free text.
+    p_scope: input.scope,
+    p_department_id: input.scope === 'department' ? (input.departmentId ?? null) : null,
   })
   if (error) throw new Error(friendlyMessage(error))
   return data as string
