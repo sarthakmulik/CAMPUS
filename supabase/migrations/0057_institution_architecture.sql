@@ -105,9 +105,12 @@ create table if not exists public.departments (
   name           text not null,
   abbreviation   text,
   status         text not null default 'active' check (status in ('active','inactive')),
-  created_at     timestamptz not null default now(),
-  unique (college_id, lower(name))
+  created_at     timestamptz not null default now()
 );
+-- case-insensitive per-college uniqueness (an expression index — inline
+-- UNIQUE constraints cannot take expressions, which is what broke 42601)
+create unique index if not exists departments_college_name_key
+  on public.departments (college_id, lower(name));
 alter table public.departments enable row level security;
 drop policy if exists "departments public read" on public.departments;
 create policy "departments public read" on public.departments
@@ -124,9 +127,11 @@ create table if not exists public.academic_programs (
   level        text not null default 'undergraduate'
     check (level in ('diploma','undergraduate','postgraduate','doctoral','certificate')),
   status       text not null default 'active' check (status in ('active','inactive')),
-  created_at   timestamptz not null default now(),
-  unique (college_id, lower(name))
+  created_at   timestamptz not null default now()
 );
+-- case-insensitive per-college uniqueness (expression index, same reason as departments)
+create unique index if not exists academic_programs_college_name_key
+  on public.academic_programs (college_id, lower(name));
 alter table public.academic_programs enable row level security;
 drop policy if exists "academic_programs public read" on public.academic_programs;
 create policy "academic_programs public read" on public.academic_programs
