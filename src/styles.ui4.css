@@ -1880,9 +1880,10 @@ textarea:disabled {
     padding-left: max(14px, env(safe-area-inset-left));
     padding-right: max(14px, env(safe-area-inset-right));
   }
+  /* the toast stays centred (left:50% + translateX(-50%)) — it only needs its
+     max-width narrowed so a side cutout cannot clip a long message */
   .toast {
-    left: max(14px, env(safe-area-inset-left));
-    right: max(14px, env(safe-area-inset-right));
+    max-width: calc(100vw - 28px - env(safe-area-inset-left) - env(safe-area-inset-right));
   }
 
   /* ---- hide states -------------------------------------------------------
