@@ -25,7 +25,7 @@
 // whose Authorization Bearer is not a valid Supabase JWT (anon included)
 // before this code runs — the gate can therefore trust the caller's token.
 
-import { AwsClient } from 'npm:aws4fetch@2.2.2'
+import { AwsClient } from 'npm:aws4fetch@1.0.20'
 
 const GET_TTL_S = 15 * 60          // viewer URLs: short-lived, mint-per-view
 const PUT_TTL_S = 10 * 60          // uploader URLs: one upload window
