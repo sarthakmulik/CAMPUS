@@ -30,7 +30,9 @@ chat_messages / social actions
 npx web-push generate-vapid-keys
 ```
 - PUBLIC key → `.env` as `VITE_VAPID_PUBLIC_KEY` (public by design) and
-  on Vercel as an environment variable (redeploy after adding).
+  on Cloudflare (Workers & Pages → campus → Settings → Variables and
+  Secrets, Production + Preview — redeploy after adding; a missing var
+  builds green and silently disables push).
 - PRIVATE key → Supabase secrets only, never in the repo.
 
 ```bash
@@ -163,4 +165,5 @@ app bundle.
 3. SQL editor: update `push_delivery_config` row 1 with the new token
    (see step 2 above — the same statement).
 4. If the anon/public key changed too: update `.env` `VITE_SUPABASE_ANON_KEY`
-   and the Vercel env var, then redeploy.
+   and the Cloudflare variable (Workers & Pages → campus → Variables and
+   Secrets), then redeploy.
