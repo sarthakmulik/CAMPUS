@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- No auto-backup: the WebView localStorage holds the Supabase refresh
          token; it must never leave the device via Google backup. -->
     <application
@@ -29,6 +30,26 @@
                 <data android:scheme="campus" />
             </intent-filter>
         </activity>
+
+        <!-- Push: replace the Capacitor plugin's FCM service with CAMPUS'
+             own (it subclasses the plugin's, so token events still flow).
+             The subclass renders notifications natively — monochrome C
+             icon, accent color, BigText, channels, Like/Reply actions. -->
+        <service
+            android:name="com.capacitorjs.plugins.pushnotifications.MessagingService"
+            tools:node="remove" />
+        <service
+            android:name=".CampusMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!-- Inline chat reply from the notification shade (RemoteInput). -->
+        <receiver
+            android:name=".ReplyReceiver"
+            android:exported="false" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

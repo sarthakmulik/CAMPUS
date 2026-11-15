@@ -188,23 +188,49 @@ async function fcmAccessToken(): Promise<string> {
   return fcmToken.value
 }
 
-/** Returns false when the token is dead (unregistered/mismatched sender). */
+/** campus:// twin of the hash url — the native notification builder turns
+ *  it into the tap/action intent (the app's existing deep-link handler
+ *  resolves it through the same routes and RLS as every web entry point). */
+function nativeLink(url: string): string {
+  const m = url.match(/^#(p|chat|u|e|c|m)\/(.+)$/)
+  if (!m) return ''
+  const kind = { p: 'post', chat: 'chat', u: 'profile', e: 'event', c: 'community', m: 'listing' }[m[1]] ?? ''
+  return kind ? `campus://${kind}/${m[2]}` : ''
+}
+
+/** Returns false when the token is dead (unregistered/mismatched sender).
+ *
+ *  Android receives DATA-ONLY messages on purpose: system-rendered
+ *  notification messages cannot carry action buttons (Like/Reply) or a
+ *  monochrome small icon, and they render with the colored launcher icon.
+ *  The app's CampusMessagingService builds the real notification — icon,
+ *  accent color, BigText, channels, actions — from this data block. iOS
+ *  stays on plain APNs alerts (see sendApns). */
 async function sendFcm(device: DeviceTokenRow, payload: QueueRow['payload']): Promise<'ok' | 'stale' | 'failed'> {
   if (!fcmAccount) return 'failed'
   const accessToken = await fcmAccessToken()
   const tag = String(payload.tag ?? 'campus')
+  const data: Record<string, string> = {
+    title: String(payload.title ?? 'CAMPUS'),
+    body: String(payload.body ?? ''),
+    url: String(payload.url ?? ''),
+    tag,
+    category: String(payload.category ?? ''),
+    nid: String(payload.nid ?? ''),
+    created_at: String(payload.created_at ?? ''),
+  }
+  const link = nativeLink(String(payload.url ?? ''))
+  if (link) data.link = link
+  if (payload.post_id) data.post_id = String(payload.post_id)
+  if (payload.comment_id) data.comment_id = String(payload.comment_id)
   const res = await fetch(`https://fcm.googleapis.com/v1/projects/${fcmAccount.project_id}/messages:send`, {
     method: 'POST',
     headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
     body: JSON.stringify({
       message: {
         token: device.token,
-        notification: { title: String(payload.title ?? 'CAMPUS'), body: String(payload.body ?? '') },
-        data: { url: String(payload.url ?? ''), tag },
-        android: {
-          priority: 'high',
-          notification: { channel_id: 'campus_default', tag },
-        },
+        data,
+        android: { priority: 'high' },
       },
     }),
   })

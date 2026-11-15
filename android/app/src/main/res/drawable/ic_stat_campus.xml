@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Monochrome notification small icon. Android status-bar/shade small
+     icons are alpha-only masks: the colored launcher "C" renders as an
+     opaque blank square, which is why the logo "wasn't visible". This is
+     the brand C as a white rounded stroke; Android tints it with the
+     notification accent color (NotificationCompat.Builder#setColor). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M17.5,6.7 A8.2,8.2 0 1 0 17.5,17.3"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.4"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+</vector>

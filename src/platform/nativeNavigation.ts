@@ -1,5 +1,6 @@
 import { App as CapacitorApp } from '@capacitor/app'
 import * as navHistory from '../lib/navHistory'
+import { currentAuthUserId, sendChatMessage, toggleCommentLike } from '../lib/db'
 import { isNativeApp, publicWebOrigin } from './platform'
 
 /**
@@ -39,13 +40,54 @@ export function initNativeNavigation(onExitHint: (message: string) => void): voi
 
   const openDeepLink = (raw: string | undefined) => {
     if (!raw) return
+    let url: URL | null = null
+    try {
+      url = new URL(raw)
+    } catch {
+      /* not a parseable URL — routing below still tries the hash */
+    }
     const hash = deepLinkHash(raw)
     if (hash && window.location.hash !== hash) window.location.hash = hash
+    if (url && url.protocol === 'campus:') runPushAction(url)
   }
 
   void CapacitorApp.addListener('appUrlOpen', ({ url }) => openDeepLink(url))
   // Cold start: Android delivers the launching intent here, not via appUrlOpen.
   void CapacitorApp.getLaunchUrl().then(launch => openDeepLink(launch?.url)).catch(() => {})
+}
+
+const UUID_LIKE = /^[0-9a-f-]{32,36}$/i
+
+/** Like/Reply/inline-send actions ride the campus:// query string (built by
+ *  the native notification service). They run under the signed-in session
+ *  like every other write — RLS verifies the target. A failed action never
+ *  blocks navigation: the user still lands on the notification's target. */
+function runPushAction(url: URL): void {
+  const send = url.searchParams.get('send')
+  const like = url.searchParams.get('like')
+  const chatId = url.hostname.toLowerCase() === 'chat' ? url.pathname.replace(/^\//, '') : ''
+  if (!send && !like) return
+  void (async () => {
+    try {
+      if (send && chatId && UUID_LIKE.test(chatId)) {
+        // A cold start can beat session restore — a few spaced retries cover it
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            await sendChatMessage(chatId, send.slice(0, 2000), '')
+            return
+          } catch (error) {
+            if (attempt === 2) throw error
+            await new Promise(resolve => setTimeout(resolve, 900))
+          }
+        }
+      } else if (like && UUID_LIKE.test(like)) {
+        const me = await currentAuthUserId()
+        if (me) await toggleCommentLike(like, me, true)
+      }
+    } catch {
+      /* best-effort: the deep link still routed */
+    }
+  })()
 }
 
 const ID_PATTERNS: Record<string, RegExp> = {

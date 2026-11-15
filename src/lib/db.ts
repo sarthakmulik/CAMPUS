@@ -1193,6 +1193,15 @@ export async function currentEmail(): Promise<string | null> {
   return data.user?.email ?? null
 }
 
+/** The signed-in member's auth uid — push-action deep links (like/reply from
+ *  a notification) resolve their targets under it, RLS verified like any
+ *  other write. Null when signed out. */
+export async function currentAuthUserId(): Promise<string | null> {
+  if (!supabase) return null
+  const { data } = await supabase.auth.getUser()
+  return data.user?.id ?? null
+}
+
 /* -------------------------------------------------------------------------- */
 /* Avatars                                                                     */
 /* -------------------------------------------------------------------------- */
