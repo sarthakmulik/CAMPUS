@@ -20,3 +20,6 @@ android/app/google-services.json
 
 # graphify knowledge-graph build (queryable locally via the graphify CLI)
 graphify-out/
+
+# Supabase CLI local state (project/org ids - never needed in git)
+supabase/.temp/

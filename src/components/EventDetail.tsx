@@ -8,6 +8,7 @@ import * as ev from '../lib/events'
 import * as bk from '../lib/bookmarks'
 import * as db from '../lib/db'
 import { publicWebOrigin } from '../platform/platform'
+import { safeHttpUrl } from '../lib/safeUrl'
 import { friendlyMessage } from '../lib/db'
 import { useSignedMediaUrl } from '../lib/signedMedia'
 import { registrationState } from './Events'
@@ -414,8 +415,8 @@ export default function EventDetail({
           ) : null
         )}
 
-        {detail.registration_url && (
-          <a className="secondary-button reg-external" href={detail.registration_url} target="_blank" rel="noreferrer">
+        {safeHttpUrl(detail.registration_url) && (
+          <a className="secondary-button reg-external" href={safeHttpUrl(detail.registration_url)!} target="_blank" rel="noreferrer">
             <Link2 size={15}/> Organizer’s own registration form
           </a>
         )}
@@ -450,7 +451,7 @@ export default function EventDetail({
           <h2>Venue</h2>
           <p className="event-text">{detail.venue_address}{detail.city ? `, ${detail.city}` : ''}</p>
           {detail.map_url && (
-            <a className="secondary-button" href={detail.map_url} target="_blank" rel="noreferrer"><MapPin size={15}/> Open map</a>
+            <a className="secondary-button" href={safeHttpUrl(detail.map_url) ?? undefined} target="_blank" rel="noreferrer"><MapPin size={15}/> Open map</a>
           )}
         </section>
       )}
@@ -458,8 +459,8 @@ export default function EventDetail({
       {detail.links_revealed && (detail.online_url || detail.access_notes) && (
         <section className="event-section" aria-label="Online access">
           <h2>Online access</h2>
-          {detail.online_url && (
-            <a className="primary-button" href={detail.online_url} target="_blank" rel="noreferrer">
+          {safeHttpUrl(detail.online_url) && (
+            <a className="primary-button" href={safeHttpUrl(detail.online_url)!} target="_blank" rel="noreferrer">
               <Video size={15}/> Join online event
             </a>
           )}

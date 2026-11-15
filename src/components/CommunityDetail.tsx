@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import * as db from '../lib/db'
 import { publicWebOrigin } from '../platform/platform'
+import { safeHttpUrl } from '../lib/safeUrl'
 import * as cm from '../lib/communities'
 import { friendlyMessage, initialsFor, relativeTime } from '../lib/db'
 import { useSignedMediaUrl } from '../lib/signedMedia'
@@ -882,8 +883,10 @@ function ResourcesPanel({ communityId, identity, isMember, isModerator, requireA
   }
 
   const openResource = async (row: cm.ResourceRow) => {
-    if (row.link_url) {
-      window.open(row.link_url, '_blank', 'noopener')
+    // member-entered link: only real http(s) URLs may open (safeUrl guard)
+    const linkUrl = safeHttpUrl(row.link_url)
+    if (linkUrl) {
+      window.open(linkUrl, '_blank', 'noopener')
       return
     }
     if (!row.storage_path) return
