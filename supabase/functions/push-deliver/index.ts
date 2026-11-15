@@ -55,13 +55,28 @@ const VAPID_SUBJECT = Deno.env.get('VAPID_SUBJECT') ?? 'mailto:campus@noreply.ex
    leaves the server side; the OAuth access token is minted per hour. */
 type ServiceAccount = { project_id: string; client_email: string; private_key: string }
 let fcmAccount: ServiceAccount | null = null
-try {
+{
   const raw = Deno.env.get('FCM_SERVICE_ACCOUNT') ?? ''
   if (raw) {
-    const parsed = JSON.parse(raw) as ServiceAccount
-    if (parsed.project_id && parsed.client_email && parsed.private_key) fcmAccount = parsed
+    try {
+      const parsed = JSON.parse(raw) as ServiceAccount
+      if (parsed.project_id && parsed.client_email && parsed.private_key) {
+        fcmAccount = parsed
+      } else {
+        console.error(
+          '[push-deliver] FCM_SERVICE_ACCOUNT is set but incomplete — need project_id, client_email and private_key. Android delivery is off.',
+        )
+      }
+    } catch (err) {
+      // A pasted secret is the easiest thing to mangle (quotes, a trailing
+      // newline, the file wrapped in prose). Say so instead of failing silently.
+      console.error(
+        '[push-deliver] FCM_SERVICE_ACCOUNT is set but is not valid JSON — Android delivery is off:',
+        err instanceof Error ? err.message : err,
+      )
+    }
   }
-} catch { /* malformed secret → native delivery stays off, web unaffected */ }
+}
 let fcmToken: { value: string; expiresAt: number } | null = null
 
 /* APNs HTTP/2 (native iOS tokens). The .p8 key never leaves the server side;
@@ -77,6 +92,24 @@ let apnsConfig: ApnsConfig | null = null
   }
 }
 let apnsJwt: { value: string; expiresAt: number } | null = null
+
+/* One line in the edge-function logs, so "is this deployment able to send at
+   all?" is answerable without guessing. No secret material is logged — only
+   which providers are live and which Firebase project Android would send as. */
+console.log(
+  '[push-deliver] providers: ' +
+    JSON.stringify({
+      vapid: Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY),
+      fcm: Boolean(fcmAccount),
+      fcmProject: fcmAccount?.project_id ?? null,
+      apns: Boolean(apnsConfig),
+    }),
+)
+if (!fcmAccount) {
+  console.warn(
+    '[push-deliver] Android push is OFF: set the FCM_SERVICE_ACCOUNT secret (Firebase console → Project settings → Service accounts → Generate new private key). Rows for recipients with an Android token will fail with a reason instead of reporting a false delivery.',
+  )
+}
 
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL') ?? '',
@@ -272,6 +305,7 @@ async function deliverRow(row: QueueRow): Promise<boolean> {
 
   const stale: string[] = []
   const staleTokens: string[] = []
+  const misconfigured: string[] = []
   let broadlyFailed = false
 
   // Browser targets are only attempted when VAPID is configured; a
@@ -298,17 +332,38 @@ async function deliverRow(row: QueueRow): Promise<boolean> {
 
   for (const device of devices ?? []) {
     // Route by token kind: iOS rows hold raw APNs tokens, Android rows hold
-    // FCM tokens. A platform whose provider secret is unset is skipped
-    // honestly (the in-app row still exists); it never fails the whole queue.
+    // FCM tokens.
     const isIos = device.platform === 'ios'
-    if (isIos ? !apnsConfig : !fcmAccount) continue
+    const providerReady = isIos ? apnsConfig !== null : fcmAccount !== null
+    if (!providerReady) {
+      // The recipient HAS a token for a platform this deployment cannot send
+      // to. That is a deployment gap, not a bad device, and it used to be
+      // skipped silently — which marked the queue row 'delivered' with nothing
+      // sent, so "push is broken" looked like "push is fine". It is recorded
+      // here so push_queue.last_error says what is actually wrong.
+      const missing = isIos
+        ? 'APNS_AUTH_KEY / APNS_KEY_ID / APNS_TEAM_ID'
+        : 'FCM_SERVICE_ACCOUNT'
+      misconfigured.push(
+        `${isIos ? 'APNs' : 'FCM'} is not configured on this deployment, but the recipient has a ${device.platform} device token (set ${missing})`,
+      )
+      continue
+    }
     try {
       const outcome = await (isIos ? sendApns(device, row.payload ?? {}) : sendFcm(device, row.payload ?? {}))
       if (outcome === 'stale') staleTokens.push(device.token)
       else if (outcome === 'failed') broadlyFailed = true
-    } catch {
+    } catch (err) {
       broadlyFailed = true
+      const detail = err instanceof Error ? err.message.slice(0, 200) : 'unknown error'
+      misconfigured.push(`send to ${device.platform} token failed: ${detail}`)
     }
+  }
+
+  // A row that could not be delivered at all fails loudly. Retries are safe:
+  // in a correctly configured deployment this branch never runs.
+  if (misconfigured.length > 0) {
+    throw new Error(misconfigured.join(' | '))
   }
 
   if (stale.length > 0) {
