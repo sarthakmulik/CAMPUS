@@ -323,8 +323,15 @@ async function deliverRow(row: QueueRow): Promise<boolean> {
         )
       } catch (err) {
         const statusCode = (err as { statusCode?: number }).statusCode ?? 0
-        // endpoint gone (unsubscribed / expired / changed keys) → clean it up
-        if (statusCode === 404 || statusCode === 410) stale.push(sub.endpoint)
+        // endpoint gone (unsubscribed / expired / changed keys) → clean it up.
+        // A dead endpoint is NOT a delivery failure: the delete below already
+        // handles it and every live target got the message. Marking the row
+        // failed here forced pointless retries that left confusing
+        // last_error ghosts on rows that actually delivered.
+        if (statusCode === 404 || statusCode === 410) {
+          stale.push(sub.endpoint)
+          continue
+        }
         broadlyFailed = true
       }
     }
@@ -381,7 +388,7 @@ async function handleQueueRow(row: QueueRow, seenAttempts: number): Promise<void
     if (ok) {
       await supabase
         .from('push_queue')
-        .update({ status: 'delivered', delivered_at: new Date().toISOString() })
+        .update({ status: 'delivered', delivered_at: new Date().toISOString(), last_error: null })
         .eq('id', row.id)
     } else {
       throw new Error('one or more push services rejected the request')
