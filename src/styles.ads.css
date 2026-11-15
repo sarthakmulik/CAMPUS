@@ -302,7 +302,7 @@
 .ad-preview-frame { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
 .ad-preview-frame .post-card { margin: 0; max-width: 380px; }
 .ad-upload-progress {
-  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(74px + env(safe-area-inset-bottom));
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(74px + var(--safe-inset-bottom));
   width: min(430px, calc(100vw - 34px)); z-index: 30;
   background: #17284c; color: #fff; border-radius: 16px; padding: 12px 14px;
   display: flex; flex-direction: column; gap: 8px; font-size: 12px;
@@ -317,7 +317,7 @@
 .ad-wizard-footer {
   position: fixed; z-index: 25; left: 50%; transform: translateX(-50%); bottom: 0;
   width: min(780px, 100vw); display: flex; justify-content: space-between; align-items: center; gap: 10px;
-  padding: 11px 17px calc(11px + env(safe-area-inset-bottom));
+  padding: 11px 17px calc(11px + var(--safe-inset-bottom));
   background: var(--surface-glass); backdrop-filter: blur(12px); border-top: 1px solid var(--line);
 }
 

@@ -14,6 +14,9 @@ import './styles.desktop.css'
 // new .disc-*/.search-* rules win; it declares no max-width queries, so the
 // phone keeps exactly the layout it had.
 import './styles.search.css'
+// Native-inset bridge: --safe-inset-* = max(env(), native measurement) for
+// every rule below that reads safe-area spacing (Android env() can lie).
+import './styles.safe-insets.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode><App /></React.StrictMode>,

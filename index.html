@@ -26,5 +26,24 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,100..900&display=swap" rel="stylesheet">
   </head>
+  <!-- Android inset bridge: the WebView can report env(safe-area-inset-*) as
+       0 on many devices even in edge-to-edge (the camera cutout then sits on
+       top of the header). MainActivity measures the real status-bar/cutout/
+       navbar insets and serves them synchronously here, before first paint.
+       Guarded no-op on the web and on builds without the bridge. -->
+  <script>
+    (function () {
+      if (!window.CampusNativeInsets) return
+      try {
+        var parts = String(window.CampusNativeInsets.get()).split(',')
+        var names = ['--native-inset-top', '--native-inset-bottom', '--native-inset-left', '--native-inset-right']
+        var root = document.documentElement
+        for (var i = 0; i < 4; i++) {
+          var px = parseInt(parts[i], 10)
+          if (px > 0) root.style.setProperty(names[i], px + 'px')
+        }
+      } catch (e) { /* web, or an older build without the bridge */ }
+    })()
+  </script>
   <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>
 </html>

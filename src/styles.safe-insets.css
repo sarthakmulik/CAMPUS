@@ -1,0 +1,14 @@
+/* Safe-inset bridge ------------------------------------------------------------
+   The shell's spacing was authored against env(safe-area-inset-*), which the
+   Android WebView can report as 0 even with edge-to-edge + shortEdges — the
+   header then hides under the camera cutout. MainActivity measures the real
+   insets natively and exposes --native-inset-* (synchronous boot pull in
+   index.html + push on every insets change). Every rule that used env() now
+   reads this var — the max of both sources — so whichever side is truthful
+   wins: the web/iOS PWA keeps pure env(), Android gets the real measurement. */
+:root {
+  --safe-inset-top: calc(max(env(safe-area-inset-top, 0px), var(--native-inset-top, 0px)));
+  --safe-inset-bottom: calc(max(env(safe-area-inset-bottom, 0px), var(--native-inset-bottom, 0px)));
+  --safe-inset-left: calc(max(env(safe-area-inset-left, 0px), var(--native-inset-left, 0px)));
+  --safe-inset-right: calc(max(env(safe-area-inset-right, 0px), var(--native-inset-right, 0px)));
+}
