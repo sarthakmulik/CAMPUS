@@ -8,5 +8,5 @@
     "noUnusedLocals": false, "noUnusedParameters": false, "noFallthroughCasesInSwitch": true
   },
   "include": ["src"],
-  "exclude": ["src/lib/pulse/engine.test.ts"]
+  "exclude": ["src/lib/pulse/engine.test.ts", "src/lib/socialGraph.test.ts"]
 }

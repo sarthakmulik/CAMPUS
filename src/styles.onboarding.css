@@ -1,7 +1,7 @@
 ﻿/* ==========================================================================
-   CAMPUS â€” explore-first onboarding layer
+   CAMPUS — explore-first onboarding layer
    Loaded after styles.css so the approved visual direction stays in charge:
-   warm ivory surfaces, #6654F5 primary, violetâ†’coral gradients, soft radius.
+   warm ivory surfaces, #6654F5 primary, violet→coral gradients, soft radius.
    ========================================================================== */
 
 /* --- shared ------------------------------------------------------------- */
@@ -120,7 +120,7 @@
 @keyframes boot-halo-in { to { opacity: .9 } }
 @keyframes boot-breathe { from { transform: scale(.94); opacity: .6 } to { transform: scale(1.08); opacity: .9 } }
 
-/* tiny network of campus nodes â€” light, secondary, slowly breathing */
+/* tiny network of campus nodes — light, secondary, slowly breathing */
 .boot-net {
   width: 224px; height: 62px;
   opacity: 0;
@@ -139,7 +139,7 @@
 @keyframes boot-node-pulse-late { from { opacity: .4; } to { opacity: .9 } }
 @keyframes boot-fade { to { opacity: 1 } }
 
-/* typography â€” crisp, understated */
+/* typography — crisp, understated */
 .boot-copy {
   display: flex;
   flex-direction: column;
@@ -173,7 +173,7 @@
 }
 @keyframes boot-rise { from { opacity: 0; transform: translateY(9px) } to { opacity: 1; transform: none } }
 
-/* honest indeterminate hairline â€” the boot has no measurable steps */
+/* honest indeterminate hairline — the boot has no measurable steps */
 .boot-bar {
   width: 148px; height: 3px;
   border-radius: 999px;
@@ -197,7 +197,7 @@
   100% { transform: translateX(245%) }
 }
 
-/* profile-failure surface â€” same atmosphere + brand, then existing actions */
+/* profile-failure surface — same atmosphere + brand, then existing actions */
 .boot-error {
   display: flex;
   flex-direction: column;
@@ -217,7 +217,7 @@
 .boot-static .boot-blob, .boot-static .boot-logo, .boot-static .boot-halo,
 .boot-static .boot-net, .boot-static .boot-node { opacity: 1 }
 
-/* exit â€” the veil carries the whole loader out while the app is already
+/* exit — the veil carries the whole loader out while the app is already
    rendered beneath it, so there is no blank frame */
 .boot-veil {
   position: fixed;
@@ -350,7 +350,7 @@
 .primary-button.small { padding: 8px 14px; font-size: 12px; margin-top: 0 }
 .secondary-button.small { padding: 7px 12px; font-size: 11.5px }
 .secondary-button:disabled, .primary-button:disabled, .text-button:disabled { opacity: .6; cursor: not-allowed }
-/* outlined quiet button â€” was referenced across Events and Marketplace but had
+/* outlined quiet button — was referenced across Events and Marketplace but had
    no base rule anywhere, so Filters/Report/Delete/Back/Cancel/Load-more
    rendered as the browser's default button */
 .ghost-button {
@@ -1767,7 +1767,7 @@
   }
 }
 
-/* ---- Mobile swipe navigation + sliding nav drawer (â‰¤650px) ------------------- */
+/* ---- Mobile swipe navigation + sliding nav drawer (≤650px) ------------------- */
 
 @media (max-width: 650px) {
   .mobile-header-left {
@@ -1778,7 +1778,7 @@
 
   /* Root scroll lock: pages scroll inside .main-column and the window itself
      never scrolls. Chrome's auto-hiding toolbar drives the layout viewport
-     height â€” a fixed bottom nav follows it, which read as the footer sliding
+     height — a fixed bottom nav follows it, which read as the footer sliding
      in/out of the bottom edge. With nothing scrollable at the root the
      toolbar (and the footer) stay perfectly still no matter how fast pages
      are switched. */
@@ -1805,7 +1805,7 @@
     display: none;
   }
 
-  /* own compositing layer â€” protects the blurred bar from the sibling
+  /* own compositing layer — protects the blurred bar from the sibling
      transform animations, which could otherwise drop its paint */
   .mobile-bottom-nav {
     transform: translateZ(0);
@@ -1860,7 +1860,7 @@
     inset: 50px 0 60px;
     width: 100%;
     height: auto;
-    /* start the list below the absolute âœ• close button */
+    /* start the list below the absolute ✕ close button */
     padding: 52px 14px 14px;
     background: var(--surface);
     border: 0;
@@ -1870,7 +1870,7 @@
     transition: transform 0.3s cubic-bezier(0.22, 0.61, 0.36, 1), visibility 0s linear 0.3s;
   }
 
-  /* the CAMPUS brand lives in the fixed header above the drawer â€” no repeat */
+  /* the CAMPUS brand lives in the fixed header above the drawer — no repeat */
   .left-sidebar .brand {
     display: none;
   }
@@ -1879,7 +1879,7 @@
     transform: none;
     visibility: visible;
     /* styles.css sets padding: 14px at equal-or-lower specificity in its own
-       open-state rule â€” this must win so the list clears the âœ• button */
+       open-state rule — this must win so the list clears the ✕ button */
     padding: 52px 14px 14px;
     box-shadow: 0 18px 54px rgba(10, 8, 30, 0.22);
     transition: transform 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
@@ -1960,14 +1960,14 @@
     margin-left: auto;
   }
 
-  /* these live on the persistent mobile chrome (bottom nav + header) â€”
+  /* these live on the persistent mobile chrome (bottom nav + header) —
      don't repeat them inside the drawer */
   .nav-item.nav-on-main-ui {
     display: none !important;
   }
 
   /* create is the bottom-nav "+" button, and sign-out moves to the Profile
-     page when it's built â€” neither belongs in the mobile drawer */
+     page when it's built — neither belongs in the mobile drawer */
   .compose-sidebar,
   .sidebar-bottom {
     display: none !important;
@@ -2682,7 +2682,7 @@
 }
 
 /* ==========================================================================
-   Chats â€” 1:1 direct messages (list + thread)
+   Chats — 1:1 direct messages (list + thread)
    Server-side only kind='dm' conversations are shown here; club/group chats
    are a later feature and never appear in this list (kind filter in 0006).
    ========================================================================== */
@@ -2892,7 +2892,7 @@
 }
 
 /* ==========================================================================
-   Search â€” live results (people, posts, colleges, clubs)
+   Search — live results (people, posts, colleges, clubs)
    ========================================================================== */
 
 .search-panel {
@@ -2977,7 +2977,7 @@
 }
 
 /* ==========================================================================
-   Profile â€” owned uploads, real follow counts, sign-out
+   Profile — owned uploads, real follow counts, sign-out
    ========================================================================== */
 
 /* ==========================================================================
@@ -4001,7 +4001,7 @@
 /* single self action (Edit profile) spans the row like Instagram */
 .profile-actions .profile-edit:only-child { flex: 1 1 auto; }
 
-/* settings sheet â†’ full page (Instagram-style) */
+/* settings sheet → full page (Instagram-style) */
 .settings-page {
   display: flex;
   flex-direction: column;
@@ -4063,7 +4063,7 @@
 .profile-identity h1 .verified-tick { display: inline-block; }
 .search-row-copy b .verified-tick { vertical-align: -2px; }
 
-/* post card, Instagram layout: header row (avatar + name/username + â‹¯),
+/* post card, Instagram layout: header row (avatar + name/username + ⋯),
    then badges/body/media/actions span the full card width below */
 .post-card {
   display: block;
@@ -4184,7 +4184,7 @@
 .comments-sheet.dark .comment-tools button:hover { color: #e8ecff; }
 .comments-sheet.dark .comment-pinned { background: #232b52; color: var(--brand); }
 
-/* Instagram-style reply slider: "â€” View n replies" toggles a smooth open */
+/* Instagram-style reply slider: "— View n replies" toggles a smooth open */
 .comment-view-replies {
   display: inline-flex;
   align-items: center;
@@ -4298,7 +4298,7 @@
 .reel-author-link.reel-author-name { font-weight: 700; text-align: left; }
 .reel-author-link:hover { text-decoration: underline; }
 
-/* ---- Instagram message actions: hover â‹¯, Edit / Unsend, tombstones ----- */
+/* ---- Instagram message actions: hover ⋯, Edit / Unsend, tombstones ----- */
 .chat-bubble-row { position: relative; align-items: center; }
 .chat-msg-actions {
   flex: none;
@@ -4318,8 +4318,8 @@
 .chat-bubble-row:hover .chat-msg-actions { visibility: visible; }
 @media (hover: none) { .chat-msg-actions { visibility: visible; opacity: .75; } }
 .chat-msg-actions:hover { background: var(--soft); color: var(--muted); }
-/* JS-anchored message menus: fixed to the viewport at open time â€” below the
-   â‹¯ trigger by default, flipped above when the row sits near the bottom edge
+/* JS-anchored message menus: fixed to the viewport at open time — below the
+   ⋯ trigger by default, flipped above when the row sits near the bottom edge
    and clamped so the popup can never leave the screen */
 .chat-msg-menu.anchored {
   position: fixed;
@@ -4364,7 +4364,7 @@
 .chat-msg-menu button.danger:hover { background: var(--danger-bg); }
 
 /* Unsent / moderator-removed rows read as one quiet system note, not a
-   message-sized card â€” the retraction event is kept in history, but it no
+   message-sized card — the retraction event is kept in history, but it no
    longer shouts from the wall the way a full bubble did. */
 .chat-bubble.unsent {
   background: transparent !important;
@@ -4412,7 +4412,7 @@
 .suggestion-link:hover b { text-decoration: underline; }
 
 /* ==========================================================================
-   Communities (migration 0016) Ã¢â‚¬â€ discovery, detail, moderation UI
+   Communities (migration 0016) — discovery, detail, moderation UI
    ========================================================================== */
 
 .communities-page { max-width: 860px; margin: 0 auto; padding: 20px 18px 80px; }
@@ -4529,7 +4529,7 @@
 .detail-loading-panel { display: flex; align-items: center; justify-content: center; gap: 9px; padding: 46px 0; color: var(--muted); font-size: 13.5px; }
 .detail-loading-panel.small { padding: 20px 0; font-size: 12.5px; }
 
-/* Layout A â€” the full overview belongs to the About tab only. Slightly
+/* Layout A — the full overview belongs to the About tab only. Slightly
    restrained cover + identity row, membership actions right beneath. */
 .community-hero.about-hero { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; padding: 0 0 6px; box-shadow: 0 4px 16px #23284d06; }
 .community-hero-cover { height: 130px; border-radius: 18px; overflow: hidden; background: var(--soft); transition: height .2s cubic-bezier(.22,.61,.36,1); }
@@ -4730,7 +4730,7 @@
 @keyframes community-spin { to { transform: rotate(360deg); } }
 
 /* =====================================================================
-   EVENTS (migration 0018) â€” discovery page, cards, calendar, detail,
+   EVENTS (migration 0018) — discovery page, cards, calendar, detail,
    registration panel, organizer tools, create/edit wizard
    ===================================================================== */
 
@@ -5028,7 +5028,7 @@
   .featured-banner { height: 84px; }
   .featured-scroll { margin: 0 -13px; padding: 0 13px 6px; }
 
-  /* cards: horizontal roster rows instead of banner-dominated tiles â€”
+  /* cards: horizontal roster rows instead of banner-dominated tiles —
      title, time, venue and state read in one glance, artwork stays but
      never taller than the text needs */
   .event-grid { grid-template-columns: 1fr; gap: 9px; }
@@ -5078,7 +5078,7 @@
 .mk-tab.on { background: #17284c; border-color: var(--ink); color: #fff; }
 
 .mk-scope-row { display: flex; gap: 6px; margin-top: 9px; flex-wrap: wrap; }
-/* the dashed chip look belongs to the Discover/My-Listings filter rows only â€”
+/* the dashed chip look belongs to the Discover/My-Listings filter rows only —
    card and detail meta reuse a soft inline look */
 .mk-scope-row .mk-scope { border: 1px dashed var(--line-strong); background: transparent; border-radius: 999px; padding: 5px 12px; font-size: 12px; font-weight: 700; color: var(--muted); cursor: pointer; }
 
@@ -5119,7 +5119,7 @@
 
 /* ---- detail ---- */
 .mk-detail-grid > .mk-gallery { min-width: 0 }
-/* the horizontal rows (tabs, photo thumbs) scroll natively on touch â€”
+/* the horizontal rows (tabs, photo thumbs) scroll natively on touch —
    hide the desktop scrollbar strip */
 .mk-tabs, .mk-thumbs { scrollbar-width: none; }
 .mk-tabs::-webkit-scrollbar, .mk-thumbs::-webkit-scrollbar { display: none; }
@@ -5189,7 +5189,7 @@
   .mk-filter-field select, .mk-filter-field input { width: 100%; }
 
   /* the two toolbar picks size themselves to their longest option
-     ("Indian Institute of Technology Bombayâ€¦") â€” give the search its own row
+     ("Indian Institute of Technology Bombay…") — give the search its own row
      and let the selects share a row and shrink instead of pushing the page
      wider than the screen */
   .mk-search { flex-basis: 100%; }
@@ -5213,7 +5213,7 @@
 
 
 /* ===========================================================================
-   COMMUNITY CHAT 2.0 (cc-*) â€” replies, reactions, pins, threads, search,
+   COMMUNITY CHAT 2.0 (cc-*) — replies, reactions, pins, threads, search,
    attachments. Shares the DM bubble language (.chat-bubble mine/theirs,
    .chat-scroll, .chat-msg-menu) and adds only what the DM page never needed.
    =========================================================================== */
@@ -5318,7 +5318,7 @@
 /* grouped consecutive rows read tighter */
 .chat-bubble-row.grouped { margin-top: -2px; }
 /* the message menu (reused .chat-msg-menu rules) anchors to the row itself,
-   not to the panel â€” the DM page inherits a positioned pane, this panel's
+   not to the panel — the DM page inherits a positioned pane, this panel's
    nearest positioned ancestor is .cc-root */
 .cc-root .chat-bubble-row,
 .cc-thread .chat-bubble-row { position: relative; }
@@ -5525,7 +5525,7 @@
 }
 
 /* ===========================================================================
-   DIRECT MESSAGING 2.0 (dm-*) â€” shared CAMPUS content cards, inbox filters,
+   DIRECT MESSAGING 2.0 (dm-*) — shared CAMPUS content cards, inbox filters,
    global/thread search, attachments (media/docs/voice), receipts, typing,
    group details, forward + share sheets. Reuses the .chat-* bubble language,
    .mini-spinner, .link-button, .avatar, .overlay and .wizard-actions inline.
@@ -5673,7 +5673,7 @@
 .chat-att-video { display: block; border-radius: 10px; max-width: 240px; max-height: 300px; background: #14182a; }
 .chat-att-video.loading, .chat-att-video.missing { display: flex; align-items: center; justify-content: center; min-width: 120px; min-height: 90px; color: var(--muted); font-size: 11px; }
 
-/* voice notes â€” the bar is a real seek control now: waveform bars when the
+/* voice notes — the bar is a real seek control now: waveform bars when the
    clip was decoded, a simple progress track as the honest fallback */
 .chat-voice {
   display: flex; align-items: center; gap: 7px; min-width: 150px;
@@ -5722,7 +5722,7 @@
 .chat-att-file a:hover { background: rgba(255, 255, 255, 0.2); }
 .chat-bubble.theirs .chat-att-file a:hover { background: var(--brand-soft); }
 
-/* shared CAMPUS content reference card â€” styled like a message, not a tile */
+/* shared CAMPUS content reference card — styled like a message, not a tile */
 .dm-share-card {
   display: grid; grid-template-columns: 54px minmax(0, 1fr); align-items: center;
   gap: 9px; width: 100%; border: 1px solid var(--line); border-radius: 12px;
@@ -5780,7 +5780,7 @@
   padding-bottom: calc(env(safe-area-inset-bottom) * 0.4);
 }
 /* on wide screens the conversation reads as a centered column instead of
-   stretching across the whole split â€” timeline, header and composer share
+   stretching across the whole split — timeline, header and composer share
    one width so the composer stays visually anchored under the messages */
 @media (min-width: 1100px) {
   .chat-thread-head, .chat-scroll, .chat-compose {
@@ -5811,7 +5811,7 @@
 .icon-button.chat-tool.danger:hover { background: var(--danger-bg); }
 .flex-spacer { flex: 1; }
 
-/* live recording strip: unmistakable pulse + elapsed, stop â†’ preview */
+/* live recording strip: unmistakable pulse + elapsed, stop → preview */
 .chat-voice-rec {
   flex: 1; min-width: 0; height: 42px; display: flex; align-items: center; gap: 9px;
   border: 1px solid var(--danger-line); border-radius: 21px; background: var(--danger-bg); padding: 0 6px 0 14px;
@@ -5828,7 +5828,7 @@
 .chat-voice-rec small { font-size:11px; color: var(--danger); font-weight: 700; flex: none; }
 .chat-voice-rec .chat-send { width: 34px; height: 34px; }
 
-/* finished recording waiting in the composer â€” play it, keep it, send it */
+/* finished recording waiting in the composer — play it, keep it, send it */
 .chat-voice-preview {
   flex: 1; min-width: 0; height: 42px; display: flex; align-items: center; gap: 7px;
   border: 1px solid var(--line); border-radius: 21px; background: var(--soft); padding: 0 6px;
@@ -5919,7 +5919,7 @@
 .dm-forward-hint { color: var(--muted); font-size:11px; }
 .chat-bubble.forwarded-preview { display: inline-block; background: var(--soft); color: var(--ink); max-height: 92px; overflow: hidden; }
 
-/* share sheet â€” a light recipient picker, not a library */
+/* share sheet — a light recipient picker, not a library */
 .share-modal-hint { display: none; }
 .share-target-row {
   display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 9px;
@@ -6002,7 +6002,7 @@
 }
 
 /* ============================================================================ */
-/* SAVED / BOOKMARKS PAGE â€” the unified saved-items surface (0026)              */
+/* SAVED / BOOKMARKS PAGE — the unified saved-items surface (0026)              */
 /* ============================================================================ */
 .bk-page { position: relative; max-width: 1000px; margin: 0 auto; min-height: 60vh; padding: 18px 22px 96px; animation: bkRise .24s ease both; }
 @keyframes bkRise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
@@ -6207,7 +6207,7 @@
 }
 
 /* ============================================================================
-   POLLS (migration 0028) â€” feed poll cards, voting, results, composer block
+   POLLS (migration 0028) — feed poll cards, voting, results, composer block
    ========================================================================== */
 
 /* ---- poll block inside a PostCard ---------------------------------------- */
@@ -6314,7 +6314,7 @@
 }
 
 /* ============================================================================
-   CONFESSIONS PAGE (migration 0028) â€” compact header, filters, feed
+   CONFESSIONS PAGE (migration 0028) — compact header, filters, feed
    ========================================================================== */
 
 /* pressed feedback for the pink Home card (still one tap = one navigation) */
@@ -6379,7 +6379,7 @@
   .conf-titles h1 { font-size: 19px; }
 }
 
-/* phones: 13px gutter rhythm â€” no horizontal overflow at 360/390/430 */
+/* phones: 13px gutter rhythm — no horizontal overflow at 360/390/430 */
 @media (max-width: 650px) {
   .conf-page { padding: 4px 13px 110px; }
   .conf-controls { flex-wrap: nowrap; }
@@ -6462,7 +6462,7 @@
 .nc-state b { font-size: 14px; color: var(--ink); }
 .nc-state span { font-size: 12px; line-height: 1.55; max-width: 330px; }
 
-/* suggestions â€” deliberately a separate card, NOT notification rows */
+/* suggestions — deliberately a separate card, NOT notification rows */
 .nc-suggestions {
   margin: 22px 12px 0; padding: 14px; border: 1px solid var(--line);
   border-radius: 16px; background: var(--soft);
@@ -6541,3 +6541,46 @@
   .nc-suggestions { margin: 18px 8px 0; }
 }
 
+/* ---- profile: relationship chips (0065 social graph) ---------------------
+   Facts only, and only the ones the server actually returned: a follow state,
+   a real mutual-connection count (which opens the paginated list), a shared
+   community count, and the college/department the two have in common. The row
+   is hidden entirely when there is nothing true to say. */
+.profile-relation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.profile-relation-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: var(--fw-semibold);
+}
+
+.profile-relation-chip.is-mutual {
+  border-color: var(--brand-line);
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+}
+
+button.profile-relation-chip.is-link {
+  color: var(--brand);
+  transition: background var(--motion-fast) var(--ease-out), border-color var(--motion-fast) var(--ease-out);
+}
+
+@media (hover: hover) {
+  button.profile-relation-chip.is-link:hover {
+    border-color: var(--brand-line);
+    background: var(--brand-soft);
+  }
+}

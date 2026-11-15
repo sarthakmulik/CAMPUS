@@ -4,6 +4,10 @@ import {
   MessageCircle, Play, UserRound, UserPlus,
 } from 'lucide-react'
 import * as db from '../lib/db'
+import {
+  fetchMutualList, fetchRelation, relationshipExplanation,
+  type MutualPerson, type SocialRelation,
+} from '../lib/socialGraph'
 import { publicWebOrigin } from '../platform/platform'
 import type { CampusPost, Caps, College, PersonResult, Profile as DbProfile, ProfileStats } from '../lib/db'
 import { friendlyMessage, initialsFor } from '../lib/db'
@@ -42,8 +46,10 @@ export default function Profile({ profileId, myUserId, colleges, isMember, caps,
   const [error, setError] = useState<string | null>(null)
   const [following, setFollowing] = useState(false)
   const [followBusy, setFollowBusy] = useState(false)
-  const [memberList, setMemberList] = useState<{ mode: 'followers' | 'following' | null; rows: PersonResult[] }>({ mode: null, rows: [] })
+  const [memberList, setMemberList] = useState<{ mode: 'followers' | 'following' | 'mutuals' | null; rows: PersonResult[] }>({ mode: null, rows: [] })
   const [listLoading, setListLoading] = useState(false)
+  /** the caller's real relation to this member (0065); null = nothing to say */
+  const [relation, setRelation] = useState<SocialRelation | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [verifyNote, setVerifyNote] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
@@ -94,6 +100,18 @@ export default function Profile({ profileId, myUserId, colleges, isMember, caps,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileId, myUserId, isMember, isSelf])
 
+  // the full relation — one server call, and it also carries the mutual count
+  // the header shows. A failure leaves the header without chips, never a guess.
+  useEffect(() => {
+    setRelation(null)
+    if (!isMember || !profileId || isSelf) return
+    let cancelled = false
+    void fetchRelation(profileId)
+      .then(row => { if (!cancelled) setRelation(row) })
+      .catch(() => { /* no relation is an honest state, not an error */ })
+    return () => { cancelled = true }
+  }, [profileId, isMember, isSelf])
+
   // uploads for the active tab (self always sees their own)
   useEffect(() => {
     if (!profile) return
@@ -108,14 +126,27 @@ export default function Profile({ profileId, myUserId, colleges, isMember, caps,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.id, followTab, following])
 
-  async function openMemberList(mode: 'followers' | 'following') {
+  async function openMemberList(mode: 'followers' | 'following' | 'mutuals') {
     if (!stats || !profile) return
     setMemberList({ mode, rows: [] })
     if (mode === 'followers' && stats.followerCount === 0) return
     if (mode === 'following' && stats.followingCount === 0) return
     setListLoading(true)
     try {
-      const rows = await db.fetchFollowersList(profile.id, mode === 'followers', 50)
+      // mutuals come from the graph service, paginated on the server; the rest
+      // keep using the existing follower list RPC
+      const rows: PersonResult[] = mode === 'mutuals'
+        ? (await fetchMutualList(profile.id, 50)).map((person: MutualPerson) => ({
+          id: person.id,
+          username: person.username,
+          displayName: person.displayName,
+          avatarUrl: person.avatarUrl,
+          collegeShort: null,
+          collegeId: null,
+          isPrivate: false,
+          isVerified: false,
+        }))
+        : await db.fetchFollowersList(profile.id, mode === 'followers', 50)
       setMemberList({ mode, rows })
     } catch (e) {
       setError(friendlyMessage(e))
@@ -297,6 +328,29 @@ export default function Profile({ profileId, myUserId, colleges, isMember, caps,
             </>
           )}
         </div>
+        {relation && (
+          <div className="profile-relation" aria-label={relationshipExplanation(relation).join(', ')}>
+            {(relation.mutual || relation.followsMe) && (
+              <span className="profile-relation-chip is-mutual">
+                {relation.mutual ? 'Follows you · mutual' : 'Follows you'}
+              </span>
+            )}
+            {relation.commonFollowing > 0 && (
+              <button className="profile-relation-chip is-link" onClick={() => void openMemberList('mutuals')}>
+                {relation.commonFollowing === 1
+                  ? '1 mutual connection'
+                  : `${relation.commonFollowing} mutual connections`}
+              </button>
+            )}
+            {relation.sharedClubs > 0 && (
+              <span className="profile-relation-chip">
+                {relation.sharedClubs === 1 ? '1 shared community' : `${relation.sharedClubs} shared communities`}
+              </span>
+            )}
+            {relation.sameCollege && <span className="profile-relation-chip">Same college</span>}
+            {relation.sameDepartment && <span className="profile-relation-chip">Same department</span>}
+          </div>
+        )}
         {verifyNote && <div className="settings-note">{verifyNote}</div>}
         {note && <div className="settings-note" role="status">{note}</div>}
 
@@ -320,15 +374,25 @@ export default function Profile({ profileId, myUserId, colleges, isMember, caps,
 
       {memberList.mode && (
         <div className="profile-list-panel">
-          <h3>{memberList.mode === 'followers' ? 'Followers' : 'Following'}</h3>
+          <h3>
+            {memberList.mode === 'followers'
+              ? 'Followers'
+              : memberList.mode === 'following'
+                ? 'Following'
+                : 'Mutual connections'}
+          </h3>
           {listLoading && <div className="search-hint"><Loader2 size={15} className="search-spin"/>Loading…</div>}
           {!listLoading && memberList.rows.length === 0 && (
-            <div className="search-hint">Nobody here yet — follows appear as members follow each other.</div>
+            <div className="search-hint">
+              {memberList.mode === 'mutuals'
+                ? 'No accounts you both follow yet — mutual connections appear here.'
+                : 'Nobody here yet — follows appear as members follow each other.'}
+            </div>
           )}
           {memberList.rows.map(person => (
             <div key={person.id} className="search-row">
               <button className="search-row-link" onClick={() => onOpenMention(person.id)} aria-label={`Open ${person.displayName}'s profile`}>
-                <span className="avatar small">{initialsFor(person.displayName, person.username ?? '')}</span>
+                <span className="avatar small">{person.avatarUrl ? <img src={person.avatarUrl} alt=""/> : initialsFor(person.displayName, person.username ?? '')}</span>
                 <span className="search-row-copy">
                   <b>{person.displayName}</b>
                   <small>{person.username ? `@${person.username}` : ''}{person.isPrivate ? ' · private' : ''}</small>
