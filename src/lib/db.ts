@@ -1498,7 +1498,7 @@ export async function fetchTrendingTags(limit = 8): Promise<[string, number][]> 
     .slice(0, limit)
 }
 
-export type FollowSuggestion = { id: string; username: string; name: string }
+export type FollowSuggestion = { id: string; username: string; name: string; avatarUrl: string | null }
 
 /**
  * Instagram-style For You ranking. Recency dominates: the ranking only gets
@@ -2677,11 +2677,11 @@ export async function fetchFollowSuggestions(
 ): Promise<FollowSuggestion[]> {
   if (!supabase) throw new Error('CAMPUS is not connected.')
   const client = supabase
-  type Row = { id: string; username: string | null; display_name: string | null }
+  type Row = { id: string; username: string | null; display_name: string | null; avatar_url: string | null }
   const load = async (sameCollege: boolean): Promise<Row[]> => {
     let query = client
       .from('profiles')
-      .select('id, username, display_name')
+      .select('id, username, display_name, avatar_url')
       .eq('is_private', false)
       .eq('role', 'member') // 0043: staff never appear as follow suggestions
       .not('username', 'is', null)
@@ -2708,6 +2708,9 @@ export async function fetchFollowSuggestions(
       id: row.id,
       username: row.username ?? '',
       name: row.display_name?.trim() || `@${row.username ?? 'student'}`,
+      // the member's photo when they uploaded one — every surface that shows a
+      // suggestion falls back to initials itself, never to a broken image
+      avatarUrl: row.avatar_url ?? null,
     }))
     .filter(s => s.username)
 }

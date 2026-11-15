@@ -184,6 +184,7 @@ type Suggestion = {
   id: string
   username: string | null
   name: string | null
+  avatarUrl: string | null
   reason: string
   isFollowing: boolean
   busy: boolean
@@ -382,6 +383,7 @@ export default function NotificationCenter({
             id: person.id,
             username: person.username,
             name: person.name,
+            avatarUrl: person.avatarUrl,
             reason: shared > 0
               ? `${shared} shared ${shared === 1 ? 'community' : 'communities'}`
               : followers >= 10
@@ -549,7 +551,7 @@ export default function NotificationCenter({
               className="nc-sugg-person"
               onClick={() => { if (person.id) onOpenProfile(person.id) }}
             >
-              <span className="avatar">{initialsFor(person.name, person.username)}</span>
+              <span className="avatar">{person.avatarUrl ? <img src={person.avatarUrl} alt=""/> : initialsFor(person.name, person.username)}</span>
               <span className="nc-sugg-copy">
                 <b>{person.name ?? person.username ?? 'Campus student'}</b>
                 <small>{person.reason}</small>

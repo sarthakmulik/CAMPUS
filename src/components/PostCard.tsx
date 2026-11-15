@@ -59,7 +59,7 @@ function closeLabel(state: PollState): string {
  * reader's own selection highlighted. A real failure rolls everything back
  * and reports through `onVote`'s success=false + parent notify.
  */
-function PollBlock({ poll, onVote }: { poll: PollState; onVote?: (optionIds: string[]) => Promise<boolean> }) {
+export function PollBlock({ poll, onVote }: { poll: PollState; onVote?: (optionIds: string[]) => Promise<boolean> }) {
   const hasVoted = poll.options.some(option => option.mine)
   const [picking, setPicking] = useState(false)
   const initialMineKey = poll.options.filter(option => option.mine).map(option => option.id).join(',')

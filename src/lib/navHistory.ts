@@ -46,6 +46,9 @@ export type CampusView = {
   listing?: string | null
   /** Home subview: the dedicated Confessions feed page is open */
   conf?: boolean | null
+  /** active Search query (Search pane only) — a real history step, so device
+   *  Back leaves the results and returns to the discovery landing */
+  q?: string | null
   /** a direct/group conversation occupies the screen on mobile */
   dm?: { id: string } | null
 }
@@ -79,6 +82,7 @@ function normaliseView(view: CampusView): CampusView {
   if (view.event) next.event = view.event
   if (view.listing) next.listing = view.listing
   if (view.conf && view.nav === 'Home') next.conf = true
+  if (view.q) next.q = view.q
   if (view.dm?.id) next.dm = { id: view.dm.id }
   return next
 }
@@ -204,6 +208,7 @@ export function viewCoreKey(view: CampusView): string {
     event: view.event ?? null,
     listing: view.listing ?? null,
     conf: view.conf ?? null,
+    q: view.q ?? null,
     dm: view.dm?.id ?? null,
   })
 }

@@ -2008,3 +2008,32 @@ textarea:disabled {
   }
 }
 
+
+/* ---- avatars: a profile photo must fill its circle ------------------------
+   Every avatar surface renders either <img class="avatar"> (chats) or an <img>
+   inside a .avatar/.post-avatar/.comment-avatar/.reel-info-avatar container.
+   Only a few of them declared a size for that image, so a real photo painted
+   at its natural size (uploadAvatar compresses to 512px) inside a 34-40px
+   circle and overflowed the layout instead of showing a face. One rule fixes
+   every surface: the image is sized to the box and cropped to it. */
+img.avatar {
+  display: block;
+  object-fit: cover;
+}
+
+.avatar,
+.post-avatar,
+.comment-avatar,
+.reel-info-avatar {
+  overflow: hidden;
+}
+
+.avatar img,
+.post-avatar img,
+.comment-avatar img,
+.reel-info-avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}

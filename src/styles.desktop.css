@@ -1,0 +1,1706 @@
+/* ============================================================================
+   styles.desktop.css — DESKTOP LAYOUT + COMPONENT LAYER
+
+   Loaded LAST (see main.tsx) so every rule here wins over the base sheets.
+
+   SCOPE: the only unscoped rules are section 0, which hides the desktop chrome
+   everywhere; every layout rule below it sits inside `@media (min-width:651px)`.
+   650px is the app's only mobile breakpoint (`@media (max-width: 650px)` in
+   styles.css / styles.onboarding.css), so 651px is the first desktop pixel and
+   no rule here can reach a phone. Mobile keeps its own architecture: the shell
+   is a fixed 100dvh box with `.main-column` scrolling inside it. Desktop is
+   the opposite — the document scrolls, `.left-sidebar` is sticky, and the
+   columns are grid tracks — so nothing here re-declares that geometry for
+   small screens.
+
+   DesktopChrome.tsx renders two extra elements into the shell for every
+   viewport (.desk-header, .desk-nav). Section 0 is what keeps them invisible
+   on mobile and at the 651-1050 icon-rail width, where the app's own
+   .mobile-header and .primary-nav are still the navigation.
+
+   PHASE 2 — COMPONENT PASS. Phase 1 established the three-column shell; this
+   pass re-designs every component that lives inside it. Rules of the language,
+   applied consistently from here on:
+
+     * one gutter (16px) for every inset block in the feed column
+     * one radius scale: 8 control / 10 button+field / 12 nav+widget /
+       14 card / 999 pill
+     * borders are hairlines; shadows appear only on hover or on floating
+       layers (menus, sheets), never as a resting state
+     * the violet→pink gradient is reserved for four things: the primary
+       action, the active nav marker, the active tab underline, the hero
+     * every section heading is 11px / .1em / uppercase / faint, with its icon
+       in brand violet
+     * 4 / 8 / 12 / 16 / 24 spacing scale; hierarchy decides which step
+
+   WHAT PHASE 1 FIXED (kept, not re-litigated):
+   1. `.app-shell` capped its tracks at 272 + 796 + 360 = 1428px and centred
+      them. On a 1920 display that left ~246px of dead space on each side.
+   2. `.right-sidebar` was `position: sticky; height: 100vh; overflow: auto`
+      while the document itself scrolls — a second permanent scrollbar.
+   3. Column gutters were zero.
+   4. At 651-1050px the base grid pinned the feed to `minmax(460px, 720px)`.
+
+   NO NEW FIELDS, NO NEW DATA. Every value rendered here comes from state the
+   shell already had (trends, followPicks, clubs, identity). The only markup
+   change in this pass is the Who-to-follow empty state, which gained an icon
+   and a Join action that calls the existing setAuthMode('signup').
+   ========================================================================= */
+
+/* ---------------------------------------------------------------------------
+   0. DEFAULT: the desktop chrome does not exist on a phone.
+
+   These two rules are deliberately OUTSIDE every media query. DesktopChrome
+   renders .desk-header and .desk-nav into the shell for all viewports; without
+   this they would be visible on mobile, where the app has its own header and
+   drawer. Every later block only ever turns them ON.
+   --------------------------------------------------------------------------- */
+.desk-nav,
+.desk-header { display: none; }
+
+/* ---------------------------------------------------------------------------
+   1. TOKENS — one desktop scale, reusing the existing palette
+   --------------------------------------------------------------------------- */
+@media (min-width: 651px) {
+  :root {
+    /* shell geometry */
+    --desk-shell: 1600px;      /* max overall content width */
+    --desk-pad: 24px;          /* outer margin inside the shell */
+    --desk-gap: 20px;          /* between the three columns */
+    --desk-sidebar: 248px;
+    --desk-rail: 308px;
+    --desk-feed: 800px;        /* feed never grows past this */
+    --desk-header: 60px;       /* global header height */
+
+    /* inner rhythm of the feed column */
+    --desk-gutter: 16px;       /* the one inset used by hero, widgets, posts */
+    --desk-card: 14px;         /* card radius */
+    --desk-nav-h: 38px;        /* one nav row */
+
+    /* component scale */
+    --desk-r-control: 8px;
+    --desk-r-button: 10px;
+    --desk-r-widget: 12px;
+    --desk-r-pill: 999px;
+    --desk-search-w: clamp(300px, 32vw, 460px);
+    --desk-accent: linear-gradient(100deg, var(--brand) 0%, #a855f7 55%, var(--pink) 100%);
+    --desk-shadow-1: 0 1px 2px rgba(16, 24, 40, .05);
+    --desk-shadow-2: 0 8px 24px rgba(16, 24, 40, .09);
+    --desk-ring: 0 0 0 3px var(--brand-soft);
+    /* the confession tile needs a hairline that survives both themes */
+    --desk-pink-line: #ffd9e8;
+  }
+
+  /* ---- shell: three columns, capped, centred, no dead gutters ------------ */
+  .app-shell {
+    grid-template-columns: var(--desk-sidebar) minmax(0, 1fr) var(--desk-rail);
+    column-gap: var(--desk-gap);
+    justify-content: normal;       /* the middle track absorbs the slack */
+    max-width: var(--desk-shell);
+    margin-inline: auto;
+    padding-inline: var(--desk-pad);
+  }
+
+  /* The global header is a grid child spanning all three tracks, so the shell
+     needs a first row for it; the two rails then start below it. Both the header
+     and the grouped nav stay hidden below 1051px, where the icon rail and the
+     flat drawer nav are the desktop navigation. */
+  .desk-header { grid-column: 1 / -1; }
+
+  /* The feed is the only column that must not stretch: a 1200px-wide post is
+     unreadable. It centres inside its own track, which turns the leftover into
+     symmetric gutters instead of a stretched measure. */
+  .main-column {
+    width: 100%;
+    max-width: var(--desk-feed);
+    min-width: 0;
+    justify-self: center;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   2. RESPONSIVE DESKTOP STEPS
+
+   1600+   full three columns, generous shell
+   1440-   slightly tighter columns
+   1280-   rail narrows
+   <1280   rail collapses (the feed keeps its width — the rail never squeezes it)
+   <1051   sidebar becomes the 78px icon rail the base sheet already defines
+   --------------------------------------------------------------------------- */
+@media (min-width: 1440px) and (max-width: 1599px) {
+  :root {
+    --desk-sidebar: 240px;
+    --desk-rail: 296px;
+    --desk-gap: 18px;
+    --desk-pad: 22px;
+  }
+}
+
+@media (min-width: 1280px) and (max-width: 1439px) {
+  :root {
+    --desk-sidebar: 232px;
+    --desk-rail: 288px;
+    --desk-gap: 16px;
+    --desk-pad: 20px;
+    --desk-feed: 780px;
+  }
+}
+
+/* Right rail gone: at this width a 280px rail costs the feed ~200px of
+   measure, which is the "main content too narrow" failure. Everything the rail
+   carried (trending, who to follow, advertise, footer links) is also reachable
+   from the nav, so nothing is lost. */
+@media (min-width: 1051px) and (max-width: 1279px) {
+  .app-shell {
+    grid-template-columns: var(--desk-sidebar) minmax(0, 1fr);
+  }
+  .right-sidebar { display: none; }
+  /* the rail is gone, so the feed may take the freed measure — and the header's
+     centre cell must be told the same number or the two drift apart */
+  :root { --desk-feed: 860px; }
+  .main-column { max-width: var(--desk-feed); }
+}
+
+/* 651-1050 keeps the base icon rail (78px, labels hidden) but stops the feed
+   from being pinned to 460-720px and centred in the leftover space. */
+@media (min-width: 651px) and (max-width: 1050px) {
+  .app-shell {
+    grid-template-columns: 78px minmax(0, 1fr);
+    column-gap: 0;
+    max-width: none;
+    padding-inline: 0;
+  }
+  .main-column {
+    max-width: none;
+    grid-column: 2;
+  }
+  :root {
+    /* one gutter for the whole range: the feed uses it, and so does the
+       header's search, which must land on the same edge */
+    --desk-gutter: 18px;
+    --desk-pad: 18px;
+  }
+
+  /* The header now exists at every desktop width, so the rail starts below it
+     instead of underneath it — and the sticky tab strip, which pins itself to
+     --desk-header, finally has something to pin to (before this it floated
+     60px below the top of the viewport in this range). The header's own column
+     template is overridden further down, after the base header rules. */
+  .left-sidebar {
+    top: var(--desk-header);
+    height: calc(100vh - var(--desk-header));
+  }
+  .main-column { min-height: calc(100vh - var(--desk-header)); }
+}
+
+/* ---------------------------------------------------------------------------
+   3. LEFT SIDEBAR — brand lockup, primary action, grouped nav, account card
+
+   The sidebar is `position: sticky; top: 0; height: 100vh` in the base sheet
+   and stays that way: the document scrolls, the nav does not. Only the internal
+   rhythm changes. Scoped to 1051px+ because below that the base sheet turns
+   the sidebar into the 78px icon rail and this padding/typography would fight it.
+   --------------------------------------------------------------------------- */
+@media (min-width: 1051px) {
+  .left-sidebar {
+    padding: 14px 12px 12px;
+    border-right: 1px solid var(--line);
+    gap: 0;
+    /* sits under the global header, not under the viewport top */
+    top: var(--desk-header);
+    height: calc(100vh - var(--desk-header));
+  }
+
+  /* the header occupies the shell's first row, so a full-height feed would make
+     the document 60px taller than the viewport and draw a scrollbar that has
+     nothing to scroll */
+  .main-column { min-height: calc(100vh - var(--desk-header)); }
+
+  /* the confession tile's hairline is the one colour here that is not a token:
+     it has to be a tint of the fill in both themes, so it flips with them */
+  @media (prefers-color-scheme: dark) {
+    :root { --desk-pink-line: #4a2338; }
+  }
+
+  /* ---- brand lockup ------------------------------------------------------ */
+  /* `.sidebar-close` is the drawer's close control (`setMobileMenu(false)`).
+     On a desktop the sidebar is not a drawer and never opens over content, so
+     the control has no job here and read as a stray X floating beside the logo. */
+  .sidebar-close { display: none; }
+
+  .brand {
+    gap: 10px;
+    min-height: 34px;
+    padding: 0 8px 16px;
+    font-size: 15px;
+    font-weight: 750;
+    letter-spacing: .16em;
+    color: var(--ink-strong);
+  }
+  .brand .brand-mark {
+    width: 30px;
+    height: 30px;
+    flex: none;
+    border-radius: 9px;
+    font-size: 16px;
+    letter-spacing: 0;
+    box-shadow: 0 3px 10px #8b5cf62e;
+  }
+
+  /* ---- primary action ---------------------------------------------------- */
+  .desk-compose {
+    display: flex;
+    flex: none;                 /* never let the nav squeeze the primary action */
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 40px;
+    margin: 0 0 16px;
+    border: 0;
+    border-radius: var(--desk-r-button);
+    background: var(--desk-accent);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 650;
+    letter-spacing: -.1px;
+    box-shadow: 0 6px 16px #7c5cf52e;
+    transition: transform var(--dur-fast) var(--ease-out),
+                box-shadow var(--dur-fast) var(--ease-out),
+                filter var(--dur-fast) var(--ease-out);
+  }
+  .desk-compose svg { flex: none; }
+  .desk-compose:hover {
+    filter: brightness(1.04);
+    box-shadow: 0 8px 20px #7c5cf53d;
+    transform: translateY(-1px);
+  }
+  .desk-compose:active { transform: translateY(0) scale(.99); }
+  .desk-compose:focus-visible { outline: none; box-shadow: var(--desk-ring); }
+
+  /* ---- grouped navigation ------------------------------------------------ */
+  .desk-nav {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1;
+  }
+
+  .desk-nav-groups {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    scrollbar-width: none;
+    /* 15 destinations + 5 group captions do not fit a 768px-tall laptop, so the
+       list scrolls with the bar hidden. The fade is the affordance: it shows
+       that a row is cut off. When the content does fit, the fade sits over empty
+       space and is invisible. */
+    -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 22px), transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 22px), transparent 100%);
+  }
+  .desk-nav-groups::-webkit-scrollbar { width: 0; height: 0; }
+
+  .desk-nav-group {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    margin-bottom: 12px;
+  }
+  .desk-nav-group:last-child { margin-bottom: 0; }
+
+  /* group heading: a caption with a hairline, so groups read as sections
+     without four heavy divider rules competing with the nav rows */
+  .desk-nav-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px 6px;
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .desk-nav-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--line);
+  }
+
+  .desk-nav-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    height: var(--desk-nav-h);
+    padding: 0 10px;
+    border: 0;
+    border-radius: var(--desk-r-widget);
+    background: transparent;
+    color: var(--ink-secondary);
+    font-size: 13px;
+    font-weight: 550;
+    letter-spacing: -.1px;
+    text-align: left;
+    transition: background var(--dur-fast) var(--ease-out),
+                color var(--dur-fast) var(--ease-out);
+  }
+  .desk-nav-item svg {
+    flex: none;
+    color: var(--ink-faint);
+    transition: color var(--dur-fast) var(--ease-out);
+  }
+  .desk-nav-item span {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .desk-nav-item:hover {
+    background: var(--soft);
+    color: var(--ink);
+  }
+  .desk-nav-item:hover svg { color: var(--ink-secondary); }
+  .desk-nav-item.active,
+  .desk-nav-item.active:hover {
+    background: var(--brand-soft);
+    color: var(--brand-ink);
+    font-weight: 650;
+  }
+  .desk-nav-item.active svg { color: var(--brand); }
+  .desk-nav-item.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 3px;
+    height: 16px;
+    margin-top: -8px;
+    border-radius: 0 3px 3px 0;
+    background: var(--desk-accent);
+  }
+
+  .desk-nav-badge {
+    margin-left: auto;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 5px;
+    border-radius: var(--desk-r-pill);
+    background: var(--danger);
+    color: #fff;
+    font-size: 9.5px;
+    font-style: normal;
+    font-weight: 700;
+    line-height: 17px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---- account card ------------------------------------------------------ */
+  .sidebar-bottom {
+    margin-top: auto;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+  }
+  .profile-chip {
+    gap: 10px;
+    min-height: 46px;
+    padding: 7px 8px;
+    border: 1px solid transparent;
+    border-radius: var(--desk-r-widget);
+    background: transparent;
+    transition: background var(--dur-fast) var(--ease-out),
+                border-color var(--dur-fast) var(--ease-out);
+  }
+  .profile-chip:hover {
+    background: var(--soft);
+    border-color: var(--line);
+  }
+  .profile-chip > .avatar {
+    width: 30px;
+    height: 30px;
+    flex: none;
+    font-size: 11px;
+  }
+  .profile-chip-copy { gap: 1px; }
+  .profile-chip-copy b {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 12.5px;
+    font-weight: 650;
+    color: var(--ink-strong);
+  }
+  .profile-chip-copy small {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 10.5px;
+    color: var(--muted);
+  }
+  .profile-chip > svg { flex: none; color: var(--ink-faint); }
+
+  /* the flat nav, the bottom compose button and the college card belong to the
+     drawer / header now: one navigation system, not two stacked lists */
+  .primary-nav,
+  .compose-sidebar,
+  .sidebar-campus-card { display: none; }
+
+  /* Short laptop screens: the nav is the only thing that must survive, so the
+     row tightens before the group spacing does. 900px-tall viewports (the most
+     common laptop) get the compact rhythm so all 15 destinations fit without a
+     hidden scroll; below 820px they cannot fit at any comfortable row height,
+     and the fade at the bottom of the list is the affordance. */
+  @media (max-height: 960px) {
+    .desk-compose { height: 38px; margin-bottom: 12px; }
+    .desk-nav-group { margin-bottom: 8px; gap: 0; }
+    .desk-nav-label { padding: 2px 10px 4px; }
+    .desk-nav-item { --desk-nav-h: 34px; }
+  }
+  @media (max-height: 820px) {
+    .desk-nav-group { margin-bottom: 6px; }
+    .desk-nav-label { padding: 2px 10px 3px; }
+    .desk-nav-item { --desk-nav-h: 32px; }
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   4. GLOBAL HEADER — one row, one search, one set of utilities
+
+   Phase 1 added this row; the feed column still rendered its own
+   `.desktop-topbar` (a second search trigger plus its own bell and avatar)
+   above the hero. That markup is gone from App.tsx, so the header is now the
+   single place to search, switch campus, open messages/notifications/profile.
+   --------------------------------------------------------------------------- */
+@media (min-width: 651px) {
+  /* The header is a grid with the SHELL'S OWN column template, not a flex row
+     with a guessed left margin: the centre cell is the feed track, so the
+     search field starts exactly where the feed starts and the two structures
+     can never drift apart. The left cell is empty — the wordmark belongs to the
+     sidebar, and a second logo up here would compete with it. */
+  .desk-header {
+    display: grid;
+    grid-template-columns: var(--desk-sidebar) minmax(0, 1fr) var(--desk-rail);
+    column-gap: var(--desk-gap);
+    align-items: center;
+    height: var(--desk-header);
+    padding: 0;
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: var(--surface-glass);
+    -webkit-backdrop-filter: saturate(180%) blur(14px);
+    backdrop-filter: saturate(180%) blur(14px);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .desk-header-lead { grid-column: 1; }
+
+  /* The centre cell is the feed track. How it sits inside that track depends on
+     the range: at 651-1050 the rail is gone, so the field hugs the rail's edge;
+     from 1051 the cell matches the feed's measure and centres inside it (below).
+     Only the placement is declared here so the two ranges cannot fight. */
+  .desk-header-centre {
+    grid-column: 2;
+    min-width: 0;
+  }
+
+  /* the anchor is exactly the field's box, so the dropdown opens flush under it */
+  .desk-search-anchor {
+    position: relative;
+    width: var(--desk-search-w);
+    height: 36px;
+  }
+
+  /* search: a field, not a ghost button — it keeps the app's own SearchPanel
+     (the trigger only opens it), and gets a real focus treatment */
+  .desk-search {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    height: 36px;
+    padding: 0 12px;
+    border: 1px solid transparent;
+    border-radius: var(--desk-r-button);
+    background: var(--soft);
+    color: var(--muted);
+    font-size: 12.5px;
+    text-align: left;
+    transition: background var(--dur-fast) var(--ease-out),
+                border-color var(--dur-fast) var(--ease-out),
+                box-shadow var(--dur-fast) var(--ease-out);
+  }
+  .desk-search svg { flex: none; color: var(--ink-faint); }
+  .desk-search span {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .desk-search:hover {
+    background: var(--surface);
+    border-color: var(--line);
+  }
+  .desk-search:focus-visible {
+    outline: none;
+    background: var(--surface);
+    border-color: var(--brand-line);
+    box-shadow: var(--desk-ring);
+  }
+
+  .desk-header-actions {
+    grid-column: 3;
+    justify-self: end;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* campus switcher: two-line lockup, the one place college identity lives */
+  .desk-campus-switch {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    margin-right: 4px;
+    padding: 0 9px 0 6px;
+    border: 1px solid transparent;
+    border-radius: var(--desk-r-button);
+    background: transparent;
+    color: var(--ink);
+    text-align: left;
+    transition: background var(--dur-fast) var(--ease-out),
+                border-color var(--dur-fast) var(--ease-out);
+  }
+  .desk-campus-switch:hover {
+    background: var(--soft);
+    border-color: var(--line);
+  }
+  .desk-campus-switch:focus-visible { outline: none; box-shadow: var(--desk-ring); }
+  .desk-campus-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    flex: none;
+    border-radius: 7px;
+    background: linear-gradient(140deg, var(--violet), var(--pink));
+    color: #fff;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: .02em;
+  }
+  .desk-campus-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    min-width: 0;
+  }
+  .desk-campus-copy small {
+    font-size: 8.5px;
+    font-weight: 700;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    line-height: 1.2;
+  }
+  .desk-campus-copy b {
+    max-width: 124px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 11.5px;
+    font-weight: 650;
+    line-height: 1.25;
+    color: var(--ink-strong);
+  }
+  .desk-campus-switch > svg { flex: none; color: var(--ink-faint); }
+
+  .desk-icon-btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border: 1px solid transparent;
+    border-radius: var(--desk-r-button);
+    background: transparent;
+    color: var(--ink-secondary);
+    transition: background var(--dur-fast) var(--ease-out),
+                color var(--dur-fast) var(--ease-out);
+  }
+  .desk-icon-btn:hover { background: var(--soft); color: var(--ink); }
+  .desk-icon-btn:focus-visible { outline: none; box-shadow: var(--desk-ring); }
+  .desk-dot {
+    position: absolute;
+    top: 1px;
+    right: 0;
+    min-width: 15px;
+    height: 15px;
+    padding: 0 4px;
+    border: 2px solid var(--surface);
+    border-radius: var(--desk-r-pill);
+    background: var(--danger);
+    color: #fff;
+    font-size: 8.5px;
+    font-style: normal;
+    font-weight: 700;
+    line-height: 11px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .desk-avatar-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 2px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--desk-r-pill);
+    background: transparent;
+  }
+  .desk-avatar-btn .avatar {
+    width: 30px;
+    height: 30px;
+    font-size: 10.5px;
+    box-shadow: 0 0 0 1px var(--line);
+    transition: box-shadow var(--dur-fast) var(--ease-out);
+  }
+  .desk-avatar-btn:hover .avatar { box-shadow: 0 0 0 2px var(--brand-line); }
+  .desk-avatar-btn:focus-visible { outline: none; }
+  .desk-avatar-btn:focus-visible .avatar { box-shadow: var(--desk-ring); }
+
+  /* ---- search dropdown ---------------------------------------------------
+     One card, anchored to the field's own box: the bar is its header, the
+     results flow under it. It is absolutely positioned inside the anchor, so it
+     overlays the feed and the hero instead of pushing them down, and it cannot
+     drift out of alignment with the field above it. */
+  .search-panel.is-anchored {
+    position: absolute;
+    top: 0;
+    left: 0;
+    /* the base sheet gives the in-flow panel a 17px inset; the anchored card
+       must sit flush on the field it belongs to */
+    margin: 0;
+    width: 100%;
+    max-height: min(70vh, 560px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-bottom: 5px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--desk-card);
+    background: var(--surface);
+    box-shadow: var(--desk-shadow-2);
+    z-index: 60;
+  }
+
+  .search-panel.is-anchored .search-bar {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    gap: 8px;
+    height: 36px;
+    padding: 0 8px 0 12px;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: var(--desk-card) var(--desk-card) 0 0;
+    background: var(--surface);
+  }
+  .search-panel.is-anchored .search-bar > svg {
+    width: 16px;
+    height: 16px;
+    flex: none;
+    color: var(--ink-faint);
+  }
+  .search-panel.is-anchored .search-bar input {
+    font-size: 12.5px;
+    color: var(--ink);
+  }
+  .search-panel.is-anchored .search-bar button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    flex: none;
+    border-radius: var(--desk-r-control);
+    color: var(--ink-faint);
+    transition: background var(--dur-fast) var(--ease-out),
+                color var(--dur-fast) var(--ease-out);
+  }
+  .search-panel.is-anchored .search-bar button:hover { background: var(--soft); color: var(--ink); }
+  .search-panel.is-anchored .search-bar button:focus-visible { outline: none; box-shadow: var(--desk-ring); }
+
+  .search-panel.is-anchored .search-section {
+    margin: 7px 0 0;
+    padding: 0 4px;
+  }
+  .search-panel.is-anchored .search-section h3 {
+    margin: 0 0 3px 7px;
+    font-size: 9.5px;
+    letter-spacing: .12em;
+    color: var(--ink-faint);
+  }
+
+  .search-panel.is-anchored .search-row {
+    width: 100%;
+    margin: 0 0 1px;
+    padding: 6px 7px;
+    gap: 9px;
+    border: 0;
+    border-radius: var(--desk-r-control);
+    background: transparent;
+  }
+  .search-panel.is-anchored .search-row:hover {
+    background: var(--soft);
+    border-color: transparent;
+  }
+  .search-panel.is-anchored .search-row:focus-visible { outline: none; box-shadow: var(--desk-ring); }
+  .search-panel.is-anchored .search-row .avatar {
+    width: 28px;
+    height: 28px;
+    font-size: 10px;
+  }
+  .search-panel.is-anchored .search-row-copy { gap: 1px; }
+  .search-panel.is-anchored .search-row-copy b,
+  .search-panel.is-anchored .search-row-copy small {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .search-panel.is-anchored .search-row-copy b { font-size: 12px; }
+  .search-panel.is-anchored .search-row-copy small { font-size: 10.5px; }
+  /* the post excerpt is prose, not a title: one line, then clip */
+  .search-panel.is-anchored .search-post-excerpt {
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+    white-space: normal;
+    font-size: 10.5px;
+    line-height: 1.45;
+  }
+  .search-panel.is-anchored .search-row-copy em { font-size: 10px; }
+
+  .search-panel.is-anchored .search-hint,
+  .search-panel.is-anchored .search-error {
+    margin: 8px 5px 3px;
+    padding: 9px 11px;
+    border-radius: var(--desk-r-control);
+    font-size: 11.5px;
+    line-height: 1.5;
+  }
+}
+
+/* Three real columns: from 1051 the centre cell takes the feed's own measure
+   and is centred in its track, so the field is inset by exactly the same amount
+   as the posts below it instead of hugging the sidebar. At 651-1050 the rail is
+   gone and the field hugs the rail's edge instead. */
+@media (min-width: 1051px) {
+  .desk-header-centre {
+    justify-self: center;
+    width: 100%;
+    max-width: var(--desk-feed);
+    /* the feed's blocks are inset by the gutter, so the field takes the same
+       inset and lands on the same edge as the hero and the post cards */
+    padding-left: var(--desk-gutter);
+  }
+}
+
+/* 651-1050: no rail, so the header drops to the shell's two-column template and
+   the field hugs the icon rail's edge. Declared after the base header rules so
+   it cannot be overridden by them. */
+@media (min-width: 651px) and (max-width: 1050px) {
+  .desk-header {
+    grid-template-columns: 78px auto minmax(0, 1fr);
+    column-gap: 0;
+    padding-right: 14px;
+  }
+  /* the shell has no column gap here and the main column carries a 1px border,
+     so the field is inset by the feed's own gutter to land on the same edge the
+     hero and the post cards use */
+  .desk-header-centre {
+    justify-self: start;
+    max-width: none;
+    padding-left: calc(var(--desk-gutter) + 1px);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   5. RIGHT SIDEBAR — a discovery column, not a stack of boxes
+
+   `position: static` (phase 1) fixed the double scrollbar: the rail scrolls
+   with the document. This pass gives the panels one edge, one heading style
+   and one row height so they read as one column.
+   --------------------------------------------------------------------------- */
+@media (min-width: 1280px) {
+  .right-sidebar {
+    position: static;
+    top: auto;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+    padding: 20px 0 32px;
+    gap: 12px;
+  }
+
+  .right-panel {
+    margin: 0;                     /* the flex gap is the only separator */
+    padding: 15px;
+    border: 1px solid var(--line);
+    border-radius: var(--desk-card);
+    background: var(--surface);
+    box-shadow: none;
+  }
+
+  /* one heading style for every panel: caption + icon */
+  .right-panel h2 {
+    gap: 7px;
+    margin: 0 0 10px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .right-panel h2 svg { width: 13px; height: 13px; color: var(--brand); }
+
+  .panel-hint {
+    margin: 0;
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: var(--muted);
+  }
+
+  /* empty state: dashed well + icon + one action, instead of a bare sentence */
+  .panel-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 5px;
+    padding: 12px 11px;
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--desk-r-widget);
+    background: var(--soft);
+  }
+  .panel-empty-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    margin-bottom: 2px;
+    border-radius: var(--desk-r-control);
+    background: var(--surface);
+    color: var(--brand);
+    box-shadow: var(--desk-shadow-1);
+  }
+  .panel-empty b {
+    font-size: 12px;
+    font-weight: 650;
+    color: var(--ink-strong);
+  }
+  .panel-empty small {
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--muted);
+  }
+  .panel-empty-cta {
+    margin-top: 5px;
+    padding: 5px 11px;
+    border: 0;
+    border-radius: var(--desk-r-pill);
+    background: var(--desk-accent);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 650;
+    box-shadow: 0 4px 12px #7c5cf526;
+    transition: filter var(--dur-fast) var(--ease-out);
+  }
+  .panel-empty-cta:hover { filter: brightness(1.05); }
+  .panel-empty-cta:focus-visible { outline: none; box-shadow: var(--desk-ring); }
+
+  /* ---- trending: ranked rows, one line each ---------------------------- */
+  .trends-panel { counter-reset: trend; }
+  .trend-row {
+    counter-increment: trend;
+    display: grid;
+    grid-template-columns: 15px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    width: calc(100% + 16px);
+    margin: 0 -8px;
+    padding: 7px 8px;
+    border-radius: var(--desk-r-control);
+    transition: background var(--dur-fast) var(--ease-out);
+  }
+  .trend-row::before {
+    content: counter(trend);
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--ink-faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .trend-row b {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--ink-strong);
+  }
+  .trend-row span {
+    font-size: 10.5px;
+    color: var(--muted);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .trend-row:hover { background: var(--brand-soft); }
+  .trend-row:hover b,
+  .trend-row:hover::before { color: var(--brand-ink); }
+  .trend-row:focus-visible { outline: none; box-shadow: var(--desk-ring); }
+
+  .see-more {
+    gap: 6px;
+    margin-top: 4px;
+    padding: 6px 0 0;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--brand-ink);
+  }
+  .see-more:hover { text-decoration: underline; }
+  .see-more svg { width: 13px; height: 13px; }
+
+  /* ---- who to follow ---------------------------------------------------- */
+  .suggestion {
+    gap: 9px;
+    margin: 0;
+    padding: 7px 0;
+  }
+  .suggestion + .suggestion { border-top: 1px solid var(--line); }
+  .suggestion .avatar {
+    width: 30px;
+    height: 30px;
+    flex: none;
+    font-size: 10.5px;
+  }
+  .suggestion-copy { gap: 0; }
+  .suggestion-copy b {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink-strong);
+  }
+  .suggestion-copy small {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 10.5px;
+    color: var(--muted);
+  }
+  .follow-button {
+    flex: none;
+    height: 26px;
+    padding: 0 11px;
+    border: 1px solid var(--brand-line);
+    border-radius: var(--desk-r-pill);
+    background: var(--surface);
+    color: var(--brand-ink);
+    font-size: 10.5px;
+    font-weight: 650;
+    transition: background var(--dur-fast) var(--ease-out),
+                color var(--dur-fast) var(--ease-out),
+                border-color var(--dur-fast) var(--ease-out);
+  }
+  .follow-button:hover {
+    background: var(--brand-soft);
+    border-color: var(--brand);
+  }
+  .follow-button.is-following {
+    background: var(--soft);
+    border-color: var(--line);
+    color: var(--muted);
+  }
+  .follow-button:focus-visible { outline: none; box-shadow: var(--desk-ring); }
+
+  /* ---- popular communities --------------------------------------------- */
+  .community-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    width: calc(100% + 16px);
+    margin: 0 -8px;
+    padding: 7px 8px;
+    border: 0;
+    border-radius: var(--desk-r-control);
+    background: transparent;
+    text-align: left;
+    transition: background var(--dur-fast) var(--ease-out);
+  }
+  .community-row:hover { background: var(--brand-soft); }
+  .community-row:focus-visible { outline: none; box-shadow: var(--desk-ring); }
+  .community-row-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    flex: none;
+    border-radius: var(--desk-r-control);
+    background: var(--brand-soft);
+    color: var(--brand-ink);
+    font-size: 11.5px;
+    font-weight: 750;
+  }
+  .community-row-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+  }
+  .community-row-copy b {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink-strong);
+    /* two lines of name, then clip: a single-line ellipsis on "Department of
+       Computer Engineering" read as a bug */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .community-row-copy small {
+    font-size: 10.5px;
+    line-height: 1.45;
+    color: var(--muted);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .community-row:hover .community-row-copy b { color: var(--brand-ink); }
+
+  /* ---- sponsored: integrated but unmistakably an ad --------------------- */
+  .advertise-panel {
+    width: auto;
+    margin: 0;
+    padding: 13px;
+    border: 1px solid var(--brand-line);
+    border-radius: var(--desk-card);
+    background: linear-gradient(135deg, var(--brand-soft) 0%, var(--pink-soft) 100%);
+    box-shadow: none;
+    text-align: left;
+    transition: border-color var(--dur-fast) var(--ease-out);
+  }
+  .advertise-panel:hover { border-color: var(--brand); }
+  .advertise-panel span {
+    gap: 6px;
+    font-size: 11.5px;
+    font-weight: 650;
+    color: var(--ink-strong);
+  }
+  .advertise-panel span svg { width: 14px; height: 14px; color: var(--brand); }
+  .advertise-panel small {
+    margin-top: 5px;
+    font-size: 10.5px;
+    line-height: 1.5;
+    color: var(--muted);
+  }
+
+  /* ---- footer ----------------------------------------------------------- */
+  .right-footer {
+    padding: 2px 2px 0;
+    font-size: 10px;
+    line-height: 1.9;
+    color: var(--ink-faint);
+  }
+  .footer-links { gap: 0 2px; margin-bottom: 4px; }
+  .footer-links button {
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--muted);
+  }
+  .footer-links button:hover { color: var(--brand-ink); background: var(--soft); }
+}
+
+/* ---------------------------------------------------------------------------
+   6. FEED COLUMN — hero, tabs, campus widgets, composer, post cards
+
+   Bars (the sticky tab strip) run full-bleed; every other block is inset by
+   the same --desk-gutter, which is what makes the column read as one surface.
+   --------------------------------------------------------------------------- */
+@media (min-width: 651px) {
+  /* ---- hero: editorial banner, text centred by flex, never clipped ------
+     The base sheet absolutely positions `.hero-copy` and the phase-1 short-
+     viewport rule re-set `top` without clearing the `translateY(-50%)` that
+     came with it, which cut the heading off at the top on a 768px-tall laptop.
+     Taking the copy out of absolute positioning removes the class of bug
+     entirely: the banner is now a flex row and its height follows the content. */
+  .campus-hero-banner {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    height: auto;
+    min-height: 108px;
+    margin: 14px var(--desk-gutter) 0;
+    padding: 14px 16px;
+    border-radius: var(--desk-card);
+    box-shadow: none;
+  }
+
+  .hero-copy {
+    position: static;
+    inset: auto;
+    transform: none;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .hero-eyebrow {
+    display: block;
+    font-size: 9.5px;
+    font-weight: 750;
+    letter-spacing: .16em;
+    color: #ffffffb3;
+  }
+  .hero-copy h2 {
+    margin: 4px 0 0;
+    font-size: 21px;
+    line-height: 1.14;
+    letter-spacing: -.6px;
+    font-weight: 700;
+  }
+  .hero-copy h2 em { font-weight: 500; }
+  .hero-swish {
+    width: 46px;
+    height: 3px;
+    margin: 6px 0 5px;
+    transform: rotate(-6deg);
+  }
+  /* the tagline stays on one line instead of stacking a third row */
+  .hero-copy p {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: .04em;
+    line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: #ffffffd9;
+  }
+
+  /* the art is the only absolutely positioned thing left in the banner */
+  .hero-campus-art {
+    inset: 0 0 0 42%;
+    transform: none;
+    opacity: .9;
+  }
+
+  .college-pill {
+    position: static;
+    inset: auto;
+    transform: none;
+    flex: none;
+    margin-left: auto;
+    gap: 8px;
+    padding: 8px 11px;
+    border: 1px solid #ffffff4d;
+    border-radius: var(--desk-r-widget);
+    background: #16294bcc;
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    transition: background var(--dur-fast) var(--ease-out),
+                border-color var(--dur-fast) var(--ease-out);
+  }
+  .college-pill:hover { background: #1d3567e0; border-color: #ffffff80; }
+  .college-pill:focus-visible { outline: none; box-shadow: 0 0 0 3px #ffffff59; }
+  .college-seal {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    flex: none;
+    border-radius: 8px;
+    background: #ffffff1f;
+  }
+  .college-pill b {
+    display: block;
+    max-width: 150px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 11.5px;
+    font-weight: 650;
+  }
+  .college-pill small {
+    display: block;
+    max-width: 190px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 10px;
+    opacity: .78;
+  }
+  .college-pill > svg { flex: none; opacity: .7; }
+
+  /* ---- feed tabs: the column's own header ------------------------------- */
+  .feed-tabs {
+    top: var(--desk-header);
+    height: 46px;
+    margin-top: 0;
+    padding: 0 var(--desk-gutter);
+    gap: 2px;
+    justify-content: flex-start;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-glass);
+  }
+  .feed-tabs button {
+    height: 100%;
+    padding: 0 12px;
+    border-radius: var(--desk-r-control) var(--desk-r-control) 0 0;
+    font-size: 12.5px;
+    font-weight: 550;
+    letter-spacing: -.1px;
+    color: var(--muted);
+    transition: color var(--dur-fast) var(--ease-out),
+                background var(--dur-fast) var(--ease-out);
+  }
+  .feed-tabs button:hover { color: var(--ink); background: var(--soft); }
+  .feed-tabs button.selected,
+  .feed-tabs button.selected:hover {
+    color: var(--ink-strong);
+    font-weight: 650;
+    background: transparent;
+  }
+  .feed-tabs button.selected::after {
+    left: 10px;
+    right: 10px;
+    height: 2.5px;
+    border-radius: 2px 2px 0 0;
+    background: var(--desk-accent);
+  }
+  .feed-tabs button:focus-visible { outline: none; box-shadow: var(--desk-ring); }
+
+  /* ---- campus widgets: two designed tiles, not two billboards ----------- */
+  .feature-row {
+    grid-auto-rows: 1fr;
+    gap: 10px;
+    padding: 14px var(--desk-gutter) 0;
+  }
+  .feature-card {
+    position: relative;
+    /* the grid is 1fr 1fr; without this the card's min-content width (the
+       nowrap sub-label) pushes the second column past the viewport at 651px */
+    min-width: 0;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    min-height: 62px;
+    padding: 10px 12px;
+    border: 1px solid transparent;
+    border-radius: var(--desk-r-widget);
+    box-shadow: none;
+    transition: transform var(--dur-fast) var(--ease-out),
+                box-shadow var(--dur-fast) var(--ease-out);
+  }
+  .feature-card.leaderboard {
+    border-color: var(--brand-line);
+    background: var(--brand-soft);
+  }
+  .feature-card.confessions {
+    border-color: var(--desk-pink-line);
+    background: var(--pink-soft);
+  }
+  .feature-card > svg {
+    width: 15px;
+    height: 15px;
+    margin: 0;
+    flex: none;
+    padding: 6px;
+    box-sizing: content-box;
+    border-radius: var(--desk-r-control);
+    background: var(--surface);
+    box-shadow: var(--desk-shadow-1);
+  }
+  .feature-card.leaderboard > svg { color: var(--violet); }
+  .feature-card.confessions > svg { color: #d6408a; }
+  .feature-card b {
+    display: block;
+    font-size: 12.5px;
+    font-weight: 650;
+    line-height: 1.25;
+    color: var(--ink-strong);
+  }
+  .feature-card span {
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 10.5px;
+    line-height: 1.35;
+    color: var(--muted);
+    opacity: 1;
+  }
+  /* affordance: a chevron drawn in CSS, so no markup or icon import changes */
+  .feature-card::after {
+    content: '';
+    flex: none;
+    width: 6px;
+    height: 6px;
+    margin-left: auto;
+    border-top: 1.5px solid var(--ink-faint);
+    border-right: 1.5px solid var(--ink-faint);
+    transform: rotate(45deg);
+    opacity: .7;
+    transition: transform var(--dur-fast) var(--ease-out),
+                opacity var(--dur-fast) var(--ease-out);
+  }
+  .feature-card:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--desk-shadow-2);
+  }
+  .feature-card:hover::after { transform: rotate(45deg) translate(1px, -1px); opacity: .7; }
+  .feature-card:active { transform: translateY(0); }
+  .feature-card:focus-visible { outline: none; box-shadow: var(--desk-ring); }
+
+  /* ---- presence line: a quiet status row, not centred filler ------------ */
+  .campus-presence {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 10px var(--desk-gutter) 12px;
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: .01em;
+    text-align: left;
+    color: var(--ink-faint);
+  }
+  .campus-presence::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    flex: none;
+    border-radius: 50%;
+    background: #16a085;
+    box-shadow: 0 0 0 3px #16a0851f;
+  }
+
+  /* ---- read-only banner: one slim announcement in the content ----------- */
+  .visitor-strip {
+    gap: 8px;
+    margin: 10px var(--desk-gutter) 0;
+    padding: 6px 11px;
+    border: 1px solid var(--line);
+    border-radius: var(--desk-r-widget);
+    background: var(--soft);
+    font-size: 11px;
+    line-height: 1.35;
+  }
+  .visitor-strip svg { width: 14px; height: 14px; flex: none; color: var(--muted); }
+  .visitor-strip span {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .visitor-strip .primary-button.small {
+    margin-left: auto;
+    padding: 5px 10px;
+    font-size: 10.5px;
+  }
+
+  /* ---- composer: the primary publishing surface ------------------------- */
+  .composer-inline {
+    gap: 11px;
+    margin: 12px var(--desk-gutter) 0;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--desk-card);
+    background: var(--surface);
+    box-shadow: var(--desk-shadow-1);
+    transition: border-color var(--dur-fast) var(--ease-out),
+                box-shadow var(--dur-fast) var(--ease-out);
+  }
+  .composer-inline:focus-within {
+    border-color: var(--brand-line);
+    box-shadow: var(--desk-ring);
+  }
+  .composer-inline .campus-avatar {
+    width: 36px;
+    height: 36px;
+    flex: none;
+    border: 0;
+    background: linear-gradient(145deg, var(--violet), var(--pink));
+    font-size: 11.5px;
+    font-weight: 700;
+  }
+  .composer-prompt {
+    padding: 3px 0 10px;
+    font-size: 13px;
+    font-weight: 450;
+    color: var(--muted);
+  }
+  .composer-tools {
+    align-items: center;
+    gap: 4px;
+    margin: 0;
+  }
+  .composer-tools button:not(.post-button) {
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border-radius: var(--desk-r-control);
+    transition: background var(--dur-fast) var(--ease-out),
+                color var(--dur-fast) var(--ease-out);
+  }
+  .composer-tools button:not(.post-button) svg { width: 16px; height: 16px; }
+  .composer-tools button:nth-child(1):not(.post-button) { background: var(--brand-soft); color: var(--brand-ink); }
+  .composer-tools button:nth-child(2):not(.post-button) { background: var(--pink-soft); color: var(--pink-ink); }
+  .composer-tools button:nth-child(3):not(.post-button) { background: var(--warn-bg); color: var(--warn); }
+  .composer-tools button:not(.post-button):hover { filter: brightness(.97); }
+  .composer-tools button:focus-visible { outline: none; box-shadow: var(--desk-ring); }
+
+  .post-button {
+    height: 30px;
+    margin-left: auto;
+    padding: 0 15px;
+    border-radius: var(--desk-r-control);
+    background: var(--desk-accent);
+    color: #fff;
+    font-size: 11.5px;
+    font-weight: 650;
+    letter-spacing: -.1px;
+    box-shadow: 0 4px 12px #7c5cf526;
+    transition: filter var(--dur-fast) var(--ease-out),
+                transform var(--dur-fast) var(--ease-out);
+  }
+  .post-button:hover { filter: brightness(1.05); }
+  .post-button:active { transform: scale(.99); }
+  .post-button:disabled { filter: none; opacity: .55; box-shadow: none; }
+  .post-button:focus-visible { outline: none; box-shadow: var(--desk-ring); }
+
+  .inline-composer-open textarea {
+    width: 100%;
+    border: 0;
+    background: transparent;
+    resize: none;
+    font-size: 13.5px;
+    line-height: 1.6;
+    color: var(--ink);
+  }
+  .inline-composer-open textarea:focus { outline: none; }
+  .inline-composer-actions { gap: 8px; margin-top: 6px; }
+  .inline-cancel {
+    height: 30px;
+    padding: 0 12px;
+    border-radius: var(--desk-r-control);
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+  .inline-cancel:hover { background: var(--soft); color: var(--ink); }
+
+  /* ---- post cards: quiet bordered rows, one design language ------------- */
+  .feed-list {
+    gap: 10px;
+    padding: 12px var(--desk-gutter) 0;
+  }
+  .post-card {
+    gap: 12px;
+    margin: 0;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--desk-card);
+    background: var(--surface);
+    box-shadow: none;
+    transition: border-color var(--dur-fast) var(--ease-out),
+                box-shadow var(--dur-fast) var(--ease-out);
+  }
+  .post-card:hover {
+    border-color: var(--line-strong);
+    background: var(--surface);
+    box-shadow: var(--desk-shadow-1);
+  }
+  .post-avatar,
+  .post-card .post-avatar {
+    width: 36px;
+    height: 36px;
+    flex: none;
+    font-size: 11.5px;
+  }
+  .post-namerow b {
+    font-size: 13px;
+    font-weight: 650;
+    color: var(--ink-strong);
+  }
+  .verified-tick { color: var(--brand); flex: none; }
+  .post-idline {
+    gap: 5px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .post-idline i { font-style: normal; opacity: .6; }
+  /* `.post-card .icon-button` in styles.ui4.css sets 44px with two classes, so
+     this needs the same specificity to win (this sheet is imported last). */
+  .post-card .more-button {
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    min-height: 28px;
+    padding: 0;
+    margin-top: -3px;
+    border-radius: var(--desk-r-control);
+    color: var(--ink-faint);
+    opacity: 0;
+    transition: opacity var(--dur-fast) var(--ease-out),
+                background var(--dur-fast) var(--ease-out);
+  }
+  .post-card:hover .more-button,
+  .more-button:focus-visible { opacity: 1; }
+  .more-button:hover { background: var(--soft); color: var(--ink); }
+
+  .post-badges { gap: 5px; margin-top: 7px; }
+  .post-badges .badge {
+    gap: 4px;
+    padding: 3px 7px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 650;
+    line-height: 1.2;
+  }
+  .post-badges .badge svg { width: 11px; height: 11px; }
+
+  .post-body {
+    margin: 8px 0 12px;
+    font-size: 13.5px;
+    line-height: 1.62;
+    color: var(--ink);
+  }
+  .post-caption { margin-top: 10px; }
+  .post-body a,
+  .post-body .mention,
+  .post-body .hashtag { border-radius: 4px; }
+  .post-body a:hover,
+  .post-body .mention:hover,
+  .post-body .hashtag:hover { background: var(--brand-soft); }
+
+  /* media: never taller than the viewport, never distorted */
+  .post-media,
+  .post-card img,
+  .post-card video {
+    border-radius: var(--desk-r-widget);
+    background: var(--soft);
+  }
+  .post-media,
+  .post-card .carousel,
+  .post-card .carousel-track { max-height: 520px; }
+  .post-card img.post-media,
+  .post-card video.post-media {
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+    object-fit: cover;
+    display: block;
+  }
+  .carousel-arrow {
+    width: 28px;
+    height: 28px;
+    border-radius: var(--desk-r-pill);
+    background: #10182880;
+    color: #fff;
+  }
+
+  .post-actions {
+    gap: 2px;
+    margin: 0;
+  }
+  .post-actions button {
+    gap: 5px;
+    min-height: 32px;
+    padding: 0 8px;
+    border-radius: var(--desk-r-control);
+    font-size: 11px;
+    font-weight: 550;
+    transition: background var(--dur-fast) var(--ease-out),
+                color var(--dur-fast) var(--ease-out);
+  }
+  .post-actions button span { font-variant-numeric: tabular-nums; }
+  .post-actions button:hover { background: var(--soft); color: var(--ink); }
+  .post-actions button.liked:hover { background: var(--danger-bg); }
+  .post-actions .action-spacer { flex: 1; }
+
+  .post-menu {
+    top: 26px;
+    width: 178px;
+    padding: 5px;
+    border-radius: var(--desk-r-widget);
+    background: var(--surface);
+    box-shadow: var(--desk-shadow-2);
+  }
+  .post-menu button {
+    padding: 8px 9px;
+    border-radius: var(--desk-r-control);
+    font-size: 11.5px;
+    color: var(--ink-secondary);
+  }
+  .post-menu button:hover { background: var(--soft); color: var(--ink); }
+  .post-menu button.danger:hover { background: var(--danger-bg); color: var(--danger); }
+
+  /* ---- section pages (Safety, Bookmarks, My College, …) ---------------- */
+  .section-page { padding: 24px var(--desk-gutter) 40px; }
+  .search-bar { padding: 12px var(--desk-gutter); }
+}
+
+/* Touch-shaped viewports keep the 44px action rows the base sheet defines;
+   a mouse-driven desktop uses the compacted 32px row above. */
+@media (min-width: 651px) and (pointer: coarse) {
+  .post-actions button { min-height: 44px; }
+  .feed-tabs button { min-height: 44px; }
+  /* hover-revealed controls cannot be discovered by touch */
+  .more-button { opacity: 1; }
+}
+
+/* ---------------------------------------------------------------------------
+   7. SHORT VIEWPORTS (e.g. 1366x768 laptop, 1024x768)
+
+   The hero no longer needs a special case: its height follows the content, so
+   it cannot clip at any viewport height. Only the vertical rhythm tightens.
+   --------------------------------------------------------------------------- */
+@media (min-width: 651px) and (max-height: 820px) {
+  .campus-hero-banner { min-height: 96px; padding: 11px 14px; }
+  .hero-copy h2 { font-size: 19px; }
+  .hero-swish { margin: 5px 0 4px; }
+  .feature-card { min-height: 56px; }
+  .campus-presence { margin: 8px var(--desk-gutter) 10px; }
+}
+
+/* ---------------------------------------------------------------------------
+   8. REDUCED MOTION — the base sheets already neutralise transitions in
+   styles.ui4.css; restate it here so this layer's own transitions (nav hover,
+   composer focus, card hover, feature tiles) cannot reintroduce movement.
+   --------------------------------------------------------------------------- */
+@media (min-width: 651px) and (prefers-reduced-motion: reduce) {
+  .desk-nav-item,
+  .desk-compose,
+  .desk-search,
+  .desk-icon-btn,
+  .desk-avatar-btn .avatar,
+  .composer-inline,
+  .post-card,
+  .feature-card,
+  .feed-tabs button,
+  .post-actions button,
+  .more-button,
+  .trend-row,
+  .community-row,
+  .follow-button,
+  .advertise-panel {
+    transition: none;
+  }
+  .feature-card:hover,
+  .desk-compose:hover { transform: none; }
+}

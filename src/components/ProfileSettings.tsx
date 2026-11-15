@@ -252,11 +252,15 @@ export default function ProfileSettings({ profile, userId, caps, patchProfile, r
     setBusy(true)
     setMessage(null)
     try {
-      if (avatarFile) await db.uploadAvatar(userId, avatarFile)
+      // The upload returns the file's public URL and that URL IS the avatar:
+      // without persisting it the file lands in the bucket and nothing ever
+      // points at it, so the new photo silently never appears anywhere.
+      const nextAvatar = avatarFile ? await db.uploadAvatar(userId, avatarFile) : null
       const failure = await patchProfile({
         display_name: name.trim(),
         ...(username.trim() && username.trim() !== (profile.username ?? '') ? { username: username.trim() } : {}),
         bio: bio.trim(),
+        ...(nextAvatar ? { avatar_url: nextAvatar } : {}),
       })
       reloadProfile()
       if (failure) note(false, failure)

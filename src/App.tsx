@@ -12,6 +12,7 @@ import {
 import { AuthProvider, hasSeenWelcome, markWelcomeSeen, useAuth } from './lib/auth'
 import { saveComposerDraft, loadComposerDraft, clearComposerDraft, type ComposerDraftMeta } from './lib/drafts'
 import { StaffConsole } from './components/StaffConsole'
+import { DesktopHeader, DesktopNav } from './components/DesktopChrome'
 import { reconcilePush } from './lib/webPush'
 import { isNativeApp } from './platform/platform'
 import { initNativeNavigation } from './platform/nativeNavigation'
@@ -48,6 +49,7 @@ import Leaderboard from './components/Leaderboard'
 import MyCollege from './components/MyCollege'
 import * as bk from './lib/bookmarks'
 import SearchPanel from './components/SearchPanel'
+import Discovery from './components/Discovery'
 import Profile from './components/Profile'
 import ReportDialog, { type ReportTarget } from './components/ReportDialog'
 import Pulse from './components/Pulse'
@@ -130,6 +132,21 @@ const glideNavRef = (navEl: HTMLElement | null) => {
 
 /** System info pages, reachable from the footer. */
 const infoNav = ['About', 'Guidelines', 'Privacy', 'Help']
+
+/** Live `matchMedia` subscription — the only reliable way to know which side of
+ *  the app's single 650px breakpoint the window is on while it is being resized. */
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia(query).matches)
+  useEffect(() => {
+    const mql = window.matchMedia(query)
+    const onChange = () => setMatches(mql.matches)
+    onChange()
+    mql.addEventListener('change', onChange)
+    return () => mql.removeEventListener('change', onChange)
+  }, [query])
+  return matches
+}
 
 /** The four primary pages reachable by horizontal swipe on mobile. */
 const swipePageOrder = ['Home', 'Discover', 'Chats', 'Profile']
@@ -218,6 +235,12 @@ function CAMPUSApp() {
   communityTabRef.current = communityTab
 
   const isMobileViewport = () => typeof window !== 'undefined' && window.matchMedia('(max-width: 650px)').matches
+
+  /* Reactive form of the app's 650px breakpoint. The search surface has to be
+     mounted in exactly one place — the global header on a desktop, the page
+     flow on a phone — so this decides which, and re-renders if the window is
+     resized across the breakpoint. */
+  const desktopSearch = useMediaQuery('(min-width: 651px)')
 
   /* ---- boot experience --------------------------------------------------- */
   // The loader lives only on the real boot path (session + profile restore).
@@ -339,6 +362,17 @@ function CAMPUSApp() {
   const [confessPatch, setConfessPatch] = useState<{ id: string; likes?: number; liked?: boolean; comments?: number } | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchSeed, setSearchSeed] = useState('')
+  /* The Search page's query. It is a real destination state (navHistory `q`),
+     so submitting from the header, tapping a trend or a hashtag lands on the
+     same results view and device Back returns to the discovery landing. A
+     shared `?view=Search&q=…` link restores it on boot. */
+  const [searchQuery, setSearchQuery] = useState(() => {
+    if (typeof window === 'undefined') return ''
+    const params = new URLSearchParams(window.location.search)
+    return params.get('view') === 'Search' ? (params.get('q') ?? '').slice(0, 120) : ''
+  })
+  /** college opened from the header search dropdown (Search owns the panel) */
+  const [exploreCollegeHit, setExploreCollegeHit] = useState<db.InstitutionHit | null>(null)
   const [mobileMenu, setMobileMenu] = useState(false)
   const [openChatId, setOpenChatId] = useState<string | null>(null)
   const [chatAutoSeq, setChatAutoSeq] = useState(0)
@@ -380,9 +414,10 @@ function CAMPUSApp() {
     if (openEventSlug) view.event = openEventSlug
     if (openListingSlug) view.listing = openListingSlug
     if (confessionsOpen && activeNav === 'Home') view.conf = true
+    if (activeNav === 'Search' && searchQuery.trim()) view.q = searchQuery.trim()
     if (dmThread && isMobileViewport()) view.dm = { id: dmThread.id }
     return view
-  }, [activeNav, openCommunityId, communityTab, openEventSlug, openListingSlug, dmThread, confessionsOpen])
+  }, [activeNav, openCommunityId, communityTab, openEventSlug, openListingSlug, dmThread, confessionsOpen, searchQuery])
   const currentViewJson = JSON.stringify(currentView)
 
   /** skip the pusher exactly once after a popstate restore applied a view */
@@ -409,6 +444,9 @@ function CAMPUSApp() {
     setCommunityTab(view.ctab ?? null)
     setOpenEventSlug(view.event ?? null)
     setOpenListingSlug(view.listing ?? null)
+    // the Search pane's query is part of the snapshot: leaving the results and
+    // coming back restores them, and a Search entry without a q is the landing
+    setSearchQuery(view.nav === 'Search' ? (view.q ?? '') : '')
     // the Confessions page is a Home subview: leaving Home closes it, and a
     // snapshot taken while it was open restores it (device Back-friendly)
     if (view.nav !== 'Home') setConfessionsOpen(false)
@@ -1119,12 +1157,15 @@ function CAMPUSApp() {
     // saved); the toggle itself still fails loudly if the write cannot happen
     void bk.syncPostSaves(posts).catch(() => undefined)
   }, [posts, user, feedSource])
-  const toggleRepost = (id: string, item?: CampusPost) => {
-    if (!requireAuth('repost to your campus')) return
+  /** Returns false when the action was refused (visitor), so a surface that
+   *  owns its own row copy can roll its optimistic flip back. */
+  const toggleRepost = (id: string, item?: CampusPost): boolean => {
+    if (!requireAuth('repost to your campus')) return false
     const target = posts.find(p => p.id === id) ?? item
-    if (!target) return
+    if (!target) return false
     setPosts(current => current.map(p => p.id === id ? { ...p, reposted: !p.reposted, reposts: p.reposts + (p.reposted ? -1 : 1) } : p))
     setConfessPatch({ id })
+    return true
   }
   const openComments = (post: CampusPost) => {
     if (!requireAuth('join the conversation')) return
@@ -1725,12 +1766,45 @@ function CAMPUSApp() {
     setActiveNav(label)
     // any navigation leaves the search overlay behind (it re-opens on demand)
     if (label !== 'Search') { setSearchOpen(false); setSearchSeed('') }
-    else setSearchOpen(true)
+    else setSearchOpen(false)
     if (label === 'Profile' && label === activeNav) setViewingProfileId(null)
     // "coming soon" only for genuinely scaffolded pages; Chats, Bookmarks,
     // Leaderboard, Notifications, Profile and My College are live (the last
     // three render real backends — verified in the M9–M16 probes)
     if (scaffoldNav.includes(label) && !['Chats', 'Bookmarks', 'Leaderboard', 'Notifications', 'Profile', 'My College', 'Campus Pulse'].includes(label)) flash(`${label} is coming soon.`)
+  }
+
+  /* Search submission: one query, one destination. The header dropdown hands
+     its text here (Enter, the arrow button or "See all results"), and the
+     Search page renders the results for it. The URL is kept shareable
+     (?view=Search&q=…) without touching the app's own history state — that
+     stays owned by navHistory. */
+  const clearSearchQuery = () => {
+    setSearchQuery('')
+    try {
+      const url = new URL(window.location.href)
+      url.searchParams.delete('q')
+      url.searchParams.delete('view')
+      window.history.replaceState(window.history.state, '', url)
+    } catch { /* non-browser shell */ }
+  }
+
+  const submitSearch = (raw: string) => {
+    const value = raw.trim().slice(0, 120)
+    setSearchSeed('')
+    setSearchQuery(value)
+    setSearchOpen(false)
+    if (value) {
+      if (activeNav !== 'Search') navigate('Search')
+      try {
+        const url = new URL(window.location.href)
+        url.searchParams.set('view', 'Search')
+        url.searchParams.set('q', value)
+        window.history.replaceState(window.history.state, '', url)
+      } catch { /* non-browser shell: the in-app state still carries the query */ }
+    } else if (activeNav === 'Search') {
+      clearSearchQuery()
+    }
   }
 
   /* ---- mobile swipe navigation (touch only, viewport ≤ 650px) -------------
@@ -2552,11 +2626,60 @@ function CAMPUSApp() {
   /* detail screens own page-level sticky bars and search keeps the header in
      reach — the scroll-away behavior only applies to plain feed-style tabs */
   const chromePersistent = Boolean(dmThread || confessionsOpen || searchOpen || openCommunityId || openEventSlug || openListingSlug)
+
+  /* One search surface, mounted once. Desktop puts it in the header's search
+     slot; mobile keeps it in the flow above the feed. The query, the debounce
+     and every RPC stay inside SearchPanel either way. */
+  const searchSurface = searchOpen ? (
+    <SearchPanel
+      colleges={colleges}
+      clubs={clubs}
+      caps={caps}
+      blockedHandles={blockedHandles}
+      mutedHandles={mutedHandles}
+      initialQuery={searchSeed}
+      anchored={desktopSearch}
+      suggested={trends}
+      onClose={() => { setSearchOpen(false); setSearchSeed('') }}
+      onSubmit={submitSearch}
+      onOpenProfile={personId => { setViewingProfileId(personId); navigate('Profile') }}
+      onMessagePerson={personId => void messagePerson(personId)}
+      onOpenCommunity={clubId => { navigate('Communities'); setOpenCommunityId(clubId); setCommunityTab(null) }}
+      onExploreCollege={hit => {
+        // the panel only knows the hit's id; hand the whole row to the Search
+        // page, which owns the institution detail (departments, campuses)
+        setExploreCollegeHit(hit)
+        setSearchOpen(false)
+        if (activeNav !== 'Search') navigate('Search')
+        setSearchQuery('')
+      }}
+      onOpenPost={post => openPostDetail(post)}
+      onNavigate={navigate}
+    />
+  ) : null
   return (
     <div
       className={`app-shell${dmThread && isMobileViewport() ? ' nav-hidden' : ''}${chromePersistent ? ' chrome-keep' : ''}`}
       ref={el => { shellRef.current = el }}
     >
+      {/* Desktop-only global header. display:none below 651px, so the mobile
+          chrome above it is the only header a phone ever renders. */}
+      <DesktopHeader
+        campusName={myInstitutionName}
+        campusShort={myInstitutionShort}
+        initials={identity.initials}
+        avatarUrl={profile?.avatar_url ?? null}
+        signedIn={status === 'member'}
+        unread={unreadNotifs}
+        searchOpen={searchOpen}
+        searchSlot={desktopSearch && searchOpen ? searchSurface : null}
+        onOpenSearch={() => setSearchOpen(true)}
+        onOpenNotifications={() => navigate('Notifications')}
+        onOpenChats={() => navigate('Chats')}
+        onOpenProfile={() => navigate('Profile')}
+        onChangeCollege={() => navigate('My College')}
+      />
+
       <header className="mobile-header" ref={el => { mobileHeaderRef.current = el }}>
         <div className="mobile-header-left">
           <button className="icon-button" aria-label="Menu" ref={menuButtonRef} onClick={() => setMobileMenu(true)}><Menu size={21}/></button>
@@ -2593,6 +2716,15 @@ function CAMPUSApp() {
             </>
           )}
         </nav>
+        {/* Desktop-only grouped nav (display:none below 651px). The flat
+            .primary-nav above is what the mobile drawer renders. */}
+        <DesktopNav
+          activeNav={activeNav}
+          onNavigate={navigate}
+          isStaff={isStaff}
+          unread={unreadNotifs}
+          onCreatePost={() => openComposer()}
+        />
         <div className="drawer-footer">
           {infoNav.map(label => (
             <button key={label} onClick={() => navigate(label)}>{label}</button>
@@ -2626,7 +2758,10 @@ function CAMPUSApp() {
           </div>
         )}
 
-        {searchOpen && <SearchPanel colleges={colleges} clubs={clubs} caps={caps} blockedHandles={blockedHandles} mutedHandles={mutedHandles} initialQuery={searchSeed} onClose={() => { setSearchOpen(false); setSearchSeed('') }} onOpenProfile={personId => { setViewingProfileId(personId); navigate('Profile') }} onMessagePerson={personId => void messagePerson(personId)} onNavigate={navigate} />}
+        {/* Phone / tablet: the search surface stays in the page flow, exactly as
+            before. On a desktop it is mounted in the header instead (see
+            searchSlot above), so this renders nothing there. */}
+        {!desktopSearch && searchSurface}
         {activeNav === 'Home' && confessionsOpen ? (
           /* dedicated Confessions destination — Home as a subview, real
              history entry, shares the composer + all post interactions */
@@ -2654,7 +2789,6 @@ function CAMPUSApp() {
             onOpenTag={openHashtagSearch}
           />
         ) : activeNav === 'Home' ? <>
-          <div className="desktop-topbar"><div className="desktop-search-trigger" onClick={() => setSearchOpen(true)} role="button" tabIndex={0}><Search size={18}/><span>Search for people, posts, colleges, clubs...</span></div><div className="topbar-actions"><button className="icon-button" aria-label="Notifications" onClick={() => navigate('Notifications')}><Bell size={20}/>{unreadNotifs > 0 && <i className="notification-dot"/>}</button><button className="icon-button" aria-label="My profile" onClick={() => navigate('Profile')}><UserRound size={20}/></button></div></div>
           <section className="campus-hero-banner"><div className="hero-copy"><span className="hero-eyebrow">YOUR PEOPLE. YOUR PLACE.</span><h2>Same Campus,<br/><em>Bigger Dreams.</em></h2><span className="hero-swish"/><p>Connect · Share · Grow</p></div><div className="hero-campus-art" aria-hidden="true"><div className="art-sun"/><div className="art-building"><span/><span/><span/><span/><b/></div><div className="art-hill"/></div><button className="college-pill" onClick={() => navigate('My College')}><span className="college-seal"><Building2 size={22}/></span><span><b>{myInstitutionShort || (isStaff ? 'CAMPUS HQ' : 'Pick your college')}</b><small>{myInstitutionName || (isStaff ? 'Platform team — all colleges' : 'JSPM, COEP, Fergusson and more across Pune')}</small></span><ChevronDown size={16}/></button></section>
           <div className="feed-tabs" role="tablist">
             {['For You','Following','My College','Trending','Latest'].map(tab => <button key={tab} role="tab" aria-selected={feedTab===tab} className={feedTab===tab?'selected':''} onClick={() => setFeedTab(tab)}>{tab}</button>)}
@@ -2912,6 +3046,44 @@ function CAMPUSApp() {
                       }}
                       onOpenProfile={openMentionProfile}
                     />
+                : activeNav === 'Search'
+                  ? <Discovery
+                      key="search"
+                      identity={identity && user ? { id: user.id, name: identity.name, username: identity.username, initials: identity.initials, college: identity.college } : null}
+                      isMember={status === 'member'}
+                      configured={configured}
+                      caps={caps}
+                      colleges={colleges}
+                      clubs={clubs}
+                      following={following}
+                      trends={trends}
+                      trendsPending={trendsPending}
+                      blockedHandles={blockedHandles}
+                      mutedHandles={mutedHandles}
+                      query={searchQuery}
+                      myCollegeId={profile?.college_id ?? null}
+                      requireAuth={requireAuth}
+                      notify={flash}
+                      onQuery={submitSearch}
+                      onClearQuery={clearSearchQuery}
+                      onOpenSearch={() => setSearchOpen(true)}
+                      onOpenProfile={openMentionProfile}
+                      onToggleFollow={toggleFollowFor}
+                      onOpenPost={post => openPostDetail(post)}
+                      pollStateMap={pollStateMap}
+                      onPollStates={map => setPollStateMap(current => ({ ...current, ...map }))}
+                      onVote={votePoll}
+                      onLike={toggleLike}
+                      onSave={toggleSave}
+                      onRepost={toggleRepost}
+                      onComment={openComments}
+                      onShare={sharePost}
+                      onOpenCommunity={clubId => { navigate('Communities'); setOpenCommunityId(clubId); setCommunityTab(null) }}
+                      onOpenEvent={slug => { navigate('Events'); setOpenEventSlug(slug) }}
+                      onNavigate={navigate}
+                      collegeToOpen={exploreCollegeHit}
+                      onCollegeConsumed={() => setExploreCollegeHit(null)}
+                    />
                 : infoNav.includes(activeNav)
               ? <InfoPage name={activeNav}/>
               : activeNav === 'Staff Console'
@@ -2951,7 +3123,7 @@ function CAMPUSApp() {
           ) : (
             <>
               {trends.slice(0, showAllTrends ? trends.length : 5).map(([tag, count]) => (
-                <button className="trend-row" key={tag} onClick={() => { setActiveNav('Home'); setSearchSeed(tag); setSearchOpen(true) }}>
+                <button className="trend-row" key={tag} onClick={() => submitSearch(tag)}>
                   <b>#{tag}</b>
                   <span>{count >= 1000 ? `${(count / 1000).toFixed(1)}K posts` : count === 1 ? '1 post' : `${count} posts`}</span>
                 </button>
@@ -2966,13 +3138,22 @@ function CAMPUSApp() {
         <section className="right-panel follow-panel">
           <h2>Who to follow</h2>
           {status !== 'member' ? (
-            <p className="panel-hint">Join CAMPUS to get follow suggestions from your campus.</p>
+            <div className="panel-empty">
+              <span className="panel-empty-icon"><Users size={16}/></span>
+              <b>Follow your campus</b>
+              <small>Join CAMPUS to get follow suggestions from your college.</small>
+              <button className="panel-empty-cta" onClick={() => setAuthMode('signup')}>Join CAMPUS</button>
+            </div>
           ) : followPicks.length === 0 ? (
-            <p className="panel-hint">
-              {followPicksPending
-                ? 'Looking for classmates…'
-                : 'No suggestions yet — they appear here as more classmates join.'}
-            </p>
+            followPicksPending ? (
+              <p className="panel-hint">Looking for classmates…</p>
+            ) : (
+              <div className="panel-empty">
+                <span className="panel-empty-icon"><Users size={16}/></span>
+                <b>No classmates yet</b>
+                <small>Suggestions appear here as more students from your campus join.</small>
+              </div>
+            )
           ) : (
             followPicks.map(person => {
               const initials = db.initialsFor(person.name, person.username)
@@ -2983,7 +3164,7 @@ function CAMPUSApp() {
                     onClick={() => void openMentionProfile(person.id)}
                     aria-label={`Open ${person.name}'s profile`}
                   >
-                    <span className="avatar">{initials}</span>
+                    <span className="avatar">{person.avatarUrl ? <img src={person.avatarUrl} alt=""/> : initials}</span>
                     <span className="suggestion-copy"><b>{person.name}</b><small>@{person.username}</small></span>
                   </button>
                   <button
@@ -2998,6 +3179,29 @@ function CAMPUSApp() {
             })
           )}
         </section>
+
+        {/* Popular communities: real .clubs rows already loaded for the shell.
+            No member counts are shown because db.Club does not carry one —
+            an empty state is used rather than an invented number. */}
+        {clubs.length > 0 && (
+          <section className="right-panel community-panel">
+            <h2><Users size={15}/> Popular communities</h2>
+            {clubs.slice(0, 5).map(club => (
+              <button
+                className="community-row"
+                key={club.id}
+                onClick={() => { navigate('Communities'); setOpenCommunityId(club.id); setCommunityTab(null) }}
+                title={club.description || club.name}
+              >
+                <span className="community-row-mark">{club.name.slice(0, 1).toUpperCase()}</span>
+                <span className="community-row-copy">
+                  <b>{club.name}</b>
+                  {club.description && <small>{club.description}</small>}
+                </span>
+              </button>
+            ))}
+          </section>
+        )}
 
         <button className="advertise-panel" onClick={() => { if (isStaff) navigate('Advertising'); else flash('Advertising on CAMPUS is managed by the campus admin team.') }}><span><Megaphone size={17}/> Advertise on CAMPUS</span><small>{isStaff ? 'Manage sponsored campaigns, college targeting and analytics.' : 'First-party sponsored posts, delivered by college targeting.'}</small></button>
 
@@ -3391,7 +3595,6 @@ function SectionPage({name,onCreate,onSignIn,isMember,displayName}:{name:string;
     'Chats':{icon:MessageCircle,title:'Your conversations',desc:'Direct messages and group chats help your campus stay connected.',items:['Class group','Robotics Club','Start a new conversation']},
     'Notifications':{icon:Bell,title:'You’re all caught up',desc:'Replies, mentions, follows and campus updates will appear here.',items:['Replies to your posts','New followers','College announcements']},
     'Bookmarks':{icon:Bookmark,title:'Saved for later',desc:'Keep important posts, opportunities and campus updates close.',items:['Saved posts','Saved opportunities','Reading list']},
-    'Search':{icon:Search,title:'Search CAMPUS',desc:'Find students, posts, colleges and topics.',items:['Search by name','Browse topics','Explore colleges']},
     'My College':{icon:Building2,title:'Your college, together',desc:'A dedicated space for your college community.',items:['College announcements','Student directory','College clubs']},
     'Profile':{icon:UserRound,title:isMember?displayName:'Your profile',desc:'Your profile, posts, saved items and campus identity live here.',items:['Edit your profile','Your posts','Your connections']},
   }
@@ -3400,6 +3603,6 @@ function SectionPage({name,onCreate,onSignIn,isMember,displayName}:{name:string;
   return <section className="section-page"><div className="section-hero-icon"><Icon size={27}/></div><span className="eyebrow">CAMPUS / {name.toUpperCase()}</span><h2>{page.title}</h2><p>{page.desc}</p>
     <div className="section-quick-actions"><button className="primary-button" onClick={()=>onCreate()}><Plus size={16}/> Create a post</button>{!isMember&&<button className="secondary-button" onClick={onSignIn}>Join CAMPUS</button>}</div>
     <div className="section-list">{page.items.map((item,i)=><button key={item} className="section-list-row" onClick={()=>{}}><span className="section-list-number">0{i+1}</span><span>{item}</span><ArrowLeft size={16}/></button>)}</div>
-    <div className="coming-note"><Sparkles size={16}/><span>This screen is scaffolded. Connect its database tables and actions to make it fully live.</span></div>
+    <div className="coming-note"><Sparkles size={16}/><span>This screen is scaffolded. Coming soon..</span></div>
   </section>
 }
