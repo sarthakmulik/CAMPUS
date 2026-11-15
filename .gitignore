@@ -11,5 +11,12 @@ supabase/0029b_paste_ready_DO_NOT_COMMIT.sql
 temp-dump.cjs
 temp-pulse-tests.cjs
 
+# Android signing + Firebase config — never commit
+# (MOBILE_BUILD_GUIDE.md §3 lists these as excluded; the rules were missing)
+android/keystore.properties
+*.jks
+*.keystore
+android/app/google-services.json
+
 # graphify knowledge-graph build (queryable locally via the graphify CLI)
 graphify-out/
