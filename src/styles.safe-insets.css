@@ -11,4 +11,8 @@
   --safe-inset-bottom: calc(max(env(safe-area-inset-bottom, 0px), var(--native-inset-bottom, 0px)));
   --safe-inset-left: calc(max(env(safe-area-inset-left, 0px), var(--native-inset-left, 0px)));
   --safe-inset-right: calc(max(env(safe-area-inset-right, 0px), var(--native-inset-right, 0px)));
+  /* footprint of the floating bottom dock (64px pill + 8px offset). 0 on
+     desktop, where the dock does not exist — redefined inside the mobile
+     media block that owns the pill (styles.ui4.css). */
+  --mobile-dock-space: 0px;
 }

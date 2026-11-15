@@ -6390,7 +6390,7 @@
 /* Notification center (0029) + push onboarding + notification settings  */
 /* ==================================================================== */
 
-.nc-page { padding: 0 0 30px; min-height: calc(100vh - 120px); }
+.nc-page { padding: 0 0 calc(30px + var(--mobile-dock-space)); min-height: calc(100vh - 120px); }
 
 /* header: compact, indigo identity, no oversized banner */
 .nc-head {

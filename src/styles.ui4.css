@@ -1793,6 +1793,9 @@ textarea:disabled {
    bars drop visibility so they are neither seen nor focused.
    ========================================================================== */
 @media (max-width: 650px) {
+  /* the floating dock exists on phones: full-height clearance for pages that
+     must END above it (notifications, sheets), unlike scroll-behind feeds */
+  :root { --mobile-dock-space: calc(72px + var(--safe-inset-bottom)) }
   /* ---- the floating pill (replaces the edge-to-edge bar) ------------------
      Glass surface reused from the system surface-glass token so dark mode
      and the reduced-transparency fallback keep working unchanged. */

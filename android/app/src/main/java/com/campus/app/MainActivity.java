@@ -73,10 +73,17 @@ public class MainActivity extends BridgeActivity {
                 && measured.left == insetLeft && measured.right == insetRight) {
             return;
         }
-        insetTop = measured.top;
-        insetBottom = measured.bottom;
-        insetLeft = measured.left;
-        insetRight = measured.right;
+        // physical px → CSS px: the WebView lays out in density-independent
+        // pixels, but inset values arrive in physical device px. Injecting
+        // them raw inflated every reserved space by the density factor
+        // (~2.6 on a moto g72) — the giant white band above the header in
+        // 1.0.4 was exactly this unit bug.
+        float density = getResources().getDisplayMetrics().density;
+        if (density <= 0) density = 1f;
+        insetTop = Math.round(measured.top / density);
+        insetBottom = Math.round(measured.bottom / density);
+        insetLeft = Math.round(measured.left / density);
+        insetRight = Math.round(measured.right / density);
         pushInsets();
     }
 
