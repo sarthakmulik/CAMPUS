@@ -3506,6 +3506,10 @@
   background: transparent;
   text-align: left;
   padding: 11px 10px;
+  /* the ⋮ row menu is absolutely positioned over the row's right edge
+     (right:9px, 26px wide) — without reserved room it painted over the
+     timestamp and request badge ("Oct 25" / "ago" clipped in the wild) */
+  padding-right: 42px;
   border-radius: 13px;
   transition: background 0.15s;
 }
@@ -6018,6 +6022,9 @@
   .overlay { align-items: flex-end; padding: 0; }
   .chats-filters { gap: 5px; }
   .chat-row-menu { right: 7px; }
+  /* M6 widened the menu to a 44px tap target (styles.ui4.css) — reserve the
+     wider zone or the 44px button paints over the timestamp/badge column */
+  .chat-row { padding-right: 56px; }
   .dm-list-menu { right: 30px; }
   .chat-voice { min-width: 120px; }
   .dm-share-card { max-width: 220px; }
