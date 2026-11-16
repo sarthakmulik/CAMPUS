@@ -192,10 +192,17 @@
   }
   .main-column { min-height: calc(100vh - var(--desk-header)); }
 
-  /* The Chats room sits under the global header at every desktop width —
-     .chats-page's base height:100vh (written when the desktop route had no
-     topbar) made it 60px too tall: the page scrolled, and the overlay
-     composer landed below the fold at common window heights. */
+}
+
+/* The Chats room sits under the global header at EVERY desktop width —
+   .chats-page's base height:100vh (written when the desktop route had no
+   topbar) made the room exactly one header too tall: the page scrolled, and
+   the overlay composer + its input landed below the fold. This was first
+   fixed inside the 651-1050 block only, and the bug survived at full desktop
+   widths (>=1051px) — the composer bottom sat 60px under the viewport. So the
+   rule lives in its own min-651 block here, after every width-scoped section,
+   and wins at 651px and up alike. */
+@media (min-width: 651px) {
   .chats-page {
     height: calc(100vh - var(--desk-header));
     height: calc(100dvh - var(--desk-header));
