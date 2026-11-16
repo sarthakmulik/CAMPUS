@@ -23,3 +23,4 @@ graphify-out/
 
 # Supabase CLI local state (project/org ids - never needed in git)
 supabase/.temp/
+CAMPUS.apk
