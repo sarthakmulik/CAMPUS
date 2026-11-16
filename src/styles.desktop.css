@@ -191,6 +191,15 @@
     height: calc(100vh - var(--desk-header));
   }
   .main-column { min-height: calc(100vh - var(--desk-header)); }
+
+  /* The Chats room sits under the global header at every desktop width —
+     .chats-page's base height:100vh (written when the desktop route had no
+     topbar) made it 60px too tall: the page scrolled, and the overlay
+     composer landed below the fold at common window heights. */
+  .chats-page {
+    height: calc(100vh - var(--desk-header));
+    height: calc(100dvh - var(--desk-header));
+  }
 }
 
 /* ---------------------------------------------------------------------------

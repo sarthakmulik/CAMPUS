@@ -1,6 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
+import { isNativeApp } from './platform/platform'
 import './styles.tokens.css'
 import './styles.css'
 import './styles.onboarding.css'
@@ -17,6 +18,13 @@ import './styles.search.css'
 // Native-inset bridge: --safe-inset-* = max(env(), native measurement) for
 // every rule below that reads safe-area spacing (Android env() can lie).
 import './styles.safe-insets.css'
+
+// Native app feel: inside the Capacitor WebView, long-press must not start
+// text selection or the copy callout — selecting paragraphs like a website
+// reads as a web page, not an app. The html.native-app class scopes the
+// user-select/callout kill (styles.css); inputs keep selection for typing.
+// Copying a message stays available through the bubble's ⋮ Copy action.
+if (isNativeApp) document.documentElement.classList.add('native-app')
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode><App /></React.StrictMode>,

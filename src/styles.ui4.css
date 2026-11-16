@@ -478,6 +478,10 @@ textarea:disabled {
 }
 .chat-scroll { padding-bottom: 78px }   /* clearance so the last bubble clears the overlay */
 @media (max-width: 650px) { .chat-scroll { padding-bottom: 84px } }
+/* with a chat-request banner the overlay stacks the banner (~42px) above the
+   input row — deepen the clearance so the last bubble still clears it */
+.chat-thread-pane.request-open .chat-scroll { padding-bottom: 136px }
+@media (max-width: 650px) { .chat-thread-pane.request-open .chat-scroll { padding-bottom: 142px } }
 @media (min-width: 1100px) { .chat-compose { left: 0; right: 0 } } /* its own 760px column centers via margin-inline:auto */
 @media (prefers-color-scheme: dark) {
   .chat-compose { box-shadow: 0 -1px 0 #ffffff12 inset, 0 -10px 30px #00000052 }

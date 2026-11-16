@@ -670,6 +670,12 @@ export default function Chats({
   const openSummary = active
   const openStatus: 'pending' | 'accepted' | 'declined' | 'unknown' = openSummary?.status ?? 'unknown'
   const openMine = openSummary?.iRequested ?? false
+  /* the request banner lives INSIDE the glass composer overlay (never a flex
+     sibling after .chat-scroll — the M5 overlay composer would paint over it
+     and the Accept/Decline buttons would be unreachable, the exact bug this
+     round fixes). The class lets CSS widen the timeline's bottom clearance. */
+  const requestBannerOpen =
+    (openStatus === 'pending' || openStatus === 'declined') && openSummary?.kind === 'dm'
   const myPendingUsed =
     openStatus === 'pending'
     && openMine
@@ -1349,7 +1355,7 @@ export default function Chats({
         </div>
       </div>
 
-      <div className={`chat-thread-pane ${mobileThread ? 'open' : ''}`}>
+      <div className={`chat-thread-pane ${mobileThread ? 'open' : ''} ${requestBannerOpen ? 'request-open' : ''}`}>
         {!openId ? (
           <div className="chat-thread-empty">
             <MessageCircle size={34}/>
@@ -1482,23 +1488,22 @@ export default function Chats({
               {messageReceiptSlot(lastMineMessage, identity)}
             </div>
 
-            {(openStatus === 'pending' || openStatus === 'declined') && openSummary?.kind === 'dm' && (
-              <div className={`chat-request-banner ${openStatus === 'declined' ? 'declined' : ''}`}>
-                {openStatus === 'declined' ? (
-                  <span>{openMine ? 'Your chat request was not accepted — sending is closed.' : 'You declined this chat request.'}</span>
-                ) : openMine ? (
-                  <span>Chat request sent — {peerName} needs to accept before the chat opens.</span>
-                ) : (
-                  <>
-                    <span>{peerName} wants to chat with you.</span>
-                    <button className="chat-request-accept" onClick={() => void respondRequest('accept')}>Accept</button>
-                    <button className="chat-request-decline" onClick={() => void respondRequest('decline')}>Decline</button>
-                  </>
-                )}
-              </div>
-            )}
-
             <div className="chat-compose">
+              {requestBannerOpen && (
+                <div className={`chat-request-banner ${openStatus === 'declined' ? 'declined' : ''}`}>
+                  {openStatus === 'declined' ? (
+                    <span>{openMine ? 'Your chat request was not accepted — sending is closed.' : 'You declined this chat request.'}</span>
+                  ) : openMine ? (
+                    <span>Chat request sent — {peerName} needs to accept before the chat opens.</span>
+                  ) : (
+                    <>
+                      <span>{peerName} wants to chat with you.</span>
+                      <button className="chat-request-accept" onClick={() => void respondRequest('accept')}>Accept</button>
+                      <button className="chat-request-decline" onClick={() => void respondRequest('decline')}>Decline</button>
+                    </>
+                  )}
+                </div>
+              )}
               {(editing || replyTo) && (
                 <div className="chat-compose-context">
                   {editing ? (

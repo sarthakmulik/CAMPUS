@@ -2833,23 +2833,26 @@
   background: linear-gradient(145deg, #2fb2a2, #3b7bd4);
 }
 
-/* ---- chat request state (Instagram-style, own look) ---- */
+/* ---- chat request state (Instagram-style, own look) ----
+   Lives INSIDE the .chat-compose glass overlay (first child) — the M5
+   composer is position:absolute pinned to the pane bottom, so a flex-sibling
+   banner painted UNDER it and Accept/Decline were unreachable. Here it
+   stacks above the input row inside the same glass surface. */
 
 .chat-request-banner {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  padding: 9px 14px;
-  border-top: 1px solid var(--brand-line);
-  background: var(--soft);
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--brand-line);
+  background: transparent;      /* the glass panel supplies the surface */
   color: var(--brand-ink);
   font-size: 12px;
   flex-shrink: 0;
 }
 .chat-request-banner.declined {
-  background: var(--soft);
-  border-top-color: var(--brand-line);
+  border-bottom-color: var(--brand-line);
   color: var(--muted);
 }
 .chat-request-banner span { flex: 1; min-width: 0; }
@@ -2860,16 +2863,19 @@
   padding: 7px 14px;
   font-size: 11.5px;
   font-weight: 700;
+  cursor: pointer;
 }
 .chat-request-accept {
   background: linear-gradient(100deg, #6654f5, #8b6cff);
   color: white;
   box-shadow: 0 3px 10px #6654f529;
 }
+.chat-request-accept:hover { filter: brightness(1.06); }
 .chat-request-decline {
   background: var(--soft);
   color: var(--muted);
 }
+.chat-request-decline:hover { color: var(--ink); }
 .chat-input-row input:disabled {
   background: var(--soft);
   color: var(--muted);
@@ -3605,18 +3611,28 @@
 .chat-thread-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
+  gap: 11px;
+  padding: 12px 18px 11px;
   border-bottom: 1px solid var(--line);
   background: #ffffffed; /* M5: pre-UI-7 value — UI-7's token sweep stamped var(--warn-bg) (pale amber) on every chat header */
 }
-.chat-thread-head b { font-size: 14px; color: var(--ink); }
+.chat-thread-head b { font-size: 14.5px; letter-spacing: -.2px; color: var(--ink); }
+/* name on one line, status ("direct message" / typing / online) under it —
+   an unstyled div let the inline <b> and .chat-sub run together as
+   "nameDIRECT MESSAGE" on wide threads */
+.chat-thread-head-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+.chat-thread-head-copy .chat-sub { text-transform: uppercase; letter-spacing: 0.8px; }
 .chat-sub {
   font-size:11px;
   letter-spacing: 0.8px;
   text-transform: uppercase;
   color: var(--muted);
-  margin-left: auto;
 }
 .chat-back { display: none; }
 
@@ -3631,6 +3647,12 @@
   scrollbar-width: thin;
   overscroll-behavior: contain;
 }
+/* bottom-anchor the timeline like every native chat app: with few messages
+   they hug the composer instead of hanging from the top of a tall empty
+   pane. margin-top:auto on the first child absorbs free space above the
+   cluster — and unlike justify-content:flex-end it never breaks scrolling
+   back to the top when the history overflows. */
+.chat-scroll > :first-child { margin-top: auto; }
 
 .chat-day-start {
   margin: 6px auto 8px;
