@@ -4003,4 +4003,93 @@ export async function pulseReportStatement(input: { statementId: string; reason:
   if (error) throw new Error(friendlyMessage(error))
 }
 
+/* -------------------------------------------------------------------------- */
+/* CAMPUS PULSE 2.0 — personalization + analytics (0072). Same rule as above:  */
+/* every interest/feedback/event row is server-only; the member touches their  */
+/* own profile exclusively through these RPCs.                                 */
+/* -------------------------------------------------------------------------- */
+
+export type PulseInterestRow = { topic: string; score: number; explicit: boolean; touchedAt: string }
+
+export type PulseProfile = {
+  personalization: boolean
+  interests: PulseInterestRow[]
+}
+
+export function pulseProfileGet(): Promise<PulseProfile> {
+  return pulseRpc('pulse_profile_get', undefined).then(r => {
+    const p = r as Partial<PulseProfile>
+    return { personalization: p.personalization !== false, interests: (p.interests ?? []) as PulseInterestRow[] }
+  })
+}
+
+export function pulseInterestSignal(topic: string, signal: 'select' | 'avoid' | 'neutral' | 'like' | 'dislike'): Promise<{ ok: boolean; ignored?: boolean; error?: string }> {
+  return pulseRpc('pulse_interest_signal', { p_topic: topic, p_signal: signal, p_target_kind: null, p_target_id: null })
+}
+
+export function pulsePrefsSet(personalization: boolean): Promise<{ ok: boolean; personalization: boolean }> {
+  return pulseRpc('pulse_prefs_set', { p_personalization: personalization })
+}
+
+export function pulseProfileReset(): Promise<{ ok: boolean }> {
+  return pulseRpc('pulse_profile_reset', undefined)
+}
+
+/** Fire-and-forget analytics (whitelisted keys, rate-limited server-side). */
+export function pulseEventLog(
+  key: string,
+  targetKind?: string | null,
+  targetId?: string | null,
+  meta?: Record<string, unknown>,
+): void {
+  if (!supabase) return
+  void supabase.rpc('pulse_event_log', {
+    p_key: key, p_target_kind: targetKind ?? null, p_target_id: targetId ?? null,
+    p_meta: meta ?? null,
+  }).then(() => undefined, () => undefined)   // never surfaces to the UI
+}
+
+/* ---- staff console (has_op('pulse.admin') enforced server-side) ---------- */
+
+export type PulseAdminAiSettings = { enabled: boolean; model: string; dailyBudget: number; maxRetries: number }
+
+export function pulseAdminAiGet(): Promise<PulseAdminAiSettings> {
+  return pulseRpc('pulse_admin_ai_get', undefined) as Promise<PulseAdminAiSettings>
+}
+
+export function pulseAdminAiSet(input: { enabled: boolean; model: string; dailyBudget: number; maxRetries: number }): Promise<{ ok: boolean }> {
+  return pulseRpc('pulse_admin_ai_set', {
+    p_enabled: input.enabled, p_model: input.model,
+    p_daily_budget: input.dailyBudget, p_max_retries: input.maxRetries,
+  })
+}
+
+export type PulseAdminEventsStats = {
+  events7: { key: string; n: number }[]
+  topicSignals7: { topic: string; positive: number; negative: number }[]
+  profilesLearned: number
+  personalizationOn: number
+}
+
+export function pulseAdminEventsStats(): Promise<PulseAdminEventsStats> {
+  return pulseRpc('pulse_admin_events_stats', undefined) as Promise<PulseAdminEventsStats>
+}
+
+export function pulseAdminMaintenance(): Promise<{ ok: boolean; eventsPruned: number }> {
+  return pulseRpc('pulse_admin_maintenance', undefined) as Promise<{ ok: boolean; eventsPruned: number }>
+}
+
+/** Invoke the AI generation edge function (admin-only; needs deployment). */
+export async function pulseGenerateQuiz(topic?: string): Promise<{ ok?: boolean; itemId?: string; title?: string; error?: string }> {
+  if (!supabase) throw new Error('CAMPUS is not connected.')
+  const { data, error } = await supabase.functions.invoke('pulse-generate', { body: topic ? { topic } : {} })
+  if (error) {
+    // functions.invoke throws FunctionHttpError-like objects with a context
+    const msg = (error as unknown as { context?: unknown })
+    const detail = typeof msg === 'object' ? '' : ''
+    throw new Error(detail || `AI generation is unavailable (${error.message}). Deploy the pulse-generate function and set OPENROUTER_API_KEY.`)
+  }
+  return (data ?? {}) as { ok?: boolean; itemId?: string; title?: string; error?: string }
+}
+
 

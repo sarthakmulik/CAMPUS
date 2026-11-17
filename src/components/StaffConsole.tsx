@@ -14,6 +14,9 @@ import {
   loadStaffRoster, loadStaffAudit, findStaffTargets, staffRpc,
   loadStaffReports, loadStaffReportCounts, fetchStaffPostContent, StaffPostContent,
   DirectoryStats, CollegeRequest, fetchDirectoryStats, listCollegeRequests, reviewCollegeRequest,
+  pulseAdminAiGet, pulseAdminAiSet, pulseAdminEventsStats, pulseAdminMaintenance,
+  pulseGenerateQuiz,
+  type PulseAdminAiSettings, type PulseAdminEventsStats as PulseEventsStats,
 } from '../lib/db'
 
 /**
@@ -1003,6 +1006,21 @@ const PULSE_CONFIG_KEYS = [
   'pulse.weight.engagement', 'pulse.weight.diversity', 'pulse.minSample',
   'pulse.trendMinLiftPts', 'pulse.freshnessDays',
   'pulse.engagementPriorStrength', 'pulse.engagementBaseline', 'pulse.statementDeck',
+  // 2.0 recommendation weights (0072) — presentation-order ranking, mirrors src/lib/pulse/config.ts
+  'pulse.recommend.interest', 'pulse.recommend.quality', 'pulse.recommend.freshness',
+  'pulse.recommend.diversity', 'pulse.recommend.satisfaction', 'pulse.recommend.campus',
+  'pulse.recommend.exploration',
+  // 2.0 AI knobs (numeric ones only — the model name rides pulse_admin_ai_set)
+  'pulse.ai.dailyBudget', 'pulse.ai.maxRetries',
+] as const
+
+/** topics offered to the AI generator (mirrors pulse_topics in 0072) */
+const PULSE_AI_TOPICS = [
+  ['campus_life', '🎓 Campus life'], ['exams', '📚 Exams & study'], ['food', '🍜 Food & mess'],
+  ['hostel', '🛏️ Hostel life'], ['commute', '🚌 Commute'], ['fests', '🎉 Fests & events'],
+  ['technology', '💻 Technology'], ['placements', '🧭 Placements & career'],
+  ['sports', '🏏 Sports & fitness'], ['entertainment', '🎬 Entertainment'],
+  ['entrepreneurship', '🚀 Startups & ideas'],
 ] as const
 
 function PulseAdminTab({ busy, setBusy, flash, bump }: {
@@ -1015,17 +1033,24 @@ function PulseAdminTab({ busy, setBusy, flash, bump }: {
   const [configDraft, setConfigDraft] = useState<Record<string, string>>({})
   const [jobs, setJobs] = useState<PulseAdminJob[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /* 2.0: AI generation + analytics */
+  const [ai, setAi] = useState<PulseAdminAiSettings | null>(null)
+  const [aiDraft, setAiDraft] = useState<{ model: string; dailyBudget: string; maxRetries: string }>({ model: '', dailyBudget: '12', maxRetries: '2' })
+  const [events, setEvents] = useState<PulseEventsStats | null>(null)
+  const [genTopic, setGenTopic] = useState<string>('')
 
   useEffect(() => {
     let cancelled = false
     void (async () => {
       setError(null)
       try {
-        const [o, i, c, j] = await Promise.all([
+        const [o, i, c, j, a, e] = await Promise.all([
           staffRpc('pulse_admin_overview'),
           staffRpc('pulse_admin_list', { p_status: statusFilter }),
           staffRpc('pulse_admin_config_get'),
           staffRpc('pulse_admin_jobs'),
+          pulseAdminAiGet().catch(() => null),   // pre-0072 DB: show the card, honestly empty
+          pulseAdminEventsStats().catch(() => null),
         ])
         if (cancelled) return
         setOverview(o as Record<string, unknown>)
@@ -1040,6 +1065,11 @@ function PulseAdminTab({ busy, setBusy, flash, bump }: {
         }
         setConfigDraft(drafts)
         setJobs(j as PulseAdminJob[])
+        if (a) {
+          setAi(a)
+          setAiDraft({ model: a.model, dailyBudget: String(a.dailyBudget), maxRetries: String(a.maxRetries) })
+        }
+        setEvents(e)
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Pulse admin data failed to load.')
       }
@@ -1078,6 +1108,56 @@ function PulseAdminTab({ busy, setBusy, flash, bump }: {
       bump()
     } catch (err) {
       flash(err instanceof Error ? err.message : 'Configuration save failed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /* ---- 2.0: AI settings, generation, maintenance ---- */
+  const saveAi = async () => {
+    if (busy || !ai) return
+    const model = aiDraft.model.trim()
+    const dailyBudget = Number(aiDraft.dailyBudget)
+    const maxRetries = Number(aiDraft.maxRetries)
+    if (model.length < 3) { flash('Enter an OpenRouter model name, e.g. "openai/gpt-4o-mini".'); return }
+    if (!Number.isInteger(dailyBudget) || dailyBudget < 0 || dailyBudget > 500) { flash('Daily budget must be a whole number between 0 and 500.'); return }
+    if (!Number.isInteger(maxRetries) || maxRetries < 0 || maxRetries > 5) { flash('Max retries must be a whole number between 0 and 5.'); return }
+    setBusy(true)
+    try {
+      await pulseAdminAiSet({ enabled: ai.enabled, model, dailyBudget, maxRetries })
+      setAi({ ...ai, model, dailyBudget, maxRetries })
+      flash(`AI settings saved — the model is "${model}". The key itself stays in server secrets.`)
+    } catch (err) {
+      flash(err instanceof Error ? err.message : 'AI settings save failed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const generateAi = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      const res = await pulseGenerateQuiz(genTopic || undefined)
+      if (res.error) flash(`Generation refused: ${res.error}`)
+      else if (res.ok) flash(`Draft quiz "${res.title}" inserted — approve it in the content library above.`)
+      else flash('Generation returned nothing usable — check the job runs below.')
+      bump()
+    } catch (err) {
+      flash(err instanceof Error ? err.message : 'AI generation is unavailable.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const runMaintenance = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      const res = await pulseAdminMaintenance()
+      flash(`Maintenance done — ${res.eventsPruned} old event row(s) pruned.`)
+    } catch (err) {
+      flash(err instanceof Error ? err.message : 'Maintenance failed.')
     } finally {
       setBusy(false)
     }
@@ -1161,6 +1241,110 @@ function PulseAdminTab({ busy, setBusy, flash, bump }: {
               ))}
             </div>
           )}
+      </div>
+
+      <div className="staff-card wide">
+        <small>AI GENERATION · OPENROUTER</small>
+        {ai === null ? (
+          <p className="staff-muted">
+            AI settings are unavailable — migration 0072 may not be applied yet.
+            Everything else on this tab keeps working without it.
+          </p>
+        ) : (
+          <>
+            <p className="staff-muted">
+              {ai.enabled ? 'Enabled' : 'Disabled'} · model <b>{ai.model || '(none set)'}</b> · budget {ai.dailyBudget}/day · {ai.maxRetries} retr{ai.maxRetries === 1 ? 'y' : 'ies'}.
+              Generated quizzes always land as <b>draft</b> — nothing publishes without your approval above.
+            </p>
+            <div className="pulse-ai-row">
+              <button className="staff-ghost" disabled={busy} onClick={() => void (async () => {
+                try {
+                  await pulseAdminAiSet({ enabled: !ai.enabled, model: ai.model || 'openai/gpt-4o-mini', dailyBudget: ai.dailyBudget, maxRetries: ai.maxRetries })
+                  setAi({ ...ai, enabled: !ai.enabled })
+                  flash(`AI generation ${!ai.enabled ? 'enabled' : 'disabled'}.`)
+                } catch (err) { flash(err instanceof Error ? err.message : 'Toggle failed.') }
+              })()}>
+                {ai.enabled ? 'Disable generation' : 'Enable generation'}
+              </button>
+              <input
+                aria-label="OpenRouter model"
+                placeholder='e.g. openai/gpt-4o-mini'
+                value={aiDraft.model}
+                onChange={e => setAiDraft(d => ({ ...d, model: e.target.value }))}
+              />
+              <input
+                aria-label="Daily generation budget" inputMode="numeric" className="pulse-ai-num"
+                value={aiDraft.dailyBudget}
+                onChange={e => setAiDraft(d => ({ ...d, dailyBudget: e.target.value }))}
+              />
+              <input
+                aria-label="Max retries" inputMode="numeric" className="pulse-ai-num"
+                value={aiDraft.maxRetries}
+                onChange={e => setAiDraft(d => ({ ...d, maxRetries: e.target.value }))}
+              />
+              <button className="staff-ghost" disabled={busy} onClick={() => void saveAi()}>Save</button>
+            </div>
+            <div className="pulse-ai-row">
+              <select
+                aria-label="Topic for the generated quiz"
+                value={genTopic}
+                onChange={e => setGenTopic(e.target.value)}
+              >
+                <option value="">Auto-pick topic</option>
+                {PULSE_AI_TOPICS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+              </select>
+              <button className="staff-ghost" disabled={busy} onClick={() => void generateAi()}>Generate AI quiz</button>
+            </div>
+            <p className="staff-muted">
+              Requires the pulse-generate edge function deployed and the OPENROUTER_API_KEY secret set —
+              the key never touches this page or the browser.
+            </p>
+          </>
+        )}
+      </div>
+
+      <div className="staff-card wide">
+        <small>PERSONALIZATION & ANALYTICS · 7 DAYS</small>
+        {events === null ? (
+          <p className="staff-muted">Analytics are unavailable — migration 0072 may not be applied yet.</p>
+        ) : (
+          <>
+            <div className="staff-grid">
+              <div className="staff-card"><small>PROFILES LEARNED</small><b>{events.profilesLearned}</b><p>Interest profiles touched this week.</p></div>
+              <div className="staff-card"><small>PERSONALIZATION ON</small><b>{events.personalizationOn}</b><p>Students who opted in (default on).</p></div>
+            </div>
+            <p className="staff-muted">Events (7 days):</p>
+            {events.events7.length === 0
+              ? <p className="staff-muted">No analytics events yet — they log as students use Pulse 2.0.</p>
+              : (
+                <ul className="staff-mini-audit">
+                  {events.events7.map(ev => (
+                    <li key={ev.key}>
+                      <span className="staff-audit-badge approved">{ev.n}</span>
+                      <div className="staff-audit-copy"><b>{ev.key}</b></div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            <p className="staff-muted">Topic signals (7 days):</p>
+            {events.topicSignals7.length === 0
+              ? <p className="staff-muted">No topic signals yet.</p>
+              : (
+                <ul className="staff-mini-audit">
+                  {events.topicSignals7.map(t => (
+                    <li key={t.topic}>
+                      <span className="staff-audit-badge approved">{t.positive}↑ {t.negative}↓</span>
+                      <div className="staff-audit-copy"><b>{t.topic}</b></div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            <div className="pulse-ai-row">
+              <button className="staff-ghost" disabled={busy} onClick={() => void runMaintenance()}>Run retention maintenance</button>
+              <span className="staff-muted">Prunes pulse_events past the 90-day window.</span>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="staff-card wide">

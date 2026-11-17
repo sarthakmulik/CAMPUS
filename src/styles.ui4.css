@@ -1724,6 +1724,22 @@ textarea:disabled {
   background: var(--surface); color: var(--ink);
   font-size: 13px;
 }
+/* pulse 2.0 — AI generation card controls */
+.pulse-ai-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center }
+.pulse-ai-row input {
+  flex: 1 1 220px; min-width: 0;
+  padding: 9px 9px;
+  border: 1px solid var(--line-strong); border-radius: 8px;
+  background: var(--surface); color: var(--ink);
+  font-size: 13px;
+}
+.pulse-ai-row input.pulse-ai-num { flex: 0 1 84px }
+.pulse-ai-row select {
+  padding: 9px 8px; min-height: 44px;   /* 44: minimum comfortable touch target */
+  border: 1px solid var(--line-strong); border-radius: 8px;
+  background: var(--surface); color: var(--ink);
+  font-size: 13px; max-width: 100%;
+}
 .staff-filter-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 }
 .staff-chip {
   border: 1px solid var(--line-strong); background: var(--surface);
@@ -1781,6 +1797,319 @@ textarea:disabled {
   .pulse-kicker { font-weight: 750; letter-spacing: 1.2px; font-size: 11px }
   .pulse-tag { padding: 4px 9px }
   .pulse-question { font-size: 15.5px }
+}
+
+/* ============================================================================
+   CAMPUS PULSE 2.0 — hero interactions, swipe deck, quiz covers, result
+   themes, insight stories, settings sheet. All animations are transform/
+   opacity only and sit behind the global reduced-motion kill-switch.
+   ========================================================================== */
+
+/* ---- page head + settings gear ---- */
+.pulse-head { display: flex; align-items: center; justify-content: space-between; gap: 8px }
+.pulse-gear {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; flex: none;   /* 44: minimum comfortable touch target */
+  border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface); color: var(--ink-secondary);
+  cursor: pointer;
+  transition: transform .12s ease, border-color .14s ease, color .14s ease;
+}
+.pulse-gear:hover { color: var(--brand-ink); border-color: var(--brand-line) }
+.pulse-gear:active { transform: scale(.94) }
+
+/* ---- daily hero: option entrance + confirmation state ---- */
+@media (prefers-reduced-motion: no-preference) {
+  .pulse-option { animation: pulse-opt-in .34s var(--ease-out, ease-out) both; animation-delay: calc(var(--i, 0) * 55ms) }
+  @keyframes pulse-opt-in {
+    from { opacity: 0; transform: translateY(7px) }
+    to   { opacity: 1; transform: none }
+  }
+  .pulse-daily.confirmed { animation: pulse-confirm .5s var(--ease-out, ease-out) }
+  @keyframes pulse-confirm {
+    0% { box-shadow: 0 0 0 0 rgba(102, 84, 245, .28) }
+    100% { box-shadow: 0 0 0 14px rgba(102, 84, 245, 0) }
+  }
+  .pulse-daily.confirmed .pulse-option { animation: none }
+}
+.pulse-daily-meta { margin: 0 }
+
+/* ---- voted state: ring + threshold track ---- */
+.pulse-voted-chip {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: 13px;
+  background: var(--brand-soft); border: 1px solid var(--brand-line);
+  font-size: var(--fs-small); color: var(--ink);
+}
+.pulse-voted-choice { display: inline-flex; align-items: center; gap: 7px }
+.pulse-voted-emoji { font-size: 22px }
+.pulse-ring { flex: none }
+.pulse-ring-fill { transition: stroke-dashoffset .6s var(--ease-out, ease-out) }
+.pulse-threshold-track {
+  height: 7px; border-radius: 999px; background: var(--brand-soft);
+  overflow: hidden; display: block;
+}
+.pulse-threshold-track span {
+  height: 100%; display: block; border-radius: 999px;
+  background: linear-gradient(100deg, var(--brand), var(--pink));
+  transition: width .5s var(--ease-out, ease-out);
+}
+.pulse-threshold-meta { margin: 0 }
+.pulse-results.locked { gap: 9px }
+
+/* ---- swipe deck ---- */
+.pulse-deck2 { position: relative }
+.pulse-deck-under {
+  position: absolute; left: 0; right: 0; top: 14px;
+  z-index: 0; pointer-events: none;
+  transform: scale(.96); opacity: .5;
+  max-height: 150px; overflow: hidden;
+}
+.pulse-deck-under .pulse-statement-text {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.pulse-deck-top {
+  position: relative; z-index: 1;
+  touch-action: pan-y;   /* horizontal drag is ours, vertical scroll stays native */
+  cursor: grab;
+  will-change: transform;
+}
+.pulse-deck-top.dragging {
+  cursor: grabbing;
+  box-shadow: 0 14px 34px rgba(23, 40, 76, .16);
+}
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes pulse-fly-right { to { transform: translateX(120%) rotate(10deg); opacity: 0 } }
+  @keyframes pulse-fly-left  { to { transform: translateX(-120%) rotate(-10deg); opacity: 0 } }
+  @keyframes pulse-fly-tap   { 45% { transform: scale(.95) } to { transform: scale(.86) translateY(16px); opacity: 0 } }
+  .pulse-deck-top.fly-right { animation: pulse-fly-right .24s ease-in forwards }
+  .pulse-deck-top.fly-left  { animation: pulse-fly-left  .24s ease-in forwards }
+  .pulse-deck-top.fly-tap   { animation: pulse-fly-tap   .24s ease-in forwards }
+}
+.pulse-deck-count {
+  align-self: flex-start;
+  font-size: var(--fs-micro); font-weight: 700;
+  color: var(--ink-faint); letter-spacing: .04em;
+}
+.pulse-statement-hint { font-size: var(--fs-micro); color: var(--ink-faint); margin: 0 }
+.pulse-reaction.big { min-height: 48px; padding: 8px 16px; font-size: 15px }
+.pulse-deck-done { align-items: center }
+
+/* recap of taken cards (reaction switching stays available) */
+.pulse-recap { display: flex; flex-direction: column; gap: 8px }
+.pulse-recap-title {
+  font-size: var(--fs-micro); font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--ink-faint); margin: 4px 0 0;
+}
+.pulse-statement.compact { padding: 10px 12px 6px }
+.pulse-statement.compact .pulse-statement-text { font-size: var(--fs-small) }
+
+/* ---- quiz covers / tiles ---- */
+.pulse-quiz-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+.pulse-quiz-tile2 {
+  display: flex; flex-direction: column; gap: 7px;
+  padding: 8px; text-align: left;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 15px;
+  box-shadow: var(--elev-1);
+  cursor: pointer;
+  transition: transform .12s ease, border-color .14s ease, box-shadow .14s ease;
+}
+.pulse-quiz-tile2:hover { border-color: var(--pt-ring, var(--brand)); box-shadow: var(--elev-2) }
+.pulse-quiz-tile2:active { transform: scale(.98) }
+.pulse-quiz-cover {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  height: 86px; border-radius: 10px; overflow: hidden;
+}
+.pulse-quiz-cover-emoji { font-size: 34px; filter: drop-shadow(0 3px 6px rgba(0, 0, 0, .18)) }
+.pulse-quiz-picked {
+  position: absolute; top: 6px; left: 6px;
+  font-size: 10px; font-weight: 700; letter-spacing: .02em;
+  color: var(--brand-ink); background: rgba(255, 255, 255, .92);
+  padding: 3px 7px; border-radius: 999px;
+  box-shadow: 0 1px 4px rgba(23, 40, 76, .18);
+}
+.pulse-quiz-tile2 .pulse-quiz-title { font-size: var(--fs-small); font-weight: 700; padding: 0 3px }
+.pulse-quiz-tile2 .pulse-quiz-meta { font-size: 11px; padding: 0 3px 2px; line-height: 1.45 }
+
+/* quiz step transition */
+@media (prefers-reduced-motion: no-preference) {
+  .pulse-quiz-stepwrap { animation: pulse-step-in .26s var(--ease-out, ease-out) both }
+  @keyframes pulse-step-in {
+    from { opacity: 0; transform: translateX(14px) }
+    to   { opacity: 1; transform: none }
+  }
+  .pulse-quiz-stepwrap .pulse-option { animation: none }
+}
+
+/* ---- result reveal ---- */
+.pulse-quiz-result { padding-top: 0; overflow: hidden; align-items: stretch }
+.pulse-result-hero {
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  margin: 0 -16px 4px;
+  padding: 24px 16px 20px;
+  color: #fff;
+}
+.pulse-result-hero .pulse-result-emoji { font-size: 48px; line-height: 1 }
+.pulse-result-hero .pulse-result-label {
+  font-size: 19px; font-weight: 800; letter-spacing: -.2px;
+  text-align: center; margin: 0;
+  text-shadow: 0 1px 8px rgba(23, 40, 76, .25);
+}
+@media (max-width: 650px) { .pulse-result-hero { margin: 0 -12px 4px; padding: 20px 14px 17px } }
+@media (prefers-reduced-motion: no-preference) {
+  .pulse-result-hero .pulse-result-emoji { animation: pulse-result-pop .5s var(--ease-out, ease-out) both .12s }
+  @keyframes pulse-result-pop {
+    from { opacity: 0; transform: scale(.5) }
+    60%  { transform: scale(1.12) }
+    to   { opacity: 1; transform: none }
+  }
+}
+.pulse-result-blurb, .pulse-result-owner { padding: 0 4px }
+.pulse-quiz-result .pulse-actions { flex-wrap: wrap }
+.pulse-quiz-result .pulse-skip { min-height: 44px }
+.pulse-feedback {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 4px 0 0;
+}
+.pulse-feedback-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px;   /* 44: minimum comfortable touch target */
+  border: 1.5px solid var(--line-strong); border-radius: 999px;
+  background: var(--surface); font-size: 17px; cursor: pointer;
+  transition: transform .12s ease, border-color .14s ease, background-color .14s ease;
+}
+.pulse-feedback-btn:hover { border-color: var(--brand); background: var(--brand-soft) }
+.pulse-feedback-btn:active { transform: scale(.92) }
+.pulse-feedback-noted { margin: 2px 0 0 !important }
+
+/* ---- insight stories ---- */
+.pulse-insight-main { flex: 1; min-width: 0 }
+.pulse-insight-sample {
+  height: 5px; border-radius: 999px; background: var(--brand-soft);
+  overflow: hidden; margin-top: 7px; display: block;
+}
+.pulse-insight-sample span {
+  height: 100%; display: block; border-radius: 999px;
+  background: linear-gradient(100deg, var(--brand), var(--pink));
+}
+.pulse-insight-samplenote { margin: 3px 0 0 !important }
+@media (prefers-reduced-motion: no-preference) {
+  .pulse-insight { animation: pulse-insight-in .34s var(--ease-out, ease-out) both; animation-delay: calc(var(--i, 0) * 70ms) }
+  @keyframes pulse-insight-in {
+    from { opacity: 0; transform: translateY(9px) }
+    to   { opacity: 1; transform: none }
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .pulse-chip.earned { animation: pulse-chip-pop .45s var(--ease-out, ease-out) }
+  @keyframes pulse-chip-pop {
+    0% { transform: scale(.9) }
+    60% { transform: scale(1.06) }
+    100% { transform: none }
+  }
+}
+
+/* ---- settings sheet ---- */
+.pulse-sheet-backdrop {
+  position: fixed; inset: 0; z-index: 90;
+  background: rgba(23, 40, 76, .38);
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.pulse-sheet {
+  width: 100%; max-width: 560px; max-height: min(82dvh, 640px);
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line); border-bottom: none;
+  border-radius: 20px 20px 0 0;
+  box-shadow: 0 -12px 40px rgba(23, 40, 76, .22);
+  padding: 16px 16px calc(18px + var(--safe-inset-bottom, 0px));
+  display: flex; flex-direction: column; gap: 12px;
+}
+@media (min-width: 651px) {
+  .pulse-sheet-backdrop { align-items: center }
+  .pulse-sheet { border-radius: 20px; border-bottom: 1px solid var(--line) }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .pulse-sheet { animation: pulse-sheet-up .28s var(--ease-out, ease-out) }
+  @keyframes pulse-sheet-up {
+    from { transform: translateY(40px); opacity: .6 }
+    to   { transform: none; opacity: 1 }
+  }
+}
+.pulse-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 8px }
+.pulse-sheet-head h2 {
+  display: flex; align-items: center; gap: 6px;
+  font-size: var(--fs-title); font-weight: 750; color: var(--ink-strong); margin: 0;
+}
+.pulse-sheet-head h2 svg { color: var(--brand) }
+.pulse-sheet-close {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; margin-right: -8px;   /* 44: minimum comfortable touch target */
+  border: none; background: none; border-radius: 999px;
+  color: var(--ink-secondary); cursor: pointer;
+}
+.pulse-sheet-close:hover { color: var(--ink); background: var(--surface-raised) }
+.pulse-sheet-lede { font-size: var(--fs-small); color: var(--ink-secondary); line-height: 1.5; margin: 0 }
+.pulse-sheet-toggle {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px; border: 1px solid var(--line); border-radius: 13px;
+  cursor: pointer;
+}
+.pulse-sheet-toggle b { display: block; font-size: var(--fs-small); color: var(--ink-strong) }
+.pulse-sheet-toggle small { display: block; font-size: var(--fs-micro); color: var(--ink-faint); line-height: 1.4; margin-top: 2px }
+.pulse-sheet-toggle input {
+  appearance: none; -webkit-appearance: none;
+  width: 48px; height: 29px; flex: none;
+  border-radius: 999px; background: var(--line-strong);
+  position: relative; cursor: pointer;
+  transition: background .18s ease;
+}
+.pulse-sheet-toggle input:checked { background: var(--brand) }
+.pulse-sheet-toggle input::before {
+  content: ''; position: absolute; top: 3px; left: 3px;
+  width: 23px; height: 23px; border-radius: 999px; background: #fff;
+  box-shadow: 0 1px 3px rgba(23, 40, 76, .3);
+  transition: transform .18s var(--ease-out, ease-out);
+}
+.pulse-sheet-toggle input:checked::before { transform: translateX(19px) }
+.pulse-sheet-toggle input:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px }
+.pulse-topic-grid {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px;
+}
+.pulse-topic-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  min-height: 44px; padding: 7px 11px;   /* 44: minimum comfortable touch target */
+  border: 1.5px solid var(--line-strong); border-radius: 12px;
+  background: var(--surface); color: var(--ink);
+  font-size: var(--fs-small); font-weight: 600;
+  cursor: pointer; text-align: left;
+  transition: transform .12s ease, border-color .14s ease, background-color .14s ease;
+}
+.pulse-topic-chip:hover:not(:disabled) { border-color: var(--brand) }
+.pulse-topic-chip:active:not(:disabled) { transform: scale(.97) }
+.pulse-topic-chip:disabled { opacity: .5; cursor: default }
+.pulse-topic-chip.select { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-ink) }
+.pulse-topic-chip.avoid { border-color: var(--pink); background: var(--pink-soft, var(--surface-raised)); color: var(--pink-ink) }
+.pulse-topic-state { margin-left: auto; font-weight: 800 }
+.pulse-sheet-foot { display: flex; flex-direction: column; gap: 4px; padding-top: 2px }
+.pulse-danger-link {
+  align-self: flex-start;
+  background: none; border: none; padding: 8px 0;
+  min-height: 44px;
+  color: var(--pink-ink); font-size: var(--fs-small); font-weight: 700;
+  cursor: pointer; text-decoration: underline;
+}
+.pulse-danger-link:hover { color: var(--ink-strong) }
+.pulse-danger-link:disabled { opacity: .55; cursor: default }
+
+/* small phones: chips stack a bit tighter, single topic column at 320 */
+@media (max-width: 360px) {
+  .pulse-topic-grid { grid-template-columns: 1fr }
+  .pulse-quiz-grid { grid-template-columns: 1fr 1fr }
+  .pulse-reaction.big { padding: 7px 10px; font-size: 14px; min-height: 46px }
 }
 
 /* ==========================================================================

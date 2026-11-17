@@ -13,7 +13,7 @@
  * exposure-adjusted. Stats here never invent sample data.
  */
 
-import { DEFAULT_WEIGHTS, PERSONALIZATION_WEIGHTS, THRESHOLDS } from './config'
+import { DEFAULT_WEIGHTS, PERSONALIZATION_WEIGHTS, THRESHOLDS, RECOMMEND_WEIGHTS, INTEREST_RULES, seasonTopics, type TopicKey } from './config'
 
 // ---------------------------------------------------------------------------
 // Statistics
@@ -408,4 +408,113 @@ export function formatInsight(data: InsightData): FormattedInsight | null {
 
 function round1(n: number): number {
   return Math.round(n * 10) / 10
+}
+
+// ===========================================================================
+// PULSE 2.0 — PERSONALIZATION + RECOMMENDATION (mirrors migration 0072)
+// ===========================================================================
+
+/**
+ * The member's interest profile as served by pulse_profile_get. Scores are
+ * bounded 0..1 per topic; `explicit` rows came from the user's own choices.
+ * Nothing sensitive is inferred anywhere — the only sources are voluntary
+ * quiz/question participation and explicit topic settings (see 0072).
+ */
+export type InterestProfile = {
+  personalization: boolean
+  interests: Record<string, number>
+  explicit: Record<string, boolean>
+}
+
+export const NEUTRAL_PROFILE: InterestProfile = { personalization: true, interests: {}, explicit: {} }
+
+/** Topic interest for ranking — neutral baseline when unlearned or opted out. */
+export function effectiveInterest(profile: InterestProfile | null, topic: string): number {
+  if (!profile?.personalization) return INTEREST_RULES.neutralBaseline
+  const v = profile.interests[topic]
+  return typeof v === 'number' && v >= 0 && v <= 1 ? v : INTEREST_RULES.neutralBaseline
+}
+
+export type RecQuiz = {
+  id: string
+  title: string
+  category: string
+  questionCount: number
+  /** the user's attempts on THIS quiz (server rows; completion signal) */
+  attemptCount: number
+  lastAttemptDate: string | null   // ISO date of the newest attempt
+}
+
+export type RecRanked = RecQuiz & { score: number; pickedForYou: boolean }
+
+export type RankQuizzesInput = {
+  scopeKey: string
+  date: string                      // ISO date
+  quizzes: RecQuiz[]
+  profile: InterestProfile | null
+  /** category of the most recently completed quiz (diversity axis) */
+  lastCompletedCategory: string | null
+}
+
+/**
+ * Recommendation ranking (presentation order ONLY — never authoritative):
+ *   0.30 topic-interest match  (learned profile, neutral 0.5 when opted out)
+ * + 0.20 quality               (all ranked content is approved; constant)
+ * + 0.15 freshness             (never attempted → 1, decays over 14 days)
+ * + 0.15 diversity             (differs from the last completed topic)
+ * + 0.10 satisfaction          (completed before; repeats decay for fatigue)
+ * + 0.10 campus relevance      (seasonal topics score 1.0, others 0.5)
+ * + exploration                (seeded daily jitter → controlled discovery)
+ *
+ * Every term is bounded, and the jitter keeps the order stable within a day.
+ */
+export function rankQuizzes(input: RankQuizzesInput): RecRanked[] {
+  const w = RECOMMEND_WEIGHTS
+  const season = seasonTopics(new Date(input.date + 'T12:00:00'))
+  return input.quizzes
+    .map(q => {
+      const interest = effectiveInterest(input.profile, q.category)
+      const quality = 1.0
+      const gap = q.lastAttemptDate ? daysBetween(q.lastAttemptDate, input.date) : null
+      const freshness = gap === null ? 1.0 : Math.max(0.1, 1 - gap / THRESHOLDS.freshnessDays)
+      const diversity = input.lastCompletedCategory && input.lastCompletedCategory === q.category ? 0.25 : 1.0
+      const satisfaction = q.attemptCount === 0
+        ? 0.5
+        : Math.max(0.15, 0.85 - 0.12 * (q.attemptCount - 1))
+      const campus = season.includes(q.category as TopicKey) ? 1.0 : 0.5
+      const score =
+        interest * w.interest +
+        quality * w.quality +
+        freshness * w.freshness +
+        diversity * w.diversity +
+        satisfaction * w.satisfaction +
+        campus * w.campus +
+        seededJitter(input.scopeKey, input.date, q.id) * 100 * w.exploration
+      const pickedForYou = Boolean(input.profile?.personalization) &&
+        (input.profile?.explicit[q.category] === true || interest >= 0.65)
+      return { ...q, score, pickedForYou }
+    })
+    .sort((a, b) => b.score - a.score)
+}
+
+/** Estimated completion time for a quiz card (honest: ~18s per question). */
+export function quizDurationLabel(questionCount: number): string {
+  const total = Math.max(1, Math.round((questionCount * 18) / 10) * 10)
+  return total >= 60 ? `${Math.round(total / 60)} min` : `${total}s`
+}
+
+/**
+ * Client-side mirror of the 0072 interest update rules — used ONLY for
+ * optimistic UI after the RPC succeeds. The server stays authoritative.
+ * @returns the new bounded score for the topic
+ */
+export function nextInterestScore(current: number | null, signal: 'select' | 'avoid' | 'like' | 'dislike' | 'dismiss'): number {
+  const cur = typeof current === 'number' && current >= 0 && current <= 1 ? current : INTEREST_RULES.neutralBaseline
+  switch (signal) {
+    case 'select':  return Math.max(cur, INTEREST_RULES.selectFloor)
+    case 'avoid':   return Math.min(cur, INTEREST_RULES.avoidCeiling)
+    case 'like':    return Math.min(1, cur + INTEREST_RULES.likeStep * (1 - cur))
+    case 'dislike': return Math.max(0, cur - INTEREST_RULES.dislikeStep * cur)
+    case 'dismiss': return Math.max(0, cur - INTEREST_RULES.dismissStep * cur)
+  }
 }
