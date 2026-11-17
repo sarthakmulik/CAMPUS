@@ -102,15 +102,17 @@ grant execute on function public.list_group_posts(integer, integer) to authentic
 -- keep the 0061 narrowing and grant to authenticated only.
 
 -- Sanity guard: the function must now be definer and callable by members.
+-- (pg_get_functiondef is version-proof: pg_proc.prosec was removed in PG 14+,
+--  which is what broke this check on the live project.)
 do $$
 declare
-  v_prosec text;
+  v_def text;
 begin
-  select prosec into v_prosec from pg_proc
-   where proname = 'list_group_posts' and pronamespace = 'public'::regnamespace;
-  if v_prosec is null then
+  select pg_get_functiondef('public.list_group_posts(integer, integer)'::regprocedure)
+    into v_def;
+  if v_def is null then
     raise exception '0071 check failed: list_group_posts is missing';
-  elsif v_prosec <> 'd' then
-    raise exception '0071 check failed: list_group_posts is not SECURITY DEFINER (prosec=%)', v_prosec;
+  elsif v_def not ilike '%security definer%' then
+    raise exception '0071 check failed: list_group_posts is not SECURITY DEFINER';
   end if;
 end $$;
