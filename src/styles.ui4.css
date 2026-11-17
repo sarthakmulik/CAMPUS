@@ -1624,7 +1624,7 @@ textarea:disabled {
 .pulse-deck { display: flex; flex-direction: column; gap: 10px }
 .pulse-statement { padding: 14px 14px 10px }
 .pulse-statement-text { font-size: var(--fs-body); color: var(--ink); line-height: 1.45; margin: 0 }
-.pulse-reactions { display: flex; gap: 8px; align-items: center }
+.pulse-reactions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap }
 .pulse-reaction {
   display: inline-flex; align-items: center; gap: 5px;
   min-height: 44px; padding: 6px 12px;   /* 44: minimum comfortable touch target */
