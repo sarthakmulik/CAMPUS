@@ -539,6 +539,7 @@ declare
   v_min numeric;
   v_cap int;
   v_count int := 0;
+  r record;
 begin
   select * into v_item from public.pulse_items i
    where i.id = p_item and i.kind = 'quiz' and i.status = 'approved';
@@ -623,6 +624,7 @@ declare
   v_min numeric;
   v_cap int;
   v_count int := 0;
+  r record;
 begin
   if not public.has_op('pulse.admin') then
     raise exception 'Only campus admins can push Pulse quizzes.';
@@ -708,6 +710,7 @@ declare
   v_cap int;
   v_quiz record;
   v_count int := 0;
+  r record;
 begin
   -- the edge function's service client (cron) or a pulse admin may run this
   if auth.uid() is not null then
