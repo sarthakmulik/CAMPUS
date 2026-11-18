@@ -1,0 +1,7 @@
+# pulse-generate accepts two gated call paths:
+#   * admin mode  — a staff JWT (verified against the DB via has_op inside the code)
+#   * cron mode   — the x-campus-cron secret header (checked inside the code)
+# Neither carries a Supabase JWT in the cron case, so the platform-level
+# verify_jwt gate must stay off here. The function's own gates are the
+# security boundary — never expose it without those checks.
+verify_jwt = false
