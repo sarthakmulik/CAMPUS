@@ -1,15 +1,29 @@
 // CAMPUS edge function: pulse-generate
 //
-// Campus Pulse 2.0 — AI content generation through OpenRouter.
-// Generates candidate personality/topic quizzes and inserts them into the
-// EXISTING pulse_items library as status='draft', so nothing reaches
-// students until a campus admin approves it through the normal flow
-// (pulse_admin_set_status). Scoring stays server-authoritative in
-// pulse_quiz_submit; the AI never computes anyone's result.
+// Campus Pulse 2.1 — AI content generation through OpenRouter, with two
+// modes sharing one validation pipeline:
+//
+//   ADMIN MODE (Authorization: Bearer <staff jwt>)
+//     Generates a candidate quiz and inserts it into the EXISTING
+//     pulse_items library. When pulse.ai.autoPublish is off the insert is
+//     status='draft' (manual approval flow unchanged); when on, it is
+//     status='approved' with origin='ai' — the server-side approval
+//     trigger then notifies the matching interest cohort automatically.
+//
+//   CRON MODE (header x-campus-cron == CRON_SECRET supabase secret)
+//     Runs unattended from the scheduled invocation. The topic is chosen
+//     by REAL DEMAND via pulse_cohort_demand() (largest interest cohort
+//     whose approved-quiz coverage is >= 2 days old), and the same daily
+//     budget as admin mode applies. Once per calendar day it also runs
+//     pulse_nudge_idle() so long-idle students get one gentle, capped
+//     reminder. Idempotency comes from pulse_job_runs idem keys, so an
+//     over-frequent schedule can never double-publish or double-nudge.
 //
 // Security model:
-//   * Caller must hold has_op('pulse.admin') (verified against the DB with
-//     the caller's own JWT — never trusted from the request body).
+//   * Admin mode: caller must hold has_op('pulse.admin') (verified against
+//     the DB with the caller's own JWT — never trusted from the body).
+//   * Cron mode: only the shared CRON_SECRET header opens the gate; it
+//     never grants anything else and can be rotated any time.
 //   * The OpenRouter key lives ONLY in `OPENROUTER_API_KEY` (supabase
 //     secrets). It is never returned, logged, or sent to the browser.
 //   * Generation is budgeted: at most pulse.ai.dailyBudget successful runs
@@ -19,11 +33,14 @@
 //     duplicates, topic taxonomy, safety scan, scoring compatibility)
 //     before insertion. Failed candidates are logged and never published.
 //   * Only pseudonymous topic-level context leaves the database — never
-//     user identities, private messages, or raw activity logs.
+//     user identities, private messages, or raw activity logs. The cron
+//     path reads aggregate cohort sizes only.
 //
 // Deployment (Supabase CLI):
 //   supabase functions deploy pulse-generate
 //   supabase secrets set OPENROUTER_API_KEY=sk-or-...
+//   supabase secrets set CRON_SECRET=<long random string>
+//   (Dashboard → Edge Functions → Schedules: invoke pulse-generate, e.g. every 6h)
 //
 // Testing from the staff console or curl:
 //   POST /functions/v1/pulse-generate   Authorization: Bearer <user jwt>
@@ -41,6 +58,7 @@ const SERVICE_KEY =
   Deno.env.get('CAMPUS_DELIVERY_TOKEN') ??
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 const OPENROUTER_KEY = Deno.env.get('OPENROUTER_API_KEY') ?? ''
+const CRON_SECRET = Deno.env.get('CRON_SECRET') ?? ''
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 
 /* ------------------------------------------------------------------ */
@@ -233,15 +251,48 @@ function extractJson(raw: string): AiQuiz {
 }
 
 /* ------------------------------------------------------------------ */
+/* Cron housekeeping: the gentle once-a-day idle nudge                 */
+/* ------------------------------------------------------------------ */
+/** Runs pulse_nudge_idle() at most once per calendar day, tracked via
+ *  pulse_job_runs (job 'pulse.nudge' / idem = the date). pulse_nudge_idle
+ *  is itself capped (pulse.nudge.cap) and per-user weekly-capped in SQL,
+ *  so even a mis-scheduled cron can never spam students. */
+async function runDailyNudge(
+  admin: ReturnType<typeof createClient>,
+  today: string,
+): Promise<{ ran: boolean; notified?: number; reason?: string }> {
+  const { count } = await admin
+    .from('pulse_job_runs')
+    .select('id', { count: 'exact', head: true })
+    .eq('job_key', 'pulse.nudge')
+    .eq('ok', true)
+    .gte('ran_at', `${today}T00:00:00Z`)
+  if ((count ?? 0) > 0) return { ran: false, reason: 'already-ran-today' }
+  const { data, error } = await admin.rpc('pulse_nudge_idle')
+  if (error) return { ran: false, reason: error.message.slice(0, 200) }
+  return { ran: true, notified: Number((data as { notified?: number } | null)?.notified ?? 0) }
+}
+
+/* ------------------------------------------------------------------ */
 /* Handler                                                             */
 /* ------------------------------------------------------------------ */
 Deno.serve(async req => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
   if (req.method !== 'POST') return new Response('method not allowed', { status: 405, headers: CORS })
 
+  // ---- mode resolution -------------------------------------------------
+  // CRON mode: the scheduler presents the shared secret in x-campus-cron.
+  // It bypasses the has_op gate ONLY here and grants nothing else — rotate
+  // the secret any time without touching user accounts.
+  const cronHeader = req.headers.get('x-campus-cron') ?? ''
+  const cronMode = cronHeader !== ''
+  if (cronMode && (!CRON_SECRET || cronHeader !== CRON_SECRET)) {
+    return json({ error: 'Invalid cron secret.' }, 401)
+  }
+
   const auth = req.headers.get('authorization') ?? ''
   const jwt = auth.replace(/^Bearer\s+/i, '')
-  if (!jwt) return json({ error: 'signin' }, 401)
+  if (!cronMode && !jwt) return json({ error: 'signin' }, 401)
 
   const userClient = createClient(Deno.env.get('SUPABASE_URL') ?? '', ANON_KEY, {
     global: { headers: { authorization: `Bearer ${jwt}` } },
@@ -249,9 +300,12 @@ Deno.serve(async req => {
   const admin = createClient(Deno.env.get('SUPABASE_URL') ?? '', SERVICE_KEY)
 
   try {
-    // 1. admin gate — verified against the DB, not the request
-    const { data: isOp, error: opErr } = await userClient.rpc('has_op', { p_op: 'pulse.admin' })
-    if (opErr || isOp !== true) return json({ error: 'Only campus admins can run AI generation.' }, 403)
+    // 1. admin gate — verified against the DB, not the request (skipped in
+    //    cron mode, which authenticated with the shared secret above)
+    if (!cronMode) {
+      const { data: isOp, error: opErr } = await userClient.rpc('has_op', { p_op: 'pulse.admin' })
+      if (opErr || isOp !== true) return json({ error: 'Only campus admins can run AI generation.' }, 403)
+    }
 
     // 2. config + secret presence
     const { data: cfgRows } = await admin.from('pulse_config').select('key,value')
@@ -265,6 +319,9 @@ Deno.serve(async req => {
     const model = typeof cfg.get('pulse.ai.model') === 'string' ? String(cfg.get('pulse.ai.model')) : ''
     const dailyBudget = num('pulse.ai.dailyBudget', 12)
     const maxRetries = num('pulse.ai.maxRetries', 2)
+    // autonomy toggle: ON = validated quizzes publish directly (origin='ai');
+    // OFF (default) = drafts wait for a human, exactly like 2.0
+    const autoPublish = num('pulse.ai.autoPublish', 0) === 1
 
     if (!aiEnabled) return json({ error: 'AI generation is disabled. Turn it on in the Pulse admin panel.', state: 'disabled' }, 200)
     if (!model) return json({ error: 'No OpenRouter model configured yet.', state: 'no-model' }, 200)
@@ -287,7 +344,35 @@ Deno.serve(async req => {
     // 4. context: recent topics + season + caller's requested topic
     let body: { topic?: string } = {}
     try { body = await req.json() } catch { /* empty body is fine */ }
-    const topic = body?.topic && TOPIC_LABELS[body.topic] ? body.topic : null
+    let topic = body?.topic && TOPIC_LABELS[body.topic] ? body.topic : null
+
+    // CRON MODE: generation follows REAL DEMAND. pulse_cohort_demand returns
+    // per-topic cohort sizes and how long since that topic got an approved
+    // quiz. We pick the largest cohort that hasn't been served in >= 2 days
+    // (min cohort of 3 so we never generate for an audience of one). If
+    // nothing is due, the campus is already well covered — skip the run and
+    // save the budget (the model never guesses a topic).
+    let cronDemand: { topic: string; cohort: number; lastQuizDays: number }[] = []
+    if (cronMode && !topic) {
+      const { data: demand, error: demandErr } = await admin.rpc('pulse_cohort_demand')
+      if (!demandErr && Array.isArray(demand)) {
+        cronDemand = demand as typeof cronDemand
+        const due = cronDemand.filter(d => d.lastQuizDays >= 2 && d.cohort >= 3)
+          .sort((a, b) => b.cohort - a.cohort)
+        if (due.length > 0) {
+          topic = due[0].topic
+        } else {
+          // still run the once-a-day nudge before bailing out
+          const nudge = await runDailyNudge(admin, today)
+          await admin.rpc('pulse_log_job', { p_job: 'ai.generate', p_idem: `${today}:cron-nothing-due`, p_ok: false,
+            p_detail: { reason: 'nothing-due', demand: cronDemand } })
+          return json({ ok: true, state: 'nothing-due', topic: null,
+            demand: cronDemand, nudge }, 200)
+        }
+      }
+      // if the demand read failed, fall through with topic=null — the model
+      // picks freely, the run still happens, demand just wasn't known
+    }
 
     const { data: recentItems } = await admin
       .from('pulse_items').select('category,body')
@@ -318,11 +403,26 @@ Deno.serve(async req => {
         }
         const quiz = verdict.value
 
-        // 6. insert as DRAFT into the existing library — approval flow unchanged
-        const { data: item, error: itemErr } = await admin
-          .from('pulse_items')
-          .insert({ kind: 'quiz', category: quiz.topic, body: quiz.title, version: 1, status: 'draft' })
-          .select('id').single()
+        // 6. insert into the existing library. autoPublish ON → approved
+        //    (origin='ai'); the server-side approval trigger then notifies
+        //    the interest cohort automatically. OFF → draft, exactly 2.0.
+        //    origin degrades gracefully if 0073 hasn't been applied yet.
+        const status = autoPublish ? 'approved' : 'draft'
+        let item: { id: string } | null = null
+        let itemErr: { message: string } | null = null
+        {
+          const r = await admin.from('pulse_items')
+            .insert({ kind: 'quiz', category: quiz.topic, body: quiz.title, version: 1, status, origin: 'ai' })
+            .select('id').single()
+          item = r.data; itemErr = r.error
+        }
+        if (itemErr && /origin/i.test(itemErr.message ?? '')) {
+          // pre-0073 database: insert without origin (treated as 'authored')
+          const r = await admin.from('pulse_items')
+            .insert({ kind: 'quiz', category: quiz.topic, body: quiz.title, version: 1, status })
+            .select('id').single()
+          item = r.data; itemErr = r.error
+        }
         if (itemErr || !item) throw new Error(`insert item: ${itemErr?.message ?? 'no id'}`)
 
         const qRows = quiz.questions.map((qq, i) => ({
@@ -338,9 +438,15 @@ Deno.serve(async req => {
         if (rErr) throw new Error(`insert results: ${rErr.message}`)
 
         await admin.rpc('pulse_log_job', { p_job: 'ai.generate', p_idem: `${today}:${item.id}`, p_ok: true,
-          p_detail: { itemId: item.id, topic: quiz.topic, quizType: quiz.quizType, questions: quiz.questions.length, model, usage } })
+          p_detail: { itemId: item.id, topic: quiz.topic, quizType: quiz.quizType, questions: quiz.questions.length, model, usage,
+            cron: cronMode, status, demandTopic: cronMode ? topic : null } })
+        // CRON MODE: housekeeping — the gentle once-a-day idle nudge
+        const nudge = cronMode ? await runDailyNudge(admin, today) : null
         return json({ ok: true, itemId: item.id, topic: quiz.topic, title: quiz.title,
-          note: 'Inserted as DRAFT — approve it in the Pulse admin content library.' }, 200)
+          status, cron: cronMode, nudge,
+          note: status === 'approved'
+            ? 'Published automatically (autoPublish ON) — the interest cohort was notified by the server.'
+            : 'Inserted as DRAFT — approve it in the Pulse admin content library.' }, 200)
       } catch (genErr) {
         lastReason = genErr instanceof Error ? genErr.message : String(genErr)
         if (lastReason.includes('The user aborted') || lastReason.includes('abort')) lastReason = 'openrouter timeout (45s)'

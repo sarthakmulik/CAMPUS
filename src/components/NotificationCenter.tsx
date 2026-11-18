@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  AtSign, Bell, CalendarDays, Check, Heart, Loader2, MessageCircle, MessageSquareText,
+  AtSign, Bell, CalendarDays, Check, Gamepad2, Heart, Loader2, MessageCircle, MessageSquareText,
   Repeat2, Settings2, ShieldCheck, Store, Tag, UserPlus, Users, X,
 } from 'lucide-react'
 import * as db from '../lib/db'
@@ -24,6 +24,8 @@ type Props = {
   onCountsChanged: () => void
   onOpenChat: (conversationId: string) => void
   onOpenProfile: (profileId: string) => void
+  /** Pulse quiz/nudge rows land on the Campus Pulse tab */
+  onOpenPulse: () => void
 }
 
 const FILTERS: { key: NotificationFilter; label: string }[] = [
@@ -54,7 +56,7 @@ type DisplayRow = {
 }
 
 type Destination = {
-  action: 'post' | 'chat' | 'community' | 'event' | 'listing' | 'profile' | 'none'
+  action: 'post' | 'chat' | 'community' | 'event' | 'listing' | 'profile' | 'pulse' | 'none'
   param: string | null
   flow: boolean
 }
@@ -72,6 +74,8 @@ function destination(item: NotificationItem): Destination {
     }
     case 'chat_message': case 'chat_mention': case 'chat_reply':
       return { action: 'chat', param: item.entityId ?? null, flow: false }
+    case 'pulse_quiz': case 'pulse_nudge':
+      return { action: 'pulse', param: item.entityId ?? 'pulse', flow: false }
     case 'club_join_accepted': case 'club_join_rejected': case 'club_invitation':
     case 'club_role_changed': case 'club_banned': case 'club_removed': case 'club_ownership':
       return { action: 'community', param: item.slug ?? null, flow: false }
@@ -149,6 +153,16 @@ function rowText(
         title: 'A warning from CAMPUS staff',
         detail: (item.metadata.note as string) ?? null,
       }
+    case 'pulse_quiz':
+      return {
+        title: (item.metadata.title as string) || 'A fresh quiz just landed on Campus Pulse',
+        detail: 'See how you score — built around what you like.',
+      }
+    case 'pulse_nudge':
+      return {
+        title: (item.metadata.title as string) || 'A quiz is waiting on Campus Pulse',
+        detail: 'No streak, no pressure — just for fun.',
+      }
     default:
       return { title: 'Important update about your account', detail: entityTitle ?? null }
   }
@@ -176,6 +190,7 @@ function typeIcon(type: string) {
     case 'club_join_accepted': case 'event_registered': case 'event_updated':
     case 'event_cancelled': case 'event_promoted': return <CalendarDays size={18}/>
     case 'listing_restored': return <Store size={18}/>
+    case 'pulse_quiz': case 'pulse_nudge': return <Gamepad2 size={18}/>
     default: return <Tag size={18}/>
   }
 }
@@ -198,7 +213,7 @@ type Suggestion = {
  * never notification records.
  */
 export default function NotificationCenter({
-  identity, configured, notify, collegeId, liveTick, onCountsChanged, onOpenChat, onOpenProfile,
+  identity, configured, notify, collegeId, liveTick, onCountsChanged, onOpenChat, onOpenProfile, onOpenPulse,
 }: Props) {
   const [filter, setFilter] = useState<NotificationFilter>('all')
   const [rows, setRows] = useState<DisplayRow[]>([])
@@ -323,6 +338,7 @@ export default function NotificationCenter({
       case 'community': window.location.hash = `#c/${destination.param}`; break
       case 'event': window.location.hash = `#e/${destination.param}`; break
       case 'listing': window.location.hash = `#m/${destination.param}`; break
+      case 'pulse': onOpenPulse(); break
       case 'profile': onOpenProfile(destination.param); break
       default: notify('This notification no longer points anywhere.')
     }

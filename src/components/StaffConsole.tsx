@@ -15,7 +15,7 @@ import {
   loadStaffReports, loadStaffReportCounts, fetchStaffPostContent, StaffPostContent,
   DirectoryStats, CollegeRequest, fetchDirectoryStats, listCollegeRequests, reviewCollegeRequest,
   pulseAdminAiGet, pulseAdminAiSet, pulseAdminEventsStats, pulseAdminMaintenance,
-  pulseGenerateQuiz,
+  pulseAdminPushQuiz, pulseGenerateQuiz,
   type PulseAdminAiSettings, type PulseAdminEventsStats as PulseEventsStats,
 } from '../lib/db'
 
@@ -1012,6 +1012,9 @@ const PULSE_CONFIG_KEYS = [
   'pulse.recommend.exploration',
   // 2.0 AI knobs (numeric ones only — the model name rides pulse_admin_ai_set)
   'pulse.ai.dailyBudget', 'pulse.ai.maxRetries',
+  // 2.1 autonomy thresholds (0073) — toggles are separate checkboxes below
+  'pulse.notify.cohortMinScore', 'pulse.notify.cohortCap',
+  'pulse.nudge.idleDays', 'pulse.nudge.cap',
 ] as const
 
 /** topics offered to the AI generator (mirrors pulse_topics in 0072) */
@@ -1140,11 +1143,45 @@ function PulseAdminTab({ busy, setBusy, flash, bump }: {
     try {
       const res = await pulseGenerateQuiz(genTopic || undefined)
       if (res.error) flash(`Generation refused: ${res.error}`)
+      else if (res.ok && res.status === 'approved') flash(`Quiz "${res.title}" published automatically — the interest cohort was notified.`)
       else if (res.ok) flash(`Draft quiz "${res.title}" inserted — approve it in the content library above.`)
       else flash('Generation returned nothing usable — check the job runs below.')
       bump()
     } catch (err) {
       flash(err instanceof Error ? err.message : 'AI generation is unavailable.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /* ---- 2.1 autonomy toggles (pulse.ai.autoPublish / pulse.notify.auto) ---- */
+  const setFlag = async (key: string, value: boolean) => {
+    if (busy) return
+    setBusy(true)
+    try {
+      await staffRpc('pulse_admin_config_set', { p_key: key, p_value: value ? 1 : 0 })
+      setConfig(d => ({ ...(d ?? {}), [key]: value ? 1 : 0 }))
+      flash(`${key} ${value ? 'ON' : 'OFF'} — the engine reads it live.`)
+      bump()
+    } catch (err) {
+      flash(err instanceof Error ? err.message : 'Toggle failed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /* ---- 2.1 manual push (admin override; server enforces the 3-day cooldown) ---- */
+  const pushQuiz = async (item: PulseAdminItem, scope: 'cohort' | 'all') => {
+    if (busy) return
+    setBusy(true)
+    try {
+      const res = await pulseAdminPushQuiz(item.id, scope)
+      flash(res.reason === 'recently-notified'
+        ? 'That quiz was already pushed in the last 3 days — cooldown active.'
+        : `Pushed to ${res.queued} student(s) (${scope === 'all' ? 'whole campus' : 'interest cohort'}).`)
+      bump()
+    } catch (err) {
+      flash(err instanceof Error ? err.message : 'Push failed.')
     } finally {
       setBusy(false)
     }
@@ -1212,6 +1249,18 @@ function PulseAdminTab({ busy, setBusy, flash, bump }: {
                         </button>
                       ))}
                     </span>
+                    {item.kind === 'quiz' && item.status === 'approved' && (
+                      <span className="staff-status-select pulse-push-select">
+                        <button disabled={busy}
+                          onClick={() => void pushQuiz(item, 'cohort')}
+                          title="Notify the interest cohort for this quiz (3-day cooldown)"
+                          aria-label="Push to interest cohort">📣 cohort</button>
+                        <button disabled={busy}
+                          onClick={() => void pushQuiz(item, 'all')}
+                          title="Notify every member (3-day cooldown)"
+                          aria-label="Push to everyone">📣 all</button>
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -1254,7 +1303,9 @@ function PulseAdminTab({ busy, setBusy, flash, bump }: {
           <>
             <p className="staff-muted">
               {ai.enabled ? 'Enabled' : 'Disabled'} · model <b>{ai.model || '(none set)'}</b> · budget {ai.dailyBudget}/day · {ai.maxRetries} retr{ai.maxRetries === 1 ? 'y' : 'ies'}.
-              Generated quizzes always land as <b>draft</b> — nothing publishes without your approval above.
+              {config?.['pulse.ai.autoPublish'] === 1
+                ? ' Autonomy is ON — validated quizzes publish straight to their interest cohort.'
+                : ' Generated quizzes land as draft — nothing publishes without your approval above.'}
             </p>
             <div className="pulse-ai-row">
               <button className="staff-ghost" disabled={busy} onClick={() => void (async () => {
@@ -1283,6 +1334,26 @@ function PulseAdminTab({ busy, setBusy, flash, bump }: {
                 onChange={e => setAiDraft(d => ({ ...d, maxRetries: e.target.value }))}
               />
               <button className="staff-ghost" disabled={busy} onClick={() => void saveAi()}>Save</button>
+            </div>
+            <div className="pulse-ai-row pulse-autonomy-row">
+              <label className="pulse-autonomy-toggle">
+                <input
+                  type="checkbox"
+                  checked={config?.['pulse.ai.autoPublish'] === 1}
+                  disabled={busy}
+                  onChange={e => void setFlag('pulse.ai.autoPublish', e.target.checked)}
+                />
+                <span>Auto-publish generated quizzes (no manual approval)</span>
+              </label>
+              <label className="pulse-autonomy-toggle">
+                <input
+                  type="checkbox"
+                  checked={config?.['pulse.notify.auto'] !== 0}
+                  disabled={busy}
+                  onChange={e => void setFlag('pulse.notify.auto', e.target.checked)}
+                />
+                <span>Notify interest cohorts when a quiz goes live</span>
+              </label>
             </div>
             <div className="pulse-ai-row">
               <select

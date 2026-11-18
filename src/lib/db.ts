@@ -3685,6 +3685,8 @@ export type NotificationPrefs = {
   eventPush: boolean
   marketplaceInapp: boolean
   marketplacePush: boolean
+  pulseInapp: boolean
+  pulsePush: boolean
   messagePreview: boolean
   quietEnabled: boolean
   quietStart: string
@@ -3710,6 +3712,8 @@ type NotifPrefsRow = {
   event_push?: boolean | null
   marketplace_inapp?: boolean | null
   marketplace_push?: boolean | null
+  pulse_inapp?: boolean | null
+  pulse_push?: boolean | null
   message_preview?: boolean | null
   quiet_enabled?: boolean | null
   quiet_start?: string | null
@@ -3735,6 +3739,8 @@ function mapNotificationPrefs(row: NotifPrefsRow): NotificationPrefs {
     eventPush: Boolean(row.event_push ?? true),
     marketplaceInapp: Boolean(row.marketplace_inapp ?? true),
     marketplacePush: Boolean(row.marketplace_push ?? false),
+    pulseInapp: Boolean(row.pulse_inapp ?? true),
+    pulsePush: Boolean(row.pulse_push ?? true),
     messagePreview: Boolean(row.message_preview ?? true),
     quietEnabled: Boolean(row.quiet_enabled ?? false),
     quietStart: String(row.quiet_start ?? '22:30'),
@@ -4079,8 +4085,15 @@ export function pulseAdminMaintenance(): Promise<{ ok: boolean; eventsPruned: nu
   return pulseRpc('pulse_admin_maintenance', undefined) as Promise<{ ok: boolean; eventsPruned: number }>
 }
 
+/** Admin manual push: blast an approved quiz to its interest cohort
+    (scope='cohort') or to every member (scope='all'). Per-item 3-day
+    cooldown is enforced server-side; double-clicks are harmless. */
+export function pulseAdminPushQuiz(itemId: string, scope: 'cohort' | 'all'): Promise<{ ok: boolean; queued: number; reason?: string }> {
+  return pulseRpc('pulse_admin_push_quiz', { p_item: itemId, p_scope: scope }) as Promise<{ ok: boolean; queued: number; reason?: string }>
+}
+
 /** Invoke the AI generation edge function (admin-only; needs deployment). */
-export async function pulseGenerateQuiz(topic?: string): Promise<{ ok?: boolean; itemId?: string; title?: string; error?: string }> {
+export async function pulseGenerateQuiz(topic?: string): Promise<{ ok?: boolean; itemId?: string; title?: string; status?: string; cron?: boolean; error?: string }> {
   if (!supabase) throw new Error('CAMPUS is not connected.')
   const { data, error } = await supabase.functions.invoke('pulse-generate', { body: topic ? { topic } : {} })
   if (error) {

@@ -27,7 +27,7 @@ type PushStatus = 'idle' | 'busy' | 'granted' | 'denied' | 'unsupported' | 'no-k
 /** The categories the sheet exposes, in a stable order. */
 const CATEGORY_KEYS = [
   'like', 'comment', 'follow', 'mention', 'message',
-  'community', 'event', 'marketplace',
+  'community', 'event', 'marketplace', 'pulse',
 ] as const
 
 const CATEGORY_LABEL: Record<(typeof CATEGORY_KEYS)[number], string> = {
@@ -39,6 +39,7 @@ const CATEGORY_LABEL: Record<(typeof CATEGORY_KEYS)[number], string> = {
   community: 'Community activity',
   event: 'Events',
   marketplace: 'Marketplace',
+  pulse: 'Campus Pulse quizzes',
 }
 
 /**
@@ -140,6 +141,7 @@ export default function NotificationSettings({ open, onClose, notify, userId }: 
       communityInapp: 'community_inapp', communityPush: 'community_push',
       eventInapp: 'event_inapp', eventPush: 'event_push',
       marketplaceInapp: 'marketplace_inapp', marketplacePush: 'marketplace_push',
+      pulseInapp: 'pulse_inapp', pulsePush: 'pulse_push',
       messagePreview: 'message_preview', quietEnabled: 'quiet_enabled',
       quietStart: 'quiet_start', quietEnd: 'quiet_end', timezone: 'timezone',
     }

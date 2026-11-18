@@ -1758,6 +1758,18 @@ textarea:disabled {
 .staff-status-select button:hover:not(:disabled) { border-color: var(--brand); color: var(--brand-ink) }
 .staff-status-select button.selected { border-color: var(--brand); color: var(--brand-ink); background: var(--brand-soft) }
 .staff-status-select button:disabled { opacity: .5; cursor: default }
+/* pulse 2.1 — autonomy toggles + manual push buttons */
+.pulse-autonomy-row { margin-top: 6px }
+.pulse-autonomy-toggle {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 12.5px; color: var(--ink-secondary);
+  min-height: 44px; cursor: pointer;   /* 44: minimum comfortable touch target */
+}
+.pulse-autonomy-toggle input { width: 17px; height: 17px; accent-color: var(--brand); cursor: pointer }
+.pulse-push-select { margin-left: 6px }
+.pulse-push-select button {
+  border-color: var(--brand); color: var(--brand-ink); background: var(--brand-soft)
+}
 
 @media (max-width: 480px) {
   /* results restack on phones: label on its own line (no 80px truncate),

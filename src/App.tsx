@@ -3045,6 +3045,7 @@ function CAMPUSApp() {
                         navigate('Chats')
                       }}
                       onOpenProfile={openMentionProfile}
+                      onOpenPulse={() => navigate('Campus Pulse')}
                     />
                 : activeNav === 'Search'
                   ? <Discovery
