@@ -273,6 +273,16 @@ async function runDailyNudge(
   return { ran: true, notified: Number((data as { notified?: number } | null)?.notified ?? 0) }
 }
 
+/** Fire-and-forget background work on the Supabase edge runtime.
+    Returns false where waitUntil is unavailable (local runs) so callers
+    can fall back to awaiting. */
+function edgeWaitUntil(p: Promise<unknown>): boolean {
+  const wu = (globalThis as { EdgeRuntime?: { waitUntil?: (x: Promise<unknown>) => void } }).EdgeRuntime?.waitUntil
+  if (typeof wu !== 'function') return false
+  wu(p)
+  return true
+}
+
 /* ------------------------------------------------------------------ */
 /* Handler                                                             */
 /* ------------------------------------------------------------------ */
@@ -362,10 +372,15 @@ Deno.serve(async req => {
         if (due.length > 0) {
           topic = due[0].topic
         } else {
-          // still run the once-a-day nudge before bailing out
-          const nudge = await runDailyNudge(admin, today)
+          // still run the once-a-day nudge before bailing out (deferred when
+          // the runtime allows it — the cron response must stay sub-5s)
           await admin.rpc('pulse_log_job', { p_job: 'ai.generate', p_idem: `${today}:cron-nothing-due`, p_ok: false,
             p_detail: { reason: 'nothing-due', demand: cronDemand } })
+          if (edgeWaitUntil(runDailyNudge(admin, today).catch(() => {}))) {
+            return json({ ok: true, state: 'nothing-due', topic: null, nudgeDeferred: true,
+              demand: cronDemand }, 200)
+          }
+          const nudge = await runDailyNudge(admin, today)
           return json({ ok: true, state: 'nothing-due', topic: null,
             demand: cronDemand, nudge }, 200)
         }
@@ -385,7 +400,11 @@ Deno.serve(async req => {
       : month === 2 || month === 3 ? 'college fest season — culture, events, creativity'
       : 'regular semester — everyday campus life'
 
-    // 5. generation + validation loop (bounded retries)
+    // 5. generation + validation loop (bounded retries). In cron mode this
+    //    whole stage runs AFTER the response (EdgeRuntime.waitUntil) — the
+    //    scheduler's HTTP timeout is capped at 5s, far below an LLM call,
+    //    so the cron gets an instant 200 and the work continues server-side.
+    const runGeneration = async (): Promise<Response> => {
     let lastReason = 'unknown'
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
@@ -457,6 +476,22 @@ Deno.serve(async req => {
 
     // 7. honest failure — the library fallback keeps Pulse fully functional
     return json({ error: `Generation failed after ${maxRetries + 1} attempt(s): ${lastReason}`, state: 'failed' }, 200)
+    }
+
+    // CRON MODE: respond immediately (the scheduler's HTTP timeout is capped
+    // at 5s — no LLM call can fit inside it) and let the generation continue
+    // server-side via EdgeRuntime.waitUntil. Results land in the library and
+    // in pulse_job_runs; the cron run itself just needs the fast 200.
+    if (cronMode && edgeWaitUntil(runGeneration().catch(async e => {
+      await admin.rpc('pulse_log_job', { p_job: 'ai.generate', p_idem: `${today}:deferred-crash`, p_ok: false,
+        p_detail: { reason: String(e).slice(0, 300) } })
+    }))) {
+      return json({ ok: true, state: 'deferred', topic,
+        note: 'Generation continues in the background — check the content library and pulse_job_runs in a minute.' }, 200)
+    }
+
+    // ADMIN MODE: synchronous — the staff console shows the result directly
+    return await runGeneration()
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : 'unexpected error' }, 500)
   }
